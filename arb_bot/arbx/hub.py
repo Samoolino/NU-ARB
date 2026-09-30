@@ -1,0 +1,210 @@
+"""Hub: owns risk, gate, stats, journal; runs all workers; scans cross-exchange spreads."""
+from __future__ import annotations
+
+import asyncio
+import csv
+import math
+import queue
+import time
+from collections import Counter
+from dataclasses import dataclass, field
+
+from arbx.config import Config
+from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
+from arbx.gate import ProfitGate, RiskManager
+from arbx.strategy import evaluate_cross
+from arbx.worker import ExchangeWorker
+
+
+@dataclass
+class Stats:
+    status: str = "starting"
+    scans: int = 0
+    signals: int = 0
+    trades: int = 0
+    failed: int = 0
+    pnl: float = 0.0
+    equity: float = 0.0
+    rejects: Counter = field(default_factory=Counter)
+    rtt: dict = field(default_factory=dict)
+
+    def snapshot(self) -> dict:
+        return {"status": self.status, "scans": self.scans, "signals": self.signals, "trades": self.trades,
+                "failed": self.failed, "pnl": self.pnl, "equity": self.equity,
+                "rejects": dict(self.rejects.most_common(4)), "rtt": dict(self.rtt)}
+
+
+class Hub:
+    def __init__(self, cfg: Config, out: "queue.Queue | None" = None):
+        self.cfg, self.out = cfg, out
+        self.risk = RiskManager(cfg)
+        self.gate = ProfitGate(cfg, self.risk)
+        self.stats = Stats(equity=cfg.start_capital_usd)
+        self.workers: list[ExchangeWorker] = []
+        self.cross_syms: set = set()
+        self.cross_exec = None
+        self._paper = PaperExecutor(cfg)
+        self._loop = self._stop = None
+        self._t_print = 0.0
+
+    # ---- utilities ------------------------------------------------------
+    @property
+    def equity(self) -> float:
+        return self.cfg.start_capital_usd + self.risk.pnl
+
+    def trade_size(self) -> float:
+        return self.cfg.trade_size_usd if self.cfg.mode == "live" else min(self.cfg.trade_size_usd, self.equity)
+
+    def log(self, kind: str, msg: str) -> None:
+        if self.out is not None:
+            self.out.put(("log", kind, msg))
+        else:
+            print(f"[{time.strftime('%H:%M:%S')}] [{kind.upper()}] {msg}", flush=True)
+
+    def request_stop(self) -> None:
+        if self._loop and self._stop:
+            self._loop.call_soon_threadsafe(self._stop.set)
+
+    def journal(self, ex, name, start, pnl, worst_bps, ok) -> None:
+        p = self.cfg.journal_path
+        new = not p.exists()
+        with p.open("a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["ts", "mode", "exchange", "path", "start_usd", "pnl_usd", "guaranteed_bps", "ok"])
+            w.writerow([time.strftime("%Y-%m-%d %H:%M:%S"), self.cfg.mode, ex, name, round(start, 6),
+                        round(pnl, 6), round(worst_bps, 3), ok])
+
+    def settle(self, ex, name, start, res, worst_bps, ms) -> None:
+        """Post-trade verification: realized result must respect the pre-trade guarantee."""
+        st = self.stats
+        self.risk.record(res.pnl, res.ok)
+        st.pnl, st.equity = self.risk.pnl, self.equity
+        if res.ok:
+            st.trades += 1
+            realized = res.pnl / start * 1e4
+            if realized < worst_bps - self.cfg.verify_slack_bps:
+                self.risk.halt(f"ASSURANCE VIOLATED on {name}: realized {realized:.2f}bps < guaranteed "
+                               f"{worst_bps:.2f}bps (wrong fee tier? tick rounding? partial fills?)")
+            self.log("trade", f"[{ex}] {name} pnl={res.pnl:+.5f} ({realized:+.1f}bps, floor {worst_bps:+.1f}) {ms:.0f}ms")
+        else:
+            st.failed += 1
+            self.log("warn", f"[{ex}] {name} unfilled (IOC expired) - no position taken")
+        self.journal(ex, name, start, res.pnl, worst_bps, res.ok)
+        tgt = self.cfg.target_equity_usd
+        if tgt and st.equity >= tgt:
+            self.risk.halt(f"target equity {tgt} reached (funds remain on the exchange)")
+
+    # ---- cross-exchange ---------------------------------------------------
+    @property
+    def cross_active(self) -> bool:
+        return (self.cfg.cross_enabled and len(self.workers) >= 2
+                and (self.cfg.mode == "paper" or self.cfg.cross_live))
+
+    def _pick_cross_symbols(self) -> set:
+        counts: dict = {}
+        for w in self.workers:
+            for s, v in w.cross_candidates().items():
+                counts.setdefault(s, []).append(v)
+        common = sorted(((min(v), s) for s, v in counts.items() if len(v) >= 2), reverse=True)
+        return {s for _, s in common[: self.cfg.cross_top_n]}
+
+    async def scan_cross(self, w, dirty) -> None:
+        cfg, now, size, best = self.cfg, time.monotonic(), self.trade_size(), None
+        for sym in dirty & self.cross_syms:
+            b1 = w.md.books.get(sym)
+            if not b1:
+                continue
+            for o in self.workers:
+                b2 = o.md.books.get(sym) if o is not w else None
+                if not b2:
+                    continue
+                for bw, sw, bb, sb in ((w, o, b1, b2), (o, w, b2, b1)):
+                    x = evaluate_cross(sym, bw, sw, bb, sb, size, cfg, now)
+                    if x and (best is None or x.worst_bps > best[0].worst_bps):
+                        best = (x, bw, sw)
+        if best:
+            await self._fire_cross(*best)
+
+    async def _fire_cross(self, x, bw, sw) -> None:
+        self.stats.signals += 1
+        if bw.lock.locked() or sw.lock.locked():
+            return
+        live = self.cfg.mode == "live"
+        d = self.gate.check_cross(x, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
+                                  bw.free_of(x.quote_ccy), sw.free.get(x.base_ccy, 0.0) if live else math.inf)
+        if not d.ok:
+            self.stats.rejects[d.reason] += 1
+            return
+        first, second = sorted((bw, sw), key=lambda w: w.id)
+        async with first.lock, second.lock:
+            t0, name = time.perf_counter(), f"X {x.symbol} {x.buy_ex}>{x.sell_ex}"
+            try:
+                res = await (self.cross_exec.execute(x) if live else self._paper.execute_cross(x))
+            except Exception as e:
+                self.risk.halt(f"{name}: {e}" if isinstance(e, LegFailure) else f"{name} execution error {e!r}")
+                self.journal(x.buy_ex + "/" + x.sell_ex, name, x.cost, 0.0, x.worst_bps, False)
+                return
+            self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
+            if live:
+                await asyncio.gather(bw.refresh_balance(), sw.refresh_balance())
+            await asyncio.sleep(self.cfg.cooldown_s)
+
+    # ---- main -----------------------------------------------------------------
+    def _push(self) -> None:
+        for w in self.workers:
+            if w.lat:
+                self.stats.rtt[w.id] = round(w.lat.stats()["p50"], 1)
+        if self.out is not None:
+            self.out.put(("stats", self.stats.snapshot()))
+        elif time.monotonic() - self._t_print > 10:
+            self._t_print = time.monotonic()
+            s = self.stats.snapshot()
+            self.log("stats", f"scans={s['scans']} signals={s['signals']} trades={s['trades']} "
+                              f"pnl={s['pnl']:+.4f} rejects={s['rejects']} rtt={s['rtt']}")
+
+    async def run(self) -> None:
+        self._loop, self._stop = asyncio.get_running_loop(), asyncio.Event()
+        self.workers = [ExchangeWorker(x, self.cfg, self) for x in self.cfg.exchanges]
+        tasks: list = []
+        try:
+            res = await asyncio.gather(*(w.prepare() for w in self.workers), return_exceptions=True)
+            ok = []
+            for w, r in zip(self.workers, res):
+                if isinstance(r, Exception):
+                    self.log("error", f"[{w.id}] disabled: {r}")
+                    await w.close()
+                else:
+                    ok.append(w)
+            self.workers = ok
+            if not ok:
+                raise RuntimeError("no exchange passed preparation (see errors above)")
+            if self.cross_active:
+                self.cross_syms = self._pick_cross_symbols()
+                if self.cfg.mode == "live":
+                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok})
+            for w in ok:
+                w.start(self.cross_syms)
+            tasks = [asyncio.create_task(w.run_loop(), name=f"loop:{w.id}") for w in ok]
+            self.stats.status = f"RUNNING ({self.cfg.mode.upper()})"
+            self.log("info", f"engine up | exchanges={[w.id for w in ok]} | cross-exchange symbols={len(self.cross_syms)}")
+            while not self._stop.is_set() and not self.risk.halted:
+                for t in tasks:
+                    if t.done() and not t.cancelled() and t.exception():
+                        self.risk.halt(f"worker crashed: {t.exception()!r}")
+                self._push()
+                await asyncio.sleep(0.5)
+            if self.risk.halted:
+                self.log("halt", self.risk.reason)
+        except Exception as e:
+            self.log("error", f"engine error: {e!r}")
+            self.stats.status = "ERROR"
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for w in self.workers:
+                await w.close()
+            if self.stats.status != "ERROR":
+                self.stats.status = "HALTED" if self.risk.halted else "STOPPED"
+            self._push()
