@@ -13,6 +13,8 @@ class Book:
     bids: list
     asks: list
     recv: float   # time.monotonic() at receipt -> immune to exchange/local clock skew
+    timestamp_exchange: int | None = None
+    sequence: int | str | None = None
 
 
 class MarketData:
@@ -30,7 +32,8 @@ class MarketData:
         while True:
             try:
                 ob = await self.ex.watch_order_book(sym, self.depth)
-                self.books[sym] = Book(ob["bids"][: self.depth], ob["asks"][: self.depth], time.monotonic())
+                self.books[sym] = Book(ob["bids"][: self.depth], ob["asks"][: self.depth], time.monotonic(),
+                                        ob.get("timestamp"), ob.get("nonce"))
                 self.dirty.add(sym)
                 self.event.set()
                 backoff = 1.0
@@ -83,3 +86,4 @@ class LatencyGuard:
                 raise
             except Exception as e:
                 log("warn", f"latency probe failed: {e!r}")
+
