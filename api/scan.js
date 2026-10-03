@@ -49,7 +49,7 @@ export default async function handler(request, response) {
   const symbolInput = String(request.query?.symbol || "BTCUSDT").trim().toUpperCase();
   const exchangeA = String(request.query?.exchangeA || "binance").trim().toLowerCase();
   const exchangeB = String(request.query?.exchangeB || "bybit").trim().toLowerCase();
-  const tradeSizeUsd = readFiniteNumber(request.query?.size, 100);
+  const tradeSizeUsdt = readFiniteNumber(request.query?.size, 100);
   const feeA = readFiniteNumber(request.query?.feeA, 10);
   const feeB = readFiniteNumber(request.query?.feeB, 10);
 
@@ -59,7 +59,7 @@ export default async function handler(request, response) {
   if (!EXCHANGE_BY_ID[exchangeA] || !EXCHANGE_BY_ID[exchangeB] || exchangeA === exchangeB) {
     return response.status(400).json({ error: "Choose two different supported exchanges." });
   }
-  if (tradeSizeUsd === null || tradeSizeUsd < 10 || tradeSizeUsd > 100000) {
+  if (tradeSizeUsdt === null || tradeSizeUsdt < 10 || tradeSizeUsdt > 100000) {
     return response.status(400).json({ error: "Trade size must be between 10 and 100,000 USDT." });
   }
   if ([feeA, feeB].some((fee) => fee === null || fee < 0 || fee > 100)) {
@@ -88,7 +88,7 @@ export default async function handler(request, response) {
         exchangeA,
         exchangeB,
         books: Object.fromEntries(Object.entries(live).map(([id, venue]) => [id, venue])),
-        tradeSizeUsd,
+        tradeSizeUsdt,
         feesBps: { [exchangeA]: feeA, [exchangeB]: feeB },
       })
     : [];
