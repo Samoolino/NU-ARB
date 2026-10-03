@@ -20,7 +20,8 @@ def build_exchange(x, live: bool):
         raise RuntimeError(f"'{x.id}' is not supported by ccxt.pro (see ccxt.pro.exchanges)")
     params = {"enableRateLimit": True, "options": {"defaultType": "spot"}}
     if x.api_key and x.secret:
-        params.update(apiKey=x.api_key, secret=x.secret)
+        secret = x.secret.encode("utf-8") if x.id == "binance" and x.auth_mode in ("rsa", "ed25519") else x.secret
+        params.update(apiKey=x.api_key, secret=secret)
         if x.password:
             params["password"] = x.password
     return cls(params)
@@ -194,3 +195,4 @@ class ExchangeWorker:
             if self.live:
                 asyncio.create_task(self.refresh_balance())
             await asyncio.sleep(self.cfg.cooldown_s)
+
