@@ -91,6 +91,7 @@
 
     function syncVenueNames() {
       const a = $("exchangeA").value;
+      if ($("exchangeB").value === a) $("exchangeB").value = EXCHANGES.find((exchange) => exchange.id !== a).id;
       const b = $("exchangeB").value;
       $("feeLabelA").textContent = nameById[a] + " TAKER · BPS";
       $("feeLabelB").textContent = nameById[b] + " TAKER · BPS";
