@@ -1,0 +1,32 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Inspect corruption in config",
+			"type": "shell",
+			"command": "python -c \"from pathlib import Path; p=Path(r'c:\\Users\\saME\\Downloads\\NU-ARB\\arb_bot\\arbx\\config.py'); text=p.read_text(); lines=text.splitlines(); print('\\n'.join(lines[60:90]));\"",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Agentic: inspect repository state",
+			"type": "shell",
+			"command": "git status --short --branch; git log -1 --oneline",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Agentic: run ARBX offline self-test",
+			"type": "shell",
+			"command": "python run.py selftest",
+			"options": {
+				"cwd": "${workspaceFolder}\\arb_bot"
+			},
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
