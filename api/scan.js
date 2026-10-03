@@ -1,50 +1,42 @@
+import ccxt from "ccxt";
+import { EXCHANGE_BY_ID } from "../lib/exchange-registry.js";
 import { isValidSymbol, scanBooks, readFiniteNumber } from "../lib/scanner.js";
 
-const VENUES = [
-  {
-    id: "binance",
-    name: "Binance",
-    url: (symbol) => `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=1000`,
-    parse: (body, receivedAt) => {
-      if (!Array.isArray(body?.asks) || !Array.isArray(body?.bids)) throw new Error("Unexpected Binance order-book response");
-      return { asks: body.asks, bids: body.bids, exchangeTime: null, receivedAt };
-    },
-  },
-  {
-    id: "bybit",
-    name: "Bybit",
-    url: (symbol) => `https://api.bybit.com/v5/market/orderbook?category=spot&symbol=${symbol}&limit=200`,
-    parse: (body, receivedAt) => {
-      if (body?.retCode !== 0 || !Array.isArray(body?.result?.a) || !Array.isArray(body?.result?.b)) {
-        throw new Error(body?.retMsg || "Unexpected Bybit order-book response");
-      }
-      return { asks: body.result.a, bids: body.result.b, exchangeTime: Number(body.time) || null, receivedAt };
-    },
-  },
-];
-
-async function loadVenue(venue, symbol) {
-  const started = performance.now();
-  const response = await fetch(venue.url(symbol), {
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(7000),
-    cache: "no-store",
+async function loadVenue(id, symbol) {
+  const config = EXCHANGE_BY_ID[id];
+  const Exchange = ccxt[id];
+  if (!config || typeof Exchange !== "function") {
+    throw new Error("This CCXT exchange adapter is unavailable in the deployed package.");
+  }
+  const exchange = new Exchange({
+    enableRateLimit: true,
+    timeout: 6000,
+    options: { defaultType: "spot" },
   });
-  if (!response.ok) throw new Error(`Public API returned HTTP ${response.status}`);
-  const body = await response.json();
-  const receivedAt = Date.now();
-  const book = venue.parse(body, receivedAt);
-  if (!book.asks.length || !book.bids.length) throw new Error("The exchange returned an empty order book");
-  return {
-    id: venue.id,
-    name: venue.name,
-    status: "live",
-    latencyMs: Math.round(performance.now() - started),
-    receivedAt,
-    exchangeTime: book.exchangeTime,
-    asks: book.asks,
-    bids: book.bids,
-  };
+  const started = performance.now();
+  try {
+    await exchange.loadMarkets();
+    const market = exchange.markets[symbol];
+    if (!market || !(market.spot || market.type === "spot") || market.contract) {
+      throw new Error("This exchange does not list this symbol as a spot market.");
+    }
+    if (!exchange.has.fetchOrderBook) throw new Error("CCXT reports no order-book method for this exchange.");
+    const book = await exchange.fetchOrderBook(symbol, 100);
+    if (!Array.isArray(book.asks) || !book.asks.length || !Array.isArray(book.bids) || !book.bids.length) {
+      throw new Error("The exchange returned an empty order book.");
+    }
+    return {
+      id,
+      name: config.name,
+      status: "live",
+      latencyMs: Math.round(performance.now() - started),
+      timestamp: book.timestamp ? new Date(book.timestamp).toISOString() : null,
+      asks: book.asks,
+      bids: book.bids,
+    };
+  } finally {
+    try { await exchange.close(); } catch {}
+  }
 }
 
 export default async function handler(request, response) {
@@ -53,34 +45,50 @@ export default async function handler(request, response) {
     return response.status(405).json({ error: "Use GET" });
   }
 
-  const symbol = String(request.query?.symbol || "BTCUSDT").trim().toUpperCase();
+  const symbolInput = String(request.query?.symbol || "BTCUSDT").trim().toUpperCase();
+  const exchangeA = String(request.query?.exchangeA || "binance").trim().toLowerCase();
+  const exchangeB = String(request.query?.exchangeB || "bybit").trim().toLowerCase();
   const tradeSizeUsd = readFiniteNumber(request.query?.size, 100);
-  const binanceFeeBps = readFiniteNumber(request.query?.binanceFeeBps, 10);
-  const bybitFeeBps = readFiniteNumber(request.query?.bybitFeeBps, 10);
+  const feeA = readFiniteNumber(request.query?.feeA, 10);
+  const feeB = readFiniteNumber(request.query?.feeB, 10);
 
-  if (!isValidSymbol(symbol)) return response.status(400).json({ error: "Use a spot symbol quoted in USDT, such as BTCUSDT." });
+  if (!isValidSymbol(symbolInput)) {
+    return response.status(400).json({ error: "Use a spot symbol quoted in USDT, such as BTCUSDT." });
+  }
+  if (!EXCHANGE_BY_ID[exchangeA] || !EXCHANGE_BY_ID[exchangeB] || exchangeA === exchangeB) {
+    return response.status(400).json({ error: "Choose two different supported exchanges." });
+  }
   if (tradeSizeUsd === null || tradeSizeUsd < 10 || tradeSizeUsd > 100000) {
     return response.status(400).json({ error: "Trade size must be between 10 and 100,000 USDT." });
   }
-  if ([binanceFeeBps, bybitFeeBps].some((fee) => fee === null || fee < 0 || fee > 100)) {
+  if ([feeA, feeB].some((fee) => fee === null || fee < 0 || fee > 100)) {
     return response.status(400).json({ error: "Each taker fee must be between 0 and 100 basis points." });
   }
 
   response.setHeader("Cache-Control", "no-store, max-age=0");
   response.setHeader("X-Content-Type-Options", "nosniff");
 
-  const results = await Promise.allSettled(VENUES.map((venue) => loadVenue(venue, symbol)));
+  const symbol = symbolInput.slice(0, -4) + "/USDT";
+  const selected = [exchangeA, exchangeB];
+  const results = await Promise.allSettled(selected.map((id) => loadVenue(id, symbol)));
   const venues = results.map((result, index) => result.status === "fulfilled"
     ? result.value
-    : { id: VENUES[index].id, name: VENUES[index].name, status: "unavailable", error: result.reason?.name === "TimeoutError" ? "Public API request timed out" : (result.reason?.message || "Public API request failed") });
-
+    : {
+        id: selected[index],
+        name: EXCHANGE_BY_ID[selected[index]].name,
+        status: "unavailable",
+        error: result.reason?.name === "RequestTimeout" || result.reason?.name === "TimeoutError"
+          ? "Public API request timed out"
+          : (result.reason?.message || "Public API request failed"),
+      });
   const live = Object.fromEntries(venues.filter((venue) => venue.status === "live").map((venue) => [venue.id, venue]));
-  const opportunities = live.binance && live.bybit
+  const opportunities = live[exchangeA] && live[exchangeB]
     ? scanBooks({
-        binance: live.binance,
-        bybit: live.bybit,
+        exchangeA,
+        exchangeB,
+        books: Object.fromEntries(Object.entries(live).map(([id, venue]) => [id, venue])),
         tradeSizeUsd,
-        feesBps: { binance: binanceFeeBps, bybit: bybitFeeBps },
+        feesBps: { [exchangeA]: feeA, [exchangeB]: feeB },
       })
     : [];
 
@@ -94,7 +102,7 @@ export default async function handler(request, response) {
     books: Object.fromEntries(Object.entries(live).map(([id, venue]) => [id, {
       bestBid: Number(venue.bids[0][0]),
       bestAsk: Number(venue.asks[0][0]),
-      receivedAt: new Date(venue.receivedAt).toISOString(),
+      receivedAt: new Date().toISOString(),
     }])),
     opportunities,
   });
