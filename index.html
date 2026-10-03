@@ -80,10 +80,10 @@
       <div class="section-head"><h2>Cross-venue opportunities</h2><span id="marketMeta">Estimated from visible REST depth</span></div>
       <div class="panel table-wrap"><table class="opps"><thead><tr><th>Buy</th><th>Sell</th><th>Base qty</th><th>Buy VWAP</th><th>Sell VWAP</th><th>Est. fees · USDT</th><th>Net PnL · USDT</th><th>State</th></tr></thead><tbody id="rows"><tr><td colspan="8" class="empty">Scan to request current public order-book snapshots.</td></tr></tbody></table></div>
     </section>
-    <div class="fineprint"><strong>Read-only estimates.</strong><span>Fees are the values you enter; actual account fee tiers, rebates, balances, transfer costs, execution latency, and slippage may differ. Public REST snapshots are not a streaming feed. A positive estimate is not a guaranteed or executable profit. The account panel verifies account and public market connectivity; it does not enable scanning or trading from those credentials.</span></div>
+    <div class="fineprint"><strong>Read-only estimates.</strong><span>Fees are the values you enter; actual account fee tiers, rebates, balances, transfer costs, execution latency, and slippage may differ. Public REST snapshots are not a streaming feed. A positive estimate is not guaranteed or executable profit. The separate engine panel uses the existing risk-gated Python strategy.</span></div>
     <details class="account" id="accountPanel">
       <summary>Account and exchange verification</summary>
-      <p class="account-note">Create an application account to verify an exchange. Passwords are hashed and exchange credentials are encrypted by the separate persistent control service. Full verification and live trading remain disabled until private-stream and permission evidence is available.</p>
+      <p class="account-note">Create an application account to verify an exchange. Passwords are hashed and exchange credentials are encrypted by the persistent HTTPS control service. Verification uses live authenticated REST and WebSocket requests. Live trading is available only when the key'sread-only permission report proves spot trading, withdrawals and transfers disabled, and IP restriction; this permission probe is currently implemented for Binance.</p>
       <div class="account-grid">
         <section class="account-box" id="authBox">
           <h3 id="authTitle">Sign in or create an account</h3>
@@ -107,7 +107,23 @@
           <div class="account-status" id="exchangeStatus" role="status"></div>
           <div class="balance-list" id="balanceList"></div>
           <pre class="evidence" id="verificationEvidence"></pre>
-          <p class="disabled-note">Scanner eligibility: disabled until private WebSocket, trade permission, and withdrawal restriction can all be proven. Live controls are disabled.</p>
+          <p class="disabled-note">The Binance permission check uses its signed key-restrictions endpoint. Other exchanges stay ineligible for live mode until an equivalent permission probe is available. The service never tests permission by submitting an order.</p>
+        </section>
+        <section class="account-box" id="engineBox" hidden style="grid-column:1 / -1">
+          <h3>Streaming scanner and execution engine</h3>
+          <p class="account-note">The engine streams spot markets and runs the existing paper or live strategy. Live mode can submit orders immediately after exchange and latency preflight; size is capped at $25 per trade and loss at $5 per session.</p>
+          <form class="account-form" id="engineForm">
+            <label class="field"><span>Mode</span><select id="engineMode"><option value="paper">Paper scan</option><option value="live">Live orders</option></select></label>
+            <label class="field"><span>Exchange</span><select id="engineVenue"></select></label>
+            <label class="field"><span>Trade size · USD (max $25)</span><input id="engineTradeSize" type="number" min="0.01" max="25" step="0.01" value="5" required></label>
+            <label class="field"><span>Session loss stop · USD (max $5)</span><input id="engineMaxLoss" type="number" min="0.01" max="5" step="0.01" value="2" required></label>
+            <label class="field"><span>Realized profit stop · USD</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="1" required></label>
+            <label class="toggle"><input id="authenticatedScan" type="checkbox" checked> Require authenticated private-balance stream</label>
+            <label class="field" id="liveConfirmField" hidden><span>To confirm live orders, type I ACCEPT REAL ORDERS</span><input id="liveConfirmation" autocomplete="off" spellcheck="false"></label>
+            <div class="account-actions"><button class="button primary" id="engineStart" type="submit">Start paper scanner</button><button class="button secondary" id="engineStop" type="button" disabled>Stop engine</button><button class="button secondary" id="engineRefresh" type="button">Refresh status</button></div>
+          </form>
+          <div class="account-status" id="engineStatus" role="status">Sign in and verify an exchange to use the engine.</div>
+          <pre class="evidence" id="engineDetails"></pre>
         </section>
       </div>
     </details>
@@ -123,6 +139,8 @@
     let signupMode = false;
     let venueDefinitions = [];
     let signedInUser = null;
+    let runtimeSettings = {liveTradingEnabled: false};
+    let engineTimer = null;
 
     function syncVenueNames() {
       const a = $("exchangeA").value;
@@ -181,7 +199,7 @@
       $("globalStatus").textContent = "Fetching public snapshots…";
       $("globalDot").className = "dot";
       $("scan").disabled = true;
-      $("scan").textContent = "Scanning…";
+$("scan").textContent = "Scanning…";
       const params = new URLSearchParams({
         symbol: $("symbol").value.trim().toUpperCase(),
         size: $("size").value,
@@ -257,12 +275,21 @@
       $("logoutButton").hidden = !user;
       $("authTitle").textContent = user ? "Signed in as " + user.email : signupMode ? "Create an application account" : "Sign in to your application account";
       $("exchangeBox").hidden = !user;
+      $("engineBox").hidden = !user;
       if (user) {
         $("accountPassword").value = "";
         $("accountPasswordConfirm").value = "";
         authMessage("Signed in. Exchange credentials are sent only to the control service.");
         loadExchanges();
+        loadRuntime();
+        loadEngineState();
       }
+    }
+    async function loadRuntime() {
+      try {
+        runtimeSettings = await control("/api/v1/runtime");
+        updateEngineChoices();
+      } catch (error) { $("engineStatus").textContent = error.message; }
     }
     function renderCredentialFields() {
       const venue = venueDefinitions.find((item) => item.id === $("credentialVenue").value);
@@ -301,6 +328,7 @@
         }
         select.value = previous && venueDefinitions.some((venue) => venue.id === previous) ? previous : "binance";
         updateAuthModes();
+        updateEngineChoices();
       } catch (error) {
         $("exchangeStatus").textContent = error.message;
       }
@@ -326,6 +354,51 @@
           asset + "  free " + amounts.free + "  used " + amounts.used + "  total " + amounts.total).join("\n") : "";
       }
       renderCredentialFields();
+    }
+    function updateEngineChoices() {
+      const mode = $("engineMode").value;
+      const eligible = venueDefinitions.filter((venue) => venue.adapterAvailable &&
+        (mode !== "live" || (runtimeSettings.liveTradingEnabled && venue.liveEligible)));
+      const select = $("engineVenue");
+      const previous = select.value;
+      select.replaceChildren();
+      for (const venue of eligible) {
+        const option = document.createElement("option");
+        option.value = venue.id;
+        option.textContent = venue.name + (mode === "live" ? " · live verified" : "");
+        select.append(option);
+      }
+      if (!eligible.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = mode === "live" ? "No live-verified venue available" : "No compatible engine adapters";
+        select.append(option);
+      }
+      select.value = eligible.some((venue) => venue.id === previous) ? previous : eligible[0]?.id || "";
+      $("liveConfirmField").hidden = mode !== "live";
+      $("engineStart").disabled = !eligible.length;
+      $("engineStart").textContent = mode === "live" ? "Start live orders" : "Start paper scanner";
+      if (mode === "live" && !eligible.length) {
+        $("engineStatus").textContent = runtimeSettings.liveTradingEnabled
+          ? "Live preflight is not verified for any connected exchange."
+          : "Live execution is disabled by the control-service operator.";
+      }
+    }
+    async function loadEngineState() {
+      if (!signedInUser) return;
+      try {
+        const data = await control("/api/v1/engine/state");
+        const stats = data.stats;
+        $("engineStatus").textContent = stats
+          ? data.status + (data.error ? " · preflight failed (" + data.error + ")" : "") + " · " + data.mode.toUpperCase() + " · scans " + stats.scans + " · signals " + stats.signals + " · trades " + stats.trades + " · net PnL $" + currency(stats.pnl, 4)
+          : "Engine stopped.";
+        $("engineDetails").textContent = stats ? JSON.stringify({equity: stats.equity, target_profit_usd: stats.target_profit_usd,
+          target_progress_pct: stats.target_progress_pct, failed: stats.failed, rejects: stats.rejects}, null, 2) : "";
+        const active = ["starting", "running", "preflight", "stopping"].some((word) => data.status.toLowerCase().startsWith(word));
+        $("engineStop").disabled = !active;
+        if (active && !engineTimer) engineTimer = setInterval(loadEngineState, 2500);
+        if (!active && engineTimer) { clearInterval(engineTimer); engineTimer = null; }
+      } catch (error) { $("engineStatus").textContent = error.message; }
     }
     $("authForm").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -361,7 +434,7 @@
       const venueId = $("credentialVenue").value;
       const credentials = Object.fromEntries([...$("credentialFields").querySelectorAll("input")].map((input) => [input.name, input.value]));
       $("verifyButton").disabled = true;
-      $("exchangeStatus").textContent = "Running public REST, authenticated account, and live WebSocket checks…";
+      $("exchangeStatus").textContent = "Checking authenticated REST, private balance WebSocket, public order-book WebSocket, and venue key permissions…";
       $("verificationEvidence").textContent = "";
       $("balanceList").textContent = "";
       try {
@@ -380,6 +453,34 @@
         updateAuthModes(false);
       }
     });
+    $("engineMode").addEventListener("change", updateEngineChoices);
+    $("engineForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const mode = $("engineMode").value;
+      $("engineStart").disabled = true;
+      $("engineStatus").textContent = mode === "live" ? "Rechecking private stream, permissions, and live preflight…" : "Starting paper scanner…";
+      try {
+        const data = await control("/api/v1/engine/start", {method: "POST", body: {
+          mode, exchange_ids: [$("engineVenue").value], trade_size_usd: Number($("engineTradeSize").value),
+          max_loss_usd: Number($("engineMaxLoss").value), target_profit_usd: Number($("engineTarget").value),
+          require_private_stream: mode === "live" || $("authenticatedScan").checked,
+          live_confirmation: $("liveConfirmation").value
+        }});
+        $("liveConfirmation").value = "";
+        $("engineStatus").textContent = data.message;
+        if (!engineTimer) engineTimer = setInterval(loadEngineState, 2500);
+        loadEngineState();
+      } catch (error) { $("engineStatus").textContent = error.message; }
+      finally { updateEngineChoices(); }
+    });
+    $("engineStop").addEventListener("click", async () => {
+      try {
+        const data = await control("/api/v1/engine/stop", {method: "POST"});
+        $("engineStatus").textContent = data.status;
+        loadEngineState();
+      } catch (error) { $("engineStatus").textContent = error.message; }
+    });
+    $("engineRefresh").addEventListener("click", loadEngineState);
     $("exchangeA").value = "binance";
     $("exchangeB").value = "bybit";
     syncVenueNames();
@@ -398,4 +499,3 @@
   </script>
 </body>
 </html>
-

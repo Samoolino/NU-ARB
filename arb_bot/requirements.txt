@@ -1,7 +1,6 @@
-ccxt>=4.4
+ccxt>=4.5.66,<5
 uvloop>=0.19; sys_platform != "win32"
 winloop>=0.1; sys_platform == "win32"
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 cryptography>=43,<47
-

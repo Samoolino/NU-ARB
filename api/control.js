@@ -54,7 +54,7 @@ export default async function handler(request, response) {
       headers: upstreamHeaders,
       body: request.method === "GET" || request.body === undefined ? undefined : JSON.stringify(request.body),
       redirect: "error",
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(59000),
     });
   } catch {
     return fail(response, 502, "Control service is unreachable");
@@ -70,4 +70,3 @@ export default async function handler(request, response) {
   const body = await upstream.text();
   return response.send(body);
 }
-

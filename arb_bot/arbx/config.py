@@ -15,6 +15,7 @@ class ExchangeCfg:
     password: str = ""            # only some exchanges (okx, kucoin, bitget)
     max_symbols: int = 120        # order-book streams to keep open on this exchange
     default_taker_bps: float = 10.0
+    require_private_stream: bool = False
 
 
 @dataclass
@@ -102,4 +103,3 @@ class Config:
             for x in self.exchanges:
                 if not (x.api_key and x.secret):
                     raise ValueError(f"live mode needs BOT_{x.id.upper()}_KEY and BOT_{x.id.upper()}_SECRET")
-
