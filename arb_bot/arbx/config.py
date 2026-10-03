@@ -16,6 +16,7 @@ class ExchangeCfg:
     max_symbols: int = 120        # order-book streams to keep open on this exchange
     default_taker_bps: float = 10.0
     require_private_stream: bool = False
+    auth_mode: str = "hmac"
 
 
 @dataclass
@@ -74,6 +75,7 @@ class Config:
         xs = [ExchangeCfg(id=i, api_key=os.getenv(f"BOT_{i.upper()}_KEY", ""),
                           secret=os.getenv(f"BOT_{i.upper()}_SECRET", ""),
                           password=os.getenv(f"BOT_{i.upper()}_PASSWORD", ""),
+                          auth_mode=os.getenv(f"BOT_{i.upper()}_AUTH_MODE", "hmac").lower(),
                           max_symbols=mx, default_taker_bps=f("BOT_DEFAULT_TAKER_BPS", 10.0)) for i in ids]
         tgt = os.getenv("BOT_TARGET_EQUITY_USD")
         profit_target = os.getenv("BOT_TARGET_PROFIT_USD")
@@ -103,3 +105,4 @@ class Config:
             for x in self.exchanges:
                 if not (x.api_key and x.secret):
                     raise ValueError(f"live mode needs BOT_{x.id.upper()}_KEY and BOT_{x.id.upper()}_SECRET")
+
