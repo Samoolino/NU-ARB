@@ -76,7 +76,7 @@
     </section>
     <section>
       <div class="section-head"><h2>Cross-venue opportunities</h2><span id="marketMeta">Estimated from visible REST depth</span></div>
-      <div class="panel table-wrap"><table class="opps"><thead><tr><th>Buy</th><th>Sell</th><th>Base qty</th><th>Buy VWAP</th><th>Sell VWAP</th><th>Est. fees</th><th>Net PnL</th><th>State</th></tr></thead><tbody id="rows"><tr><td colspan="8" class="empty">Scan to request current public order-book snapshots.</td></tr></tbody></table></div>
+      <div class="panel table-wrap"><table class="opps"><thead><tr><th>Buy</th><th>Sell</th><th>Base qty</th><th>Buy VWAP</th><th>Sell VWAP</th><th>Est. fees · USDT</th><th>Net PnL · USDT</th><th>State</th></tr></thead><tbody id="rows"><tr><td colspan="8" class="empty">Scan to request current public order-book snapshots.</td></tr></tbody></table></div>
     </section>
     <div class="fineprint"><strong>Read-only estimates.</strong><span>Fees are the values you enter; actual account fee tiers, rebates, balances, transfer costs, execution latency, and slippage may differ. Public REST snapshots are not a streaming feed. A positive estimate is not a guaranteed or executable profit. This interface never accesses exchange credentials and cannot place orders.</span></div>
     <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>Binance Spot REST · Bybit Spot REST</span></footer>
@@ -128,11 +128,11 @@
         return;
       }
       rows.innerHTML = opportunities.map((o) => {
-        const complete = Number.isFinite(o.netPnlUsd);
+        const complete = Number.isFinite(o.netPnlUsdt);
         const positive = o.status === "positive_after_estimated_fees";
         const state = o.status === "insufficient_depth" ? "Insufficient depth" : positive ? "Positive estimate" : "No net edge";
-        const pnl = complete ? "$" + (o.netPnlUsd >= 0 ? "+" : "") + currency(o.netPnlUsd, 4) + " <small>(" + currency(o.netReturnBps, 2) + " bps)</small>" : "—";
-        const fees = complete ? "$" + currency(o.estimatedFeesUsd, 4) : "—";
+        const pnl = complete ? (o.netPnlUsdt >= 0 ? "+" : "") + currency(o.netPnlUsdt, 4) + " USDT" + " <small>(" + currency(o.netReturnBps, 2) + " bps)</small>" : "—";
+        const fees = complete ? currency(o.estimatedFeesUsd, 4) + " USDT" : "—";
         return '<tr><td>' + venueNames[o.buyVenue] + '</td><td>' + venueNames[o.sellVenue] + '</td><td>' + currency(o.quantityBase, 6) + '</td><td>' + currency(o.buyVwap, 2) + '</td><td>' + currency(o.sellVwap, 2) + '</td><td>' + fees + '</td><td class="' + (positive ? "positive" : "negative") + '">' + pnl + '</td><td><span class="status-pill ' + (positive ? "" : "neutral") + '">' + state + '</span></td></tr>';
       }).join("");
     }
@@ -211,7 +211,7 @@
   </script>
 </body>
 </html>
-+(o.netPnlUsd>=0?"+":"")+currency(o.netPnlUsd,4)+' <small>('+currency(o.netReturnBps,2)+' bps)</small>':'—';
++(o.netPnlUsdt>=0?"+":"")+currency(o.netPnlUsdt,4)+' <small>('+currency(o.netReturnBps,2)+' bps)</small>':'—';
         return '<tr><td>'+o.buyVenue+'</td><td>'+o.sellVenue+'</td><td>'+currency(o.quantityBase,6)+'</td><td>'+currency(o.buyVwap,2)+'</td><td>'+currency(o.sellVwap,2)+'</td><td>'+(complete?'
       }).join("");
     }
