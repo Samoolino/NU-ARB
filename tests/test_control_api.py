@@ -79,8 +79,9 @@ class ControlApiTests(unittest.TestCase):
             async def close(self):
                 return None
 
-        evidence = {"authentication": True, "balances": True, "privateWebSocket": True,
-                    "publicWebSocket": True, "scannerEligible": True, "liveEligible": False}
+        evidence = {"authentication": True, "rest": True, "account": True, "balances": True, "privateWebSocket": True,
+                    "publicWebSocket": True, "scannerEligible": True, "liveEligible": False,
+                    "connectionState": "FULLY_VERIFIED", "verifiedAt": "2026-10-03T00:00:00+00:00"}
         with patch.object(web_api, "_make_exchange", return_value=FakeAdapter()), \
              patch.object(web_api, "_probe_exchange", return_value=(evidence, {"USDT": {"free": 1, "used": 0, "total": 1}}, None)):
             response = self.client.post("/api/v1/exchanges/binance/verify", headers=self.headers, json={
@@ -97,6 +98,27 @@ class ControlApiTests(unittest.TestCase):
             db.close()
         self.assertNotIn(b"private-test-secret", stored)
         self.assertIn(b"private-test-secret", web_api._decrypt(stored))
+
+    def test_capital_sources_returns_empty_until_a_fresh_verified_balance_exists(self):
+        self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "capital@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        response = self.client.get("/api/v1/capital-sources", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"sources": [], "fundsMoved": False})
+
+    def test_engine_cannot_bypass_authenticated_stream_requirement(self):
+        self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "paper@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        response = self.client.post("/api/v1/engine/start", headers=self.headers, json={
+            "mode": "paper", "exchange_ids": ["binance"], "trade_size_usd": 5,
+            "max_loss_usd": 2, "target_profit_usd": 1, "require_private_stream": False,
+        })
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("private balance stream", response.json()["detail"])
 
     def test_credentials_cannot_be_changed_during_owned_engine_session(self):
         signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
@@ -118,3 +140,4 @@ class ControlApiTests(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
+
