@@ -31,6 +31,7 @@ async function loadVenue(id, symbol) {
       status: "live",
       latencyMs: Math.round(performance.now() - started),
       timestamp: book.timestamp ? new Date(book.timestamp).toISOString() : null,
+      receivedAt: Date.now(),
       asks: book.asks,
       bids: book.bids,
     };
@@ -98,11 +99,14 @@ export default async function handler(request, response) {
     observedAt: new Date().toISOString(),
     dataMode: "public_rest_snapshot",
     executionEnabled: false,
-    venues: venues.map(({ asks, bids, ...venue }) => venue),
+    venues: venues.map(({ asks, bids, receivedAt, ...venue }) => ({
+      ...venue,
+      receivedAt: receivedAt ? new Date(receivedAt).toISOString() : null,
+    })),
     books: Object.fromEntries(Object.entries(live).map(([id, venue]) => [id, {
       bestBid: Number(venue.bids[0][0]),
       bestAsk: Number(venue.asks[0][0]),
-      receivedAt: new Date().toISOString(),
+      receivedAt: new Date(venue.receivedAt).toISOString(),
     }])),
     opportunities,
   });
