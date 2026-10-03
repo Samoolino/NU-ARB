@@ -134,5 +134,24 @@ WantedBy=multi-user.target
 | `BOT_FEE_DISCOUNT_PCT` | 0 | fee-token discount |
 | `BOT_CROSS`, `BOT_CROSS_LIVE` | 1, 0 | cross-exchange scan / live orders |
 
+### Global realized-profit target and durable journal
+
+Set `BOT_TARGET_PROFIT_USD` to a positive number to stop initiating new trades once cumulative realized session PnL reaches the target. The target is global across the strategies and symbols enabled in the session; it is not tied to BTC/USDT or another pair. Paper mode tracks virtual realized PnL from its paper executor. Live mode counts only completed executor results. A target stop also halts the engine, so a person must review the journal before starting a new session.
+
+The engine keeps the existing `trade_journal.csv` for compatibility and writes a durable SQLite ledger beside it as `trade_journal.sqlite3`. Set `BOT_JOURNAL_PATH` to choose the CSV path; the SQLite file uses the same path with a `.sqlite3` suffix. Store both files on persistent storage when the engine host is restarted or redeployed.
+
+To resume the same target session after a restart, set `BOT_SESSION_ID` to the session ID shown in the engine stats. The engine reloads that session's filled net PnL from SQLite and halts immediately if the target was already attained. If no session ID is supplied, a new isolated target session is created at process start.
+
+Example:
+
+```bash
+export BOT_TARGET_PROFIT_USD=100
+export BOT_JOURNAL_PATH=/var/lib/arbx/trade_journal.csv
+python run.py --headless
+```
+
+The SQLite ledger records session, strategy/path, requested notional, execution result, status, failure reason, latency, and target progress. It deliberately leaves unavailable per-leg fill, fee, and slippage detail blank rather than substituting estimates. The current Vercel dashboard is still a separate public-data scanner and does not read or control this ledger or engine.
+
 ## 5. Pre-funded cross-exchange and rebalancing
 Cross trades buy on A and sell on B simultaneously (IOC both sides). Balances drift one way over time. Rebalance **manually** (bot never withdraws) using the cheapest vehicle from `transfer-plan`: stablecoins on the cheapest network (often TRC-20/other low-fee chains) when a flat fee dominates; a coin like TRX/XRP/XLM only if its fee + 2 conversion legs beats that. `rebalance_haircut_bps` (2 bps default in `config.py`) charges that amortized cost against every cross trade.
+

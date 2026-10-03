@@ -24,6 +24,7 @@ class Config:
     start_assets: tuple[str, ...] = ("USDT", "USDC")      # cycles start/end here (must be stablecoins)
     start_capital_usd: float = 100.0                      # paper only
     trade_size_usd: float = 25.0
+    target_profit_usd: float | None = None       # session-wide realized net PnL target; stops new orders at attainment
     target_equity_usd: float | None = None                # halt (never withdraw) when reached
 
     # ---- Profit/No-Loss gate ------------------------------------------------
@@ -74,14 +75,17 @@ class Config:
                           password=os.getenv(f"BOT_{i.upper()}_PASSWORD", ""),
                           max_symbols=mx, default_taker_bps=f("BOT_DEFAULT_TAKER_BPS", 10.0)) for i in ids]
         tgt = os.getenv("BOT_TARGET_EQUITY_USD")
+        profit_target = os.getenv("BOT_TARGET_PROFIT_USD")
         return cls(
             mode=os.getenv("BOT_MODE", "paper").lower(), exchanges=xs,
             start_capital_usd=f("BOT_START_CAPITAL_USD", 100.0), trade_size_usd=f("BOT_TRADE_SIZE_USD", 25.0),
+            target_profit_usd=float(profit_target) if profit_target else None,
             target_equity_usd=float(tgt) if tgt else None,
             min_net_bps=f("BOT_MIN_NET_BPS", 3.0), min_worst_bps=f("BOT_MIN_WORST_BPS", 0.5),
             limit_tol_bps=f("BOT_LIMIT_TOL_BPS", 1.0), max_rtt_ms=f("BOT_MAX_RTT_MS", 80.0),
             max_loss_usd=f("BOT_MAX_LOSS_USD", 5.0), fee_discount_pct=f("BOT_FEE_DISCOUNT_PCT", 0.0),
             cross_enabled=b("BOT_CROSS", True), cross_live=b("BOT_CROSS_LIVE", False),
+            journal_path=Path(os.getenv("BOT_JOURNAL_PATH", "trade_journal.csv")),
         )
 
     def validate(self) -> None:
@@ -89,6 +93,8 @@ class Config:
             raise ValueError("BOT_MODE must be 'paper' or 'live'")
         if not self.exchanges:
             raise ValueError("no exchanges configured (BOT_EXCHANGES)")
+        if self.target_profit_usd is not None and self.target_profit_usd <= 0:
+            raise ValueError("BOT_TARGET_PROFIT_USD must be greater than zero")
         bad = [a for a in self.start_assets if a not in STABLES]
         if bad:
             raise ValueError(f"start assets must be stablecoins, got {bad}")
@@ -96,3 +102,4 @@ class Config:
             for x in self.exchanges:
                 if not (x.api_key and x.secret):
                     raise ValueError(f"live mode needs BOT_{x.id.upper()}_KEY and BOT_{x.id.upper()}_SECRET")
+

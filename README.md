@@ -12,6 +12,8 @@ To deploy, import this GitHub repository in Vercel and set the project root to t
 
 This dashboard is intentionally **read-only**. It does not collect API keys, access private balances, run persistent WebSocket subscriptions, share state with the Python engine, store a durable journal, or place orders. Fees are estimates, and a positive estimate is not a guaranteed or executable profit. Keep the existing long-running WebSocket scanner and any explicitly authorized trading on a persistent host as described in [ARBX_README.md](ARBX_README.md).
 
+The Python engine now supports a global realized-profit target with a durable SQLite execution ledger, separate from this Vercel dashboard. Configure `BOT_TARGET_PROFIT_USD` and persistent `BOT_JOURNAL_PATH` storage on the engine host; see [the target and journal guide](ARBX_README.md#global-realized-profit-target-and-durable-journal). The dashboard and engine do not yet share authenticated state or controls.
+
 Run the dependency-free scanner unit tests with Node.js 20 or later:
 
 ```sh
@@ -38,3 +40,4 @@ python run.py --headless
 ```
 
 The bot defaults to paper mode. Live mode can place real exchange orders; it requires exchange credentials, and cross-exchange live orders require the separate `BOT_CROSS_LIVE=1` opt-in. Arbitrage is risky and profits are not guaranteed. Read the full [operations guide](ARBX_README.md) before configuring exchanges. Never commit API keys.
+
