@@ -32,6 +32,8 @@ class ExchangeWorker:
         self.x, self.id, self.cfg, self.hub = x, x.id, cfg, hub
         self.live = cfg.mode == "live"
         self.private_stream_ready = False
+        self.private_last_message: float | None = None
+        self.private_stream_error: str | None = None
         self.ex = self.md = self.lat = self.executor = None
         self.by_symbol: dict = {}
         self.symbols: set = set()
@@ -74,6 +76,7 @@ class ExchangeWorker:
             if not isinstance(private_balance, dict) or not all(key in private_balance for key in ("free", "used", "total")):
                 raise RuntimeError("authenticated balance WebSocket did not return a unified balance snapshot")
             self.private_stream_ready = True
+            self.private_last_message = time.monotonic()
             self.hub.log("info", f"[{self.id}] authenticated private balance WebSocket verified")
         elif need_private_stream:
             raise RuntimeError("authenticated private balance WebSocket is required but unavailable")
@@ -124,6 +127,33 @@ class ExchangeWorker:
         elif self.private_stream_ready:
             self.tasks.append(asyncio.create_task(self._private_balance_loop()))
 
+    def health_snapshot(self) -> dict:
+        now = time.monotonic()
+        latest = None
+        if self.md and self.md.books:
+            symbol, book = max(self.md.books.items(), key=lambda item: item[1].recv)
+            latest = {"symbol": symbol, "bestBid": book.bids[0][0] if book.bids else None,
+                      "bestAsk": book.asks[0][0] if book.asks else None,
+                      "receivedAtAgeMs": round(max(0.0, now - book.recv) * 1000, 1),
+                      "exchangeTimestamp": book.timestamp_exchange, "sequence": book.sequence,
+                      "stale": (now - book.recv) * 1000 > self.cfg.max_book_age_ms}
+        latency = self.lat.stats() if self.lat else {}
+        needs_private = self.live or self.x.require_private_stream
+        private_age = ((now - self.private_last_message) * 1000
+                       if self.private_last_message is not None else None)
+        private_fresh = not needs_private or (self.private_stream_ready and private_age is not None and private_age <= 120_000)
+        return {"exchange": self.id,
+                "state": "HEALTHY" if (latest is not None and not latest["stale"] and private_fresh and self.lat and self.lat.ok()) else "DEGRADED",
+                "publicWebSocket": {"state": "LIVE" if latest is not None and not latest["stale"] else "STALE",
+                                    "latestBook": latest},
+                "privateWebSocket": {"state": "NOT_REQUIRED" if not needs_private else "LIVE" if private_fresh else "STALE",
+                                     "lastMessageAgeMs": round(private_age, 1) if private_age is not None else None,
+                                     "error": self.private_stream_error},
+                "restLatencyMs": {"p50": round(latency.get("p50", 0), 1),
+                                  "p95": round(latency.get("p95", 0), 1),
+                                  "clockDriftMs": round(latency.get("skew", 0), 1)},
+                "verifiedStreamRequired": needs_private}
+
     async def close(self) -> None:
         for t in self.tasks:
             t.cancel()
@@ -146,7 +176,10 @@ class ExchangeWorker:
             try:
                 balance = await self.ex.watch_balance()
                 self.free = {k: float(v) for k, v in (balance.get("free") or {}).items() if v}
+                self.private_last_message = time.monotonic()
             except Exception as exc:
+                self.private_stream_error = type(exc).__name__
+                self.private_stream_ready = False
                 self.hub.log("error", f"[{self.id}] private balance stream failed ({type(exc).__name__})")
                 raise
 

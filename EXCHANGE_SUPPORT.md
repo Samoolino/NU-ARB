@@ -18,6 +18,7 @@ The API key and private material stay in the encrypted control-service database 
 ## Current product boundaries
 
 - The browser supports account creation, login, exchange credential entry, evidence display, recent verified balance snapshots, paper/live controls, and reading the durable execution journal.
+- While an engine session runs, the status panel exposes actual recent book messages, sequence/timestamp data where CCXT supplies them, private-stream message age, REST latency, clock drift, and degraded state. The engine stops a protected session if its authenticated stream goes stale, and live mode also stops on stale public market data or latency above its pause threshold.
 - The profit target is a numeric USD net-realized target for the current engine session. The engine halts new opportunities once its journaled realized PnL reaches that target. The journal endpoint also reports completed realized PnL across durable saved sessions; this lifetime total does not change the current-session stop threshold.
 - No funds are transferred by the starter-capital view. It displays only the latest authenticated balance data and does not estimate USD valuation without a price source.
 - Live trading is operator-disabled by default. It remains limited to one Binance account and the existing per-trade/session-loss caps. Other venues must not be described as live-trading integrations until their permission verification and execution paths are implemented and validated.

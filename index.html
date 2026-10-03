@@ -410,7 +410,7 @@
           ? data.status + (data.error ? " · preflight failed (" + data.error + ")" : "") + " · " + data.mode.toUpperCase() + " · scans " + stats.scans + " · signals " + stats.signals + " · trades " + stats.trades + " · net PnL $" + currency(stats.pnl, 4)
           : "Engine stopped.";
         $("engineDetails").textContent = stats ? JSON.stringify({equity: stats.equity, target_profit_usd: stats.target_profit_usd,
-          target_progress_pct: stats.target_progress_pct, failed: stats.failed, rejects: stats.rejects}, null, 2) : "";
+          target_progress_pct: stats.target_progress_pct, failed: stats.failed, rejects: stats.rejects, venues: stats.venues}, null, 2) : "";
         const active = ["starting", "running", "preflight", "stopping"].some((word) => data.status.toLowerCase().startsWith(word));
         $("engineStop").disabled = !active;
         if (active && !engineTimer) engineTimer = setInterval(loadEngineState, 2500);

@@ -605,6 +605,7 @@ def engine_state(request: Request):
     status = engine_phase if engine_phase in ("PREFLIGHTING", "PREFLIGHT_FAILED", "STOPPING") else stats["status"]
     if engine_task and engine_task.done() and status.startswith("RUNNING"):
         status = "STOPPED"
+    stats["venues"] = [worker.health_snapshot() for worker in engine_hub.workers]
     return {"status": status, "mode": engine_hub.cfg.mode,
             "stats": stats,
             "error": engine_error,
