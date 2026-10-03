@@ -31,12 +31,12 @@ test("uses ordered depth and subtracts fees at both selected venues", () => {
     exchangeA: "binance",
     exchangeB: "bybit",
     books,
-    tradeSizeUsd: 100,
+    tradeSizeUsdt: 100,
     feesBps: { binance: 10, bybit: 10 },
   });
   assert.equal(result.length, 2);
   assert.equal(result[0].status, "positive_after_estimated_fees");
-  assert.ok(result[0].netPnlUsd < 2);
+  assert.ok(result[0].netPnlUsdt < 2);
   assert.equal(result[1].status, "no_net_edge");
 });
 
@@ -48,12 +48,12 @@ test("marks a direction unavailable when the sell book lacks matched depth", () 
       binance: { asks: [["100", "1"]], bids: [["99", "1"]] },
       bybit: { asks: [["101", "1"]], bids: [["100", "0.1"]] },
     },
-    tradeSizeUsd: 100,
+    tradeSizeUsdt: 100,
     feesBps: { binance: 0, bybit: 0 },
   });
   assert.equal(result[0].status, "insufficient_depth");
 });
 
 test("requires distinct selected exchanges", () => {
-  assert.throws(() => scanBooks({ exchangeA: "binance", exchangeB: "binance", books: {}, tradeSizeUsd: 100, feesBps: {} }));
+  assert.throws(() => scanBooks({ exchangeA: "binance", exchangeB: "binance", books: {}, tradeSizeUsdt: 100, feesBps: {} }));
 });
