@@ -58,7 +58,7 @@ export default async function handler(request, response) {
   const binanceFeeBps = readFiniteNumber(request.query?.binanceFeeBps, 10);
   const bybitFeeBps = readFiniteNumber(request.query?.bybitFeeBps, 10);
 
-  if (!isValidSymbol(symbol)) return response.status(400).json({ error: "Use a spot symbol such as BTCUSDT (letters and numbers only)." });
+  if (!isValidSymbol(symbol)) return response.status(400).json({ error: "Use a spot symbol quoted in USDT, such as BTCUSDT." });
   if (tradeSizeUsd === null || tradeSizeUsd < 10 || tradeSizeUsd > 100000) {
     return response.status(400).json({ error: "Trade size must be between 10 and 100,000 USDT." });
   }
