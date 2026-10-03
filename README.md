@@ -4,13 +4,15 @@ ARBX is a Python spot-arbitrage bot for triangular and cross-exchange strategies
 
 ## Vercel web dashboard (read-only)
 
-The repository root now includes a deployable Vercel dashboard for read-only Binance and Bybit spot market scans. It requests public REST order-book snapshots, walks the available depth for the chosen USDT notional, applies the taker-fee basis points entered in the page, and shows the estimated net result for both buy/sell directions.
+The repository root includes a Vercel dashboard for public, read-only spot order-book scans. Choose two venues, a USDT-quoted symbol, a quote-currency notional, and estimated taker fees. The serverless API loads market metadata through CCXT, requests each selected order book, walks the visible depth, and estimates both buy/sell directions after the entered fee rates.
 
-To deploy, import this GitHub repository in Vercel and keep the project root set to the repository root. The project uses a static `index.html` and a Node.js serverless function at `/api/scan`; no build command or environment variables are required. The app is also runnable locally with Vercel CLI using `vercel dev`.
+The venue picker is configured for Binance, Bybit, OKX, KuCoin, Gate.io, MEXC, HTX, LBank, Bitget, Kraken, Coinbase, Bitfinex, Bitstamp, Gemini, Crypto.com Exchange, CoinEx, BingX, and WhiteBIT. Actual market availability depends on whether both selected exchanges list the requested spot pair and whether their public API is reachable from the deployed region. The dashboard shows per-venue errors and does not claim unavailable adapters or markets are live.
 
-This web dashboard is intentionally **read-only**. It does not collect API keys, access private balances, run persistent WebSocket subscriptions, share state with the Python engine, or place orders. A positive estimate is not an executable-profit guarantee. Vercel Functions are request/response handlers; keep the existing long-running WebSocket scanner and any explicitly authorized trading on a suitable persistent host as described in [ARBX_README.md](ARBX_README.md).
+To deploy, import this GitHub repository in Vercel and set the project root to the repository root. Vercel builds the static `index.html` and the Node.js function at `/api/scan`; no build command or environment variables are required. The app is also runnable locally with Vercel CLI using `vercel dev`.
 
-Run the dashboard's dependency-free unit tests with Node.js 20 or later:
+This dashboard is intentionally **read-only**. It does not collect API keys, access private balances, run persistent WebSocket subscriptions, share state with the Python engine, store a durable journal, or place orders. Fees are estimates, and a positive estimate is not a guaranteed or executable profit. Keep the existing long-running WebSocket scanner and any explicitly authorized trading on a persistent host as described in [ARBX_README.md](ARBX_README.md).
+
+Run the dependency-free scanner unit tests with Node.js 20 or later:
 
 ```sh
 npm test
