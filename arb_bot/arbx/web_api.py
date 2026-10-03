@@ -1,0 +1,615 @@
+"""Persistent control-plane API for the Vercel UI. Run only behind HTTPS on a persistent host."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import hmac
+import json
+import os
+import queue
+import secrets
+import sqlite3
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from arbx.permissions import inspect_permissions
+
+
+APP_DB = Path(os.getenv("ARBX_APP_DB", "arbx_app.sqlite3"))
+SESSION_COOKIE = "arbx_session"
+SESSION_TTL = 60 * 60 * 24 * 7
+VENUES = {
+    "binance": "Binance", "bybit": "Bybit", "okx": "OKX", "kucoin": "KuCoin", "gateio": "Gate.io",
+    "mexc": "MEXC", "htx": "HTX", "lbank": "LBank", "bitget": "Bitget", "kraken": "Kraken",
+    "coinbaseexchange": "Coinbase Exchange", "bitfinex": "Bitfinex", "bitstamp": "Bitstamp", "gemini": "Gemini",
+    "cryptocom": "Crypto.com Exchange", "coinex": "CoinEx", "bingx": "BingX", "whitebit": "WhiteBIT",
+}
+AUTH_SCHEMAS = {venue_id: {"modes": [{"id": "ccxt", "label": "API key and secret",
+                                     "fields": [{"name": "apiKey", "label": "API key"},
+                                                {"name": "secret", "label": "API secret"}]}]}
+                for venue_id in VENUES}
+AUTH_SCHEMAS["kucoin"] = {"modes": [{"id": "ccxt", "label": "API key, secret, and passphrase",
+    "fields": [{"name": "apiKey", "label": "API key"}, {"name": "secret", "label": "API secret"},
+               {"name": "password", "label": "API passphrase"}]}]}
+for _venue_id in ("okx", "bitget"):
+    AUTH_SCHEMAS[_venue_id] = {"modes": [{"id": "ccxt", "label": "API key, secret, and passphrase",
+        "fields": [{"name": "apiKey", "label": "API key"}, {"name": "secret", "label": "API secret"},
+                   {"name": "password", "label": "API passphrase"}]}]}
+AUTH_SCHEMAS["coinbaseexchange"] = {"modes": [{"id": "ccxt", "label": "API key, secret, and passphrase",
+    "fields": [{"name": "apiKey", "label": "API key"}, {"name": "secret", "label": "API secret"},
+               {"name": "password", "label": "API passphrase"}]}]}
+AUTH_SCHEMAS["binance"] = {"modes": [
+    {"id": "hmac", "label": "HMAC", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "secret", "label": "API secret"}]},
+    {"id": "rsa", "label": "RSA key pair", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "privateKey", "label": "RSA private key"}]},
+    {"id": "ed25519", "label": "Ed25519 key pair", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "privateKey", "label": "Ed25519 private key"}]},
+]}
+PYTHON_ADAPTERS = {"gateio": "gate"}
+app = FastAPI(title="ARBX Control API", version="1.0.0")
+engine_owner_id: str | None = None
+engine_hub = None
+engine_task: asyncio.Task | None = None
+engine_phase = "STOPPED"
+engine_error: str | None = None
+engine_stop_requested = False
+engine_logs: queue.Queue = queue.Queue(maxsize=100)
+engine_lock = asyncio.Lock()
+
+
+class _EngineOut:
+    def put(self, event):
+        try:
+            engine_logs.put_nowait(event)
+        except queue.Full:
+            try:
+                engine_logs.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                engine_logs.put_nowait(event)
+            except queue.Full:
+                pass
+
+
+async def _run_engine_job(payload: "EngineStart", credentials_by_id: dict[str, dict[str, str]],
+                         auth_modes: dict[str, str]) -> None:
+    global engine_phase, engine_error
+    try:
+        if payload.mode == "live" or payload.require_private_stream:
+            for exchange_id in payload.exchange_ids:
+                credentials = credentials_by_id[exchange_id]
+                exchange = _make_exchange(exchange_id, auth_modes[exchange_id], credentials)
+                try:
+                    evidence, _, _ = await _probe_exchange(exchange_id, exchange, "BTC/USDT")
+                finally:
+                    try:
+                        await exchange.close()
+                    except Exception:
+                        pass
+                if payload.mode == "live" and not evidence["liveEligible"]:
+                    raise RuntimeError("live permission preflight failed")
+                if payload.require_private_stream and not evidence["scannerEligible"]:
+                    raise RuntimeError("authenticated scanner preflight failed")
+        if engine_stop_requested:
+            engine_phase = "STOPPED"
+            return
+        engine_phase = "STARTING"
+        await engine_hub.run()
+        engine_phase = engine_hub.stats.status
+    except Exception as exc:
+        engine_error = type(exc).__name__
+        engine_phase = "PREFLIGHT_FAILED"
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_without_input(request: Request, exc: RequestValidationError):
+    # Pydantic errors can include submitted values; credential and password payloads must not echo.
+    return JSONResponse(status_code=422, content={"detail": "Invalid request. Check the required fields and try again."})
+
+
+def _connect():
+    APP_DB.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(APP_DB, timeout=10)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA synchronous=FULL")
+    db.executescript("""CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, salt BLOB NOT NULL, password_hash BLOB NOT NULL,
+        created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS exchange_credentials (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, exchange_id TEXT NOT NULL,
+        encrypted_credentials BLOB NOT NULL, auth_mode TEXT NOT NULL, state TEXT NOT NULL,
+        last_verified TEXT, verification_json TEXT NOT NULL DEFAULT '{}',
+        PRIMARY KEY(user_id, exchange_id));""")
+    db.commit()
+    return db
+
+
+def _proxy_auth(x_engine_token: str | None = Header(default=None)):
+    expected = os.getenv("ENGINE_PROXY_TOKEN", "")
+    if not expected or not x_engine_token or not hmac.compare_digest(expected, x_engine_token):
+        raise HTTPException(503, "Control API proxy is not configured")
+
+
+def _user(db: sqlite3.Connection, token: str | None):
+    if not token:
+        raise HTTPException(401, "Sign in required")
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    row = db.execute("SELECT user_id, expires_at FROM sessions WHERE token_hash=?", (digest,)).fetchone()
+    if not row or row["expires_at"] < int(time.time()):
+        if row:
+            db.execute("DELETE FROM sessions WHERE token_hash=?", (digest,)); db.commit()
+        raise HTTPException(401, "Session expired; sign in again")
+    return row["user_id"]
+
+
+def _encrypt(raw: bytes) -> bytes:
+    key_hex = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "")
+    try:
+        key = bytes.fromhex(key_hex)
+    except ValueError as exc:
+        raise HTTPException(503, "CREDENTIAL_ENCRYPTION_KEY must be 64 hexadecimal characters") from exc
+    if len(key) != 32:
+        raise HTTPException(503, "CREDENTIAL_ENCRYPTION_KEY must be 64 hexadecimal characters")
+    nonce = secrets.token_bytes(12)
+    return nonce + AESGCM(key).encrypt(nonce, raw, b"arbx-exchange-credentials-v1")
+
+
+def _decrypt(blob: bytes) -> bytes:
+    key = bytes.fromhex(os.getenv("CREDENTIAL_ENCRYPTION_KEY", ""))
+    if len(key) != 32:
+        raise RuntimeError("credential encryption key is not configured")
+    return AESGCM(key).decrypt(blob[:12], blob[12:], b"arbx-exchange-credentials-v1")
+
+
+class Signup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
+    password: str = Field(min_length=12, max_length=256)
+    password_confirmation: str = Field(min_length=12, max_length=256)
+
+
+class Login(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class ExchangeConnect(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    credentials: dict[str, str] = Field(min_length=1, max_length=8)
+    auth_mode: str = "ccxt"
+    symbol: str = Field(default="BTC/USDT", pattern=r"^[A-Z0-9]{2,20}/[A-Z0-9]{2,20}$", max_length=41)
+
+    @field_validator("credentials")
+    @classmethod
+    def bound_credential_payload(cls, credentials):
+        if any(len(key) > 32 or len(value) > 16_384 for key, value in credentials.items()):
+            raise ValueError("Credential fields exceed their maximum length")
+        return credentials
+
+
+class EngineStart(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    mode: Literal["paper", "live"]
+    exchange_ids: list[str] = Field(min_length=1, max_length=4)
+    trade_size_usd: float = Field(gt=0, le=25)
+    max_loss_usd: float = Field(gt=0, le=5)
+    target_profit_usd: float = Field(gt=0, le=1000)
+    require_private_stream: bool = True
+    live_confirmation: str = ""
+
+    @field_validator("exchange_ids")
+    @classmethod
+    def unique_supported_venues(cls, exchange_ids):
+        if len(set(exchange_ids)) != len(exchange_ids) or any(item not in VENUES for item in exchange_ids):
+            raise ValueError("Select unique supported exchange IDs")
+        return exchange_ids
+
+
+def _make_exchange(exchange_id: str, auth_mode: str, credentials: dict[str, str]):
+    import ccxt.pro as ccxtpro
+    adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
+    cls = getattr(ccxtpro, adapter_id, None)
+    if cls is None:
+        raise HTTPException(501, "This venue has no CCXT Pro adapter in the installed runtime")
+    config = dict(credentials)
+    if exchange_id == "binance" and auth_mode in ("rsa", "ed25519"):
+        config["secret"] = config.pop("privateKey")
+    return cls({**config, "enableRateLimit": True, "timeout": 10000,
+                "options": {"defaultType": "spot"}})
+
+
+async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict, dict | None, dict | None]:
+    evidence = {"rest": False, "authentication": False, "account": False, "balances": False,
+                "publicWebSocket": False, "privateWebSocket": False,
+                "tradePermission": "unverified", "withdrawalsDisabled": "unverified",
+                "scannerEligible": False, "liveEligible": False}
+    balance_summary = None
+    book_summary = None
+    market_ok = False
+    try:
+        t0 = time.perf_counter()
+        await exchange.load_markets()
+        if exchange.has.get("fetchTime") is not True:
+            raise RuntimeError("adapter does not expose a server-time request")
+        evidence["rest"] = bool(await exchange.fetch_time())
+        evidence["restRttMs"] = round((time.perf_counter() - t0) * 1000, 1)
+        market = exchange.market(symbol)
+        if not market.get("spot") or market.get("contract"):
+            raise RuntimeError("verification symbol is not a spot market")
+        market_ok = True
+        balance = await exchange.fetch_balance()
+        evidence["authentication"] = True
+        evidence["account"] = True
+        evidence["balances"] = isinstance(balance, dict)
+        balance_summary = {asset: {"free": float((balance.get("free") or {}).get(asset) or 0),
+                                   "used": float((balance.get("used") or {}).get(asset) or 0),
+                                   "total": float((balance.get("total") or {}).get(asset) or 0)}
+                           for asset in (balance.get("total") or {})
+                           if float((balance.get("total") or {}).get(asset) or 0) > 0}
+    except Exception as exc:
+        evidence["accountError"] = type(exc).__name__
+
+    if evidence["authentication"] and exchange.has.get("watchBalance") is True:
+        try:
+            private_balance = await asyncio.wait_for(exchange.watch_balance(), timeout=15)
+            if isinstance(private_balance, dict) and all(key in private_balance for key in ("free", "used", "total")):
+                evidence["privateWebSocket"] = True
+                evidence["privateWebSocketAt"] = datetime.now(timezone.utc).isoformat()
+            else:
+                evidence["privateWebSocketError"] = "No unified balance snapshot received"
+        except Exception as exc:
+            evidence["privateWebSocketError"] = type(exc).__name__
+    elif evidence["authentication"]:
+        evidence["privateWebSocketError"] = "Adapter does not advertise watchBalance support"
+
+    if evidence["authentication"]:
+        try:
+            permission = await inspect_permissions(exchange_id, exchange)
+            evidence["permissions"] = permission
+            evidence["tradePermission"] = permission.get("tradePermission", "unverified")
+            evidence["withdrawalsDisabled"] = permission.get("withdrawalsDisabled", "unverified")
+        except Exception as exc:
+            evidence["permissionError"] = type(exc).__name__
+            evidence["permissions"] = {"liveEligible": False}
+
+    if market_ok and exchange.has.get("watchOrderBook") is True:
+        try:
+            book = await asyncio.wait_for(exchange.watch_order_book(symbol, 10), timeout=12)
+            if book.get("bids") and book.get("asks"):
+                evidence["publicWebSocket"] = True
+                book_summary = {"symbol": symbol, "bestBid": book["bids"][0][0],
+                                "bestAsk": book["asks"][0][0],
+                                "receivedAt": datetime.now(timezone.utc).isoformat(),
+                                "sequence": book.get("nonce")}
+                evidence["orderBook"] = book_summary
+        except Exception as exc:
+            evidence["publicWebSocketError"] = type(exc).__name__
+
+    evidence["scannerEligible"] = bool(evidence["authentication"] and evidence["balances"]
+                                        and evidence["privateWebSocket"] and evidence["publicWebSocket"])
+    evidence["liveEligible"] = bool(evidence["scannerEligible"]
+                                     and (evidence.get("permissions") or {}).get("liveEligible") is True)
+    return evidence, balance_summary, book_summary
+
+
+def _new_session(db, user_id: str, response: Response):
+    token = secrets.token_urlsafe(32)
+    db.execute("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)",
+               (hashlib.sha256(token.encode()).hexdigest(), user_id, int(time.time()) + SESSION_TTL))
+    db.commit()
+    response.set_cookie(SESSION_COOKIE, token, httponly=True, secure=os.getenv("APP_SECURE_COOKIE", "1") == "1",
+                        samesite="lax", max_age=SESSION_TTL, path="/")
+
+
+def _current_user(request: Request, db: sqlite3.Connection):
+    return _user(db, request.cookies.get(SESSION_COOKIE))
+
+
+@app.get("/api/v1/health", dependencies=[Depends(_proxy_auth)])
+def health():
+    enabled = os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"
+    return {"service": "arbx-control-api", "status": "available", "execution_enabled": enabled}
+
+
+@app.get("/healthz")
+def healthz():
+    token_ok = bool(os.getenv("ENGINE_PROXY_TOKEN"))
+    try:
+        key_ok = len(bytes.fromhex(os.getenv("CREDENTIAL_ENCRYPTION_KEY", ""))) == 32
+    except ValueError:
+        key_ok = False
+    if not token_ok or not key_ok:
+        raise HTTPException(503, "Control service configuration is incomplete")
+    db = _connect()
+    try:
+        db.execute("CREATE TABLE IF NOT EXISTS service_health_probe (ok INTEGER NOT NULL)")
+        db.execute("INSERT INTO service_health_probe(ok) VALUES(1)")
+        db.execute("DELETE FROM service_health_probe")
+        db.commit()
+    finally:
+        db.close()
+    return {"status": "ready"}
+
+
+@app.get("/api/v1/runtime", dependencies=[Depends(_proxy_auth)])
+def runtime_config():
+    return {"liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
+            "executionActive": bool(engine_task and not engine_task.done()),
+            "executionEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
+            "enginePhase": engine_phase}
+
+
+@app.post("/api/v1/auth/signup", dependencies=[Depends(_proxy_auth)])
+def signup(payload: Signup, response: Response):
+    if payload.password != payload.password_confirmation:
+        raise HTTPException(422, "Passwords do not match")
+    db = _connect(); user_id = secrets.token_hex(16); salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), salt, 310_000)
+    try:
+        db.execute("INSERT INTO users(id,email,salt,password_hash,created_at) VALUES(?,?,?,?,?)",
+                   (user_id, payload.email.lower(), salt, digest, datetime.now(timezone.utc).isoformat()))
+        db.commit(); _new_session(db, user_id, response)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(409, "An account with this email already exists") from exc
+    finally:
+        db.close()
+    return {"user": {"id": user_id, "email": payload.email.lower()}}
+
+
+@app.post("/api/v1/auth/login", dependencies=[Depends(_proxy_auth)])
+def login(payload: Login, response: Response):
+    db = _connect()
+    try:
+        row = db.execute("SELECT id,email,salt,password_hash FROM users WHERE email=?", (payload.email.lower(),)).fetchone()
+        supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
+        if not row or not hmac.compare_digest(supplied, row["password_hash"]):
+            raise HTTPException(401, "Email or password is incorrect")
+        _new_session(db, row["id"], response)
+        return {"user": {"id": row["id"], "email": row["email"]}}
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/auth/logout", dependencies=[Depends(_proxy_auth)])
+def logout(request: Request, response: Response):
+    db = _connect(); token = request.cookies.get(SESSION_COOKIE)
+    uid = None
+    if token:
+        row = db.execute("SELECT user_id FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
+        uid = row["user_id"] if row else None
+    if uid and uid == engine_owner_id and engine_task is not None and not engine_task.done():
+        db.close()
+        raise HTTPException(409, "Stop the engine before signing out")
+    if token:
+        db.execute("DELETE FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),)); db.commit()
+    db.close(); response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
+    return {"ok": True}
+
+
+@app.get("/api/v1/auth/me", dependencies=[Depends(_proxy_auth)])
+def me(request: Request):
+    db = _connect()
+    try:
+        user_id = _current_user(request, db)
+        row = db.execute("SELECT id,email FROM users WHERE id=?", (user_id,)).fetchone()
+        return {"user": dict(row)}
+    finally:
+        db.close()
+
+
+@app.get("/api/v1/exchanges", dependencies=[Depends(_proxy_auth)])
+async def exchanges(request: Request):
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+        rows = {r["exchange_id"]: r for r in db.execute(
+            "SELECT exchange_id,auth_mode,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?", (uid,))}
+        try:
+            import ccxt.pro as ccxtpro
+        except Exception:
+            ccxtpro = None
+        result = []
+        for exchange_id, name in VENUES.items():
+            adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
+            cls = getattr(ccxtpro, adapter_id, None) if ccxtpro else None
+            schema = AUTH_SCHEMAS[exchange_id]["modes"]
+            row = rows.get(exchange_id)
+            saved = json.loads(row["verification_json"]) if row else {}
+            result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
+                           "authenticationModes": schema, "state": row["state"] if row else "NOT_CONFIGURED",
+                           "lastVerified": row["last_verified"] if row else None,
+                           "evidence": saved.get("evidence", {}), "balances": saved.get("balances"),
+                           "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
+                           "scannerEligible": bool(saved.get("evidence", {}).get("scannerEligible")),
+                           "liveEligible": bool(saved.get("evidence", {}).get("liveEligible")),
+                           "executionEnabled": bool(saved.get("evidence", {}).get("liveEligible"))
+                               and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
+        return {"exchanges": result}
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/exchanges/{exchange_id}/verify", dependencies=[Depends(_proxy_auth)])
+async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: Request):
+    if exchange_id not in VENUES:
+        raise HTTPException(404, "Exchange is not in the supported venue registry")
+    uid = None; db = _connect()
+    try:
+        uid = _current_user(request, db)
+        if engine_owner_id == uid and engine_task is not None and not engine_task.done():
+            raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
+        if not payload.credentials or any(not isinstance(k, str) or not isinstance(v, str) for k, v in payload.credentials.items()):
+            raise HTTPException(422, "Credential fields must be text values")
+        modes = {item["id"]: item for item in AUTH_SCHEMAS[exchange_id]["modes"]}
+        mode = modes.get(payload.auth_mode)
+        if not mode:
+            raise HTTPException(422, "Authentication mode is not supported for this exchange")
+        allowed_fields = {field["name"] for field in mode["fields"]}
+        if set(payload.credentials) != allowed_fields or any(not value.strip() for value in payload.credentials.values()):
+            raise HTTPException(422, "Provide exactly the non-empty credential fields shown for this authentication mode")
+        try:
+            exchange = _make_exchange(exchange_id, payload.auth_mode, payload.credentials)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(500, f"Could not initialize adapter: {type(exc).__name__}") from exc
+        try:
+            evidence, balance_summary, book_summary = await _probe_exchange(exchange_id, exchange, payload.symbol)
+        finally:
+            try: await exchange.close()
+            except Exception: pass
+        live_eligible = evidence["liveEligible"]
+        scanner_eligible = evidence["scannerEligible"]
+        state = "FULLY_VERIFIED" if live_eligible else "ACCOUNT_DATA_CONNECTED" if evidence["authentication"] else "FAILED"
+        verified_at = datetime.now(timezone.utc).isoformat() if evidence["authentication"] else None
+        key_preview = payload.credentials.get("apiKey", "")
+        masked = f"{key_preview[:3]}••••{key_preview[-3:]}" if len(key_preview) >= 7 else "••••"
+        encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
+        saved_verification = {"evidence": evidence, "balances": balance_summary,
+                              "orderBook": book_summary, "maskedKey": masked}
+        db.execute("""INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json)
+                      VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
+                      encrypted_credentials=excluded.encrypted_credentials,auth_mode=excluded.auth_mode,state=excluded.state,
+                      last_verified=excluded.last_verified,verification_json=excluded.verification_json""",
+                   (uid, exchange_id, encrypted, payload.auth_mode, state, verified_at,
+                    json.dumps(saved_verification, separators=(",", ":"))))
+        db.commit()
+        return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
+                "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
+                "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
+                "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
+    finally:
+        db.close()
+
+
+@app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
+def remove_exchange(exchange_id: str, request: Request):
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+        if engine_owner_id == uid and engine_task is not None and not engine_task.done():
+            raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
+        db.execute("DELETE FROM exchange_credentials WHERE user_id=? AND exchange_id=?", (uid, exchange_id)); db.commit()
+        return {"id": exchange_id, "state": "NOT_CONFIGURED"}
+    finally:
+        db.close()
+
+
+@app.get("/api/v1/engine/state", dependencies=[Depends(_proxy_auth)])
+def engine_state(request: Request):
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+    finally:
+        db.close()
+    if engine_owner_id != uid or engine_hub is None:
+        return {"status": "STOPPED", "mode": None, "stats": None}
+    stats = engine_hub.stats.snapshot()
+    status = engine_phase if engine_phase in ("PREFLIGHTING", "PREFLIGHT_FAILED", "STOPPING") else stats["status"]
+    if engine_task and engine_task.done() and status.startswith("RUNNING"):
+        status = "STOPPED"
+    return {"status": status, "mode": engine_hub.cfg.mode,
+            "stats": stats,
+            "error": engine_error,
+            "executionEnabled": engine_hub.cfg.mode == "live" and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
+
+
+@app.post("/api/v1/engine/start", dependencies=[Depends(_proxy_auth)])
+async def engine_start(payload: EngineStart, request: Request):
+    if payload.mode == "live":
+        if os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") != "1":
+            raise HTTPException(503, "Live execution is disabled by the control-service operator")
+        if payload.live_confirmation != "I ACCEPT REAL ORDERS":
+            raise HTTPException(422, 'For live mode, type exactly: "I ACCEPT REAL ORDERS"')
+        if len(payload.exchange_ids) != 1:
+            raise HTTPException(422, "Live mode currently supports one exchange per engine session")
+
+    global engine_owner_id, engine_hub, engine_task, engine_phase, engine_error, engine_stop_requested
+    async with engine_lock:
+        if engine_task is not None and not engine_task.done():
+            raise HTTPException(409, "An engine session is already active on this control-service instance")
+        db = _connect()
+        try:
+            uid = _current_user(request, db)
+            rows = {r["exchange_id"]: r for r in db.execute(
+                "SELECT exchange_id,encrypted_credentials,auth_mode FROM exchange_credentials WHERE user_id=?", (uid,))}
+            credentials_by_id: dict[str, dict[str, str]] = {}
+            auth_modes: dict[str, str] = {}
+            for exchange_id in payload.exchange_ids:
+                row = rows.get(exchange_id)
+                if row is None:
+                    if payload.mode == "live" or payload.require_private_stream:
+                        raise HTTPException(409, f"Verify {VENUES[exchange_id]} before starting an authenticated scan or live mode")
+                    credentials_by_id[exchange_id] = {}
+                    auth_modes[exchange_id] = "ccxt"
+                    continue
+                try:
+                    credentials_by_id[exchange_id] = json.loads(_decrypt(row["encrypted_credentials"]).decode())
+                except Exception as exc:
+                    raise HTTPException(503, "Could not unlock saved exchange credentials") from exc
+                auth_modes[exchange_id] = row["auth_mode"]
+                if payload.mode == "live" and exchange_id != "binance":
+                    raise HTTPException(409, "Live key-scope verification is currently supported only for Binance")
+
+            from arbx.config import Config, ExchangeCfg
+            from arbx.hub import Hub
+            exchange_cfgs = []
+            for exchange_id in payload.exchange_ids:
+                adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
+                credentials = credentials_by_id[exchange_id]
+                if exchange_id == "binance" and auth_modes[exchange_id] in ("rsa", "ed25519"):
+                    credentials = {**credentials, "secret": credentials.get("privateKey", "")}
+                exchange_cfgs.append(ExchangeCfg(id=adapter_id, api_key=credentials.get("apiKey", ""),
+                                                 secret=credentials.get("secret", ""),
+                                                 password=credentials.get("password", ""),
+                                                 require_private_stream=(payload.mode == "live" or payload.require_private_stream)))
+            cfg = Config(mode=payload.mode, exchanges=exchange_cfgs, trade_size_usd=payload.trade_size_usd,
+                         max_loss_usd=payload.max_loss_usd, target_profit_usd=payload.target_profit_usd,
+                         cross_enabled=payload.mode == "paper", cross_live=False,
+                         journal_path=APP_DB.parent / f"engine_{uid}.csv")
+            try:
+                cfg.validate()
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            engine_logs.queue.clear()
+            engine_owner_id = uid
+            engine_error = None
+            engine_stop_requested = False
+            engine_phase = "PREFLIGHTING" if payload.mode == "live" or payload.require_private_stream else "STARTING"
+            engine_hub = Hub(cfg, _EngineOut())
+            engine_task = asyncio.create_task(_run_engine_job(payload, credentials_by_id, auth_modes), name="arbx-engine-job")
+        finally:
+            db.close()
+    return {"status": engine_phase, "mode": payload.mode,
+            "message": "Preflight is running. No live order is submitted until account, permission, stream, and latency checks pass." if payload.mode == "live" else "Paper scanner starting."}
+
+
+@app.post("/api/v1/engine/stop", dependencies=[Depends(_proxy_auth)])
+def engine_stop(request: Request):
+    global engine_phase, engine_stop_requested
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+    finally:
+        db.close()
+    if engine_owner_id != uid or engine_hub is None or engine_task is None or engine_task.done():
+        return {"status": "STOPPED"}
+    engine_stop_requested = True
+    if engine_phase in ("PREFLIGHTING", "STARTING"):
+        engine_phase = "STOPPING"
+    engine_hub.request_stop()
+    return {"status": "STOPPING"}
+

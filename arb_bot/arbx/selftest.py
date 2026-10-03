@@ -3,6 +3,7 @@ Proves the install works and exercises stream -> evaluate -> gate -> paper-execu
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import time
 from pathlib import Path
@@ -11,6 +12,8 @@ from arbx import worker as worker_mod
 from arbx.config import Config, ExchangeCfg
 from arbx.gate import Decision, ProfitGate, RiskManager
 from arbx.hub import Hub
+from arbx.journal import TradeJournal
+from arbx.execute import TradeResult
 from arbx.strategy import Opp
 from arbx.util import buy_with_quote, loop_factory, walk_base
 
@@ -82,13 +85,52 @@ def _unit_checks() -> None:
     assert gate.check_tri(opp(), {"X/USDT": (None, 50.0)}, True, 100.0).reason == "below_exchange_minimum"
     risk.halt("x")
     assert gate.check_tri(opp(), {}, True, 100.0).reason == "halted"
-    print("unit checks: OK (depth walking, 8 gate rejection paths)")
+    journal_path = Path("selftest_durable_journal.sqlite3")
+    journal_path.unlink(missing_ok=True)
+    durable = TradeJournal(journal_path)
+    durable.append({"session_id": "test-session", "mode": "paper", "exchange_a": "a",
+                    "strategy": "cross_exchange", "net_pnl": 0.12, "execution_status": "FILLED",
+                    "verification_status": "PAPER_SIMULATION", "cumulative_realized_pnl": 0.12})
+    assert abs(durable.realized("test-session") - 0.12) < 1e-9
+    durable.close()
+    reopened = TradeJournal(journal_path)
+    assert abs(reopened.realized("test-session") - 0.12) < 1e-9
+    reopened.close()
+    journal_path.unlink(missing_ok=True)
+    Path(str(journal_path) + "-wal").unlink(missing_ok=True)
+    Path(str(journal_path) + "-shm").unlink(missing_ok=True)
+    target_csv = Path("selftest_target.csv")
+    target_csv.unlink(missing_ok=True)
+    target_cfg = Config(exchanges=[ExchangeCfg("target_test")], journal_path=target_csv, target_profit_usd=0.05)
+    target_hub = Hub(target_cfg)
+    target_hub.settle("target_test", "X BTC/USDT target_test>target_test2", 25.0,
+                      TradeResult(0.06), 0.0, 12.0)
+    assert target_hub.risk.halted and "target attained" in target_hub.risk.reason
+    assert target_hub.stats.target_progress_pct == 100.0
+    resumed_session = target_hub.session_id
+    target_hub.journal_store.close()
+    previous_session = os.environ.get("BOT_SESSION_ID")
+    os.environ["BOT_SESSION_ID"] = resumed_session
+    resumed_hub = Hub(target_cfg)
+    assert resumed_hub.risk.halted and resumed_hub.stats.target_progress_pct == 100.0
+    resumed_hub.journal_store.close()
+    if previous_session is None:
+        os.environ.pop("BOT_SESSION_ID", None)
+    else:
+        os.environ["BOT_SESSION_ID"] = previous_session
+    target_db = target_csv.with_suffix(".sqlite3")
+    target_db.unlink(missing_ok=True)
+    Path(str(target_db) + "-wal").unlink(missing_ok=True)
+    Path(str(target_db) + "-shm").unlink(missing_ok=True)
+    target_csv.unlink(missing_ok=True)
+    print("unit checks: OK (depth walking, risk gates, durable journal, target resume)")
 
 
 def run_selftest(seconds: float = 6.0) -> bool:
     _unit_checks()
     journal = Path("selftest_journal.csv")
     journal.unlink(missing_ok=True)
+    journal.with_suffix(".sqlite3").unlink(missing_ok=True)
     cfg = Config(mode="paper", exchanges=[ExchangeCfg("fake_a"), ExchangeCfg("fake_b")],
                  journal_path=journal, cooldown_s=0.05, max_loss_usd=50.0, cross_top_n=5)
     cfg.validate()
@@ -108,6 +150,10 @@ def run_selftest(seconds: float = 6.0) -> bool:
         hub = asyncio.run(go(), loop_factory=loop_factory())
     finally:
         worker_mod.build_exchange = original
+    db_path = journal.with_suffix(".sqlite3")
+    db_path.unlink(missing_ok=True)
+    Path(str(db_path) + "-wal").unlink(missing_ok=True)
+    Path(str(db_path) + "-shm").unlink(missing_ok=True)
     s = hub.stats
     rows = journal.read_text().count("\n") - 1 if journal.exists() else 0
     print(f"paper run {seconds:.0f}s: scans={s.scans} signals={s.signals} trades={s.trades} pnl={s.pnl:+.4f} "
@@ -115,3 +161,4 @@ def run_selftest(seconds: float = 6.0) -> bool:
     ok = s.trades > 0 and not hub.risk.halted and s.pnl > 0 and rows == s.trades + s.failed
     print("SELFTEST PASSED" if ok else "SELFTEST FAILED")
     return ok
+

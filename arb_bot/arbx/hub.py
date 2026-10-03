@@ -2,22 +2,25 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import math
+import os
 import queue
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 
 from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
 from arbx.gate import ProfitGate, RiskManager
+from arbx.journal import TradeJournal
 from arbx.strategy import evaluate_cross
 from arbx.worker import ExchangeWorker
 
 
 @dataclass
 class Stats:
+    session_id: str = ""
     status: str = "starting"
     scans: int = 0
     signals: int = 0
@@ -25,21 +28,33 @@ class Stats:
     failed: int = 0
     pnl: float = 0.0
     equity: float = 0.0
+    target_profit_usd: float | None = None
+    target_progress_pct: float = 0.0
     rejects: Counter = field(default_factory=Counter)
     rtt: dict = field(default_factory=dict)
 
     def snapshot(self) -> dict:
-        return {"status": self.status, "scans": self.scans, "signals": self.signals, "trades": self.trades,
+        return {"status": self.status, "session_id": self.session_id,
+                "scans": self.scans, "signals": self.signals, "trades": self.trades,
                 "failed": self.failed, "pnl": self.pnl, "equity": self.equity,
+                "target_profit_usd": self.target_profit_usd, "target_progress_pct": self.target_progress_pct,
                 "rejects": dict(self.rejects.most_common(4)), "rtt": dict(self.rtt)}
 
 
 class Hub:
     def __init__(self, cfg: Config, out: "queue.Queue | None" = None):
         self.cfg, self.out = cfg, out
+        self.session_id = os.getenv("BOT_SESSION_ID") or uuid.uuid4().hex
+        self.journal_store = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
         self.risk = RiskManager(cfg)
+        self.risk.pnl = self.journal_store.realized(self.session_id)
         self.gate = ProfitGate(cfg, self.risk)
-        self.stats = Stats(equity=cfg.start_capital_usd)
+        self.stats = Stats(session_id=self.session_id, pnl=self.risk.pnl, equity=cfg.start_capital_usd + self.risk.pnl,
+                           target_profit_usd=cfg.target_profit_usd)
+        if cfg.target_profit_usd is not None:
+            self.stats.target_progress_pct = min(100.0, max(0.0, self.risk.pnl / cfg.target_profit_usd * 100.0))
+            if self.risk.pnl >= cfg.target_profit_usd:
+                self.risk.halt(f"target attained: realized net PnL {self.risk.pnl:.4f} USD >= {cfg.target_profit_usd:.4f} USD")
         self.workers: list[ExchangeWorker] = []
         self.cross_syms: set = set()
         self.cross_exec = None
@@ -65,21 +80,52 @@ class Hub:
         if self._loop and self._stop:
             self._loop.call_soon_threadsafe(self._stop.set)
 
-    def journal(self, ex, name, start, pnl, worst_bps, ok) -> None:
+    def journal(self, ex, name, start, pnl, worst_bps, ok, *, latency_ms=None, target_before=None) -> None:
         p = self.cfg.journal_path
         new = not p.exists()
         with p.open("a", newline="") as f:
+            import csv
             w = csv.writer(f)
             if new:
                 w.writerow(["ts", "mode", "exchange", "path", "start_usd", "pnl_usd", "guaranteed_bps", "ok"])
             w.writerow([time.strftime("%Y-%m-%d %H:%M:%S"), self.cfg.mode, ex, name, round(start, 6),
                         round(pnl, 6), round(worst_bps, 3), ok])
+        strategy = "cross_exchange" if name.startswith("X ") else "triangular"
+        symbols = [part for part in name.replace("X ", "").split() if "/" in part]
+        self.journal_store.append({
+            "session_id": self.session_id,
+            "mode": self.cfg.mode,
+            "exchange_a": str(ex).split("/")[0],
+            "exchange_b": str(ex).split("/")[1] if "/" in str(ex) else None,
+            "strategy": strategy,
+            "path": [name],
+            "symbols": symbols,
+            "requested_quantity": start,
+            "executed_quantity": None,
+            "average_fill_price": None,
+            "fees": None,
+            "gross_pnl": None,
+            "slippage": None,
+            "net_pnl": pnl if ok else 0.0,
+            "latency_ms": latency_ms,
+            "book_age_ms": None,
+            "execution_status": "FILLED" if ok else "UNFILLED_OR_FAILED",
+            "verification_status": "PAPER_SIMULATION" if self.cfg.mode == "paper" and ok else "FILL_RESULT_RECORDED" if ok else "NOT_FILLED",
+            "risk_decision": "APPROVED" if ok else "REJECTED_OR_FAILED",
+            "failure_reason": None if ok else "Order was not completed; inspect engine log for cause",
+            "target_before": target_before,
+            "target_after": self.risk.pnl,
+            "cumulative_realized_pnl": self.risk.pnl,
+        })
 
     def settle(self, ex, name, start, res, worst_bps, ms) -> None:
         """Post-trade verification: realized result must respect the pre-trade guarantee."""
         st = self.stats
+        target_before = self.risk.pnl
         self.risk.record(res.pnl, res.ok)
         st.pnl, st.equity = self.risk.pnl, self.equity
+        if self.cfg.target_profit_usd:
+            st.target_progress_pct = min(100.0, max(0.0, st.pnl / self.cfg.target_profit_usd * 100.0))
         if res.ok:
             st.trades += 1
             realized = res.pnl / start * 1e4
@@ -90,7 +136,10 @@ class Hub:
         else:
             st.failed += 1
             self.log("warn", f"[{ex}] {name} unfilled (IOC expired) - no position taken")
-        self.journal(ex, name, start, res.pnl, worst_bps, res.ok)
+        self.journal(ex, name, start, res.pnl, worst_bps, res.ok, latency_ms=ms, target_before=target_before)
+        target_profit = self.cfg.target_profit_usd
+        if target_profit is not None and st.pnl >= target_profit:
+            self.risk.halt(f"target attained: realized net PnL {st.pnl:.4f} USD >= {target_profit:.4f} USD")
         tgt = self.cfg.target_equity_usd
         if tgt and st.equity >= tgt:
             self.risk.halt(f"target equity {tgt} reached (funds remain on the exchange)")
@@ -208,3 +257,5 @@ class Hub:
             if self.stats.status != "ERROR":
                 self.stats.status = "HALTED" if self.risk.halted else "STOPPED"
             self._push()
+            self.journal_store.close()
+

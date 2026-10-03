@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    ARBX_APP_DB=/data/arbx_app.sqlite3
+
+WORKDIR /app
+COPY arb_bot/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY arb_bot/arbx /app/arb_bot/arbx
+COPY arb_bot/control_entrypoint.py /app/control_entrypoint.py
+RUN useradd --system --uid 10001 --home-dir /nonexistent arbx \
+    && mkdir -p /data \
+    && chown -R arbx:arbx /data
+
+EXPOSE 8000
+ENTRYPOINT ["python", "/app/control_entrypoint.py"]

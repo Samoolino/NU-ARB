@@ -19,7 +19,7 @@ def build_exchange(x, live: bool):
     if cls is None:
         raise RuntimeError(f"'{x.id}' is not supported by ccxt.pro (see ccxt.pro.exchanges)")
     params = {"enableRateLimit": True, "options": {"defaultType": "spot"}}
-    if live:
+    if x.api_key and x.secret:
         params.update(apiKey=x.api_key, secret=x.secret)
         if x.password:
             params["password"] = x.password
@@ -30,6 +30,7 @@ class ExchangeWorker:
     def __init__(self, x, cfg, hub):
         self.x, self.id, self.cfg, self.hub = x, x.id, cfg, hub
         self.live = cfg.mode == "live"
+        self.private_stream_ready = False
         self.ex = self.md = self.lat = self.executor = None
         self.by_symbol: dict = {}
         self.symbols: set = set()
@@ -66,6 +67,15 @@ class ExchangeWorker:
     async def prepare(self) -> None:
         self.ex = build_exchange(self.x, self.live)
         await self.ex.load_markets()
+        need_private_stream = self.live or self.x.require_private_stream
+        if need_private_stream and self.x.api_key and self.x.secret and self.ex.has.get("watchBalance") is True:
+            private_balance = await asyncio.wait_for(self.ex.watch_balance(), timeout=15)
+            if not isinstance(private_balance, dict) or not all(key in private_balance for key in ("free", "used", "total")):
+                raise RuntimeError("authenticated balance WebSocket did not return a unified balance snapshot")
+            self.private_stream_ready = True
+            self.hub.log("info", f"[{self.id}] authenticated private balance WebSocket verified")
+        elif need_private_stream:
+            raise RuntimeError("authenticated private balance WebSocket is required but unavailable")
         self.lat = LatencyGuard(self.ex, self.cfg)
         st = await self.lat.preflight()
         self.hub.log("info", f"[{self.id}] REST RTT p50={st['p50']:.0f}ms p95={st['p95']:.0f}ms "
@@ -110,6 +120,8 @@ class ExchangeWorker:
         self.tasks = self.md.start() + [asyncio.create_task(self.lat.loop(self.hub.log))]
         if self.live:
             self.tasks.append(asyncio.create_task(self._balance_loop()))
+        elif self.private_stream_ready:
+            self.tasks.append(asyncio.create_task(self._private_balance_loop()))
 
     async def close(self) -> None:
         for t in self.tasks:
@@ -127,6 +139,15 @@ class ExchangeWorker:
         while True:
             await asyncio.sleep(30)
             await self.refresh_balance()
+
+    async def _private_balance_loop(self) -> None:
+        while True:
+            try:
+                balance = await self.ex.watch_balance()
+                self.free = {k: float(v) for k, v in (balance.get("free") or {}).items() if v}
+            except Exception as exc:
+                self.hub.log("error", f"[{self.id}] private balance stream failed ({type(exc).__name__})")
+                raise
 
     # ---- hot loop ---------------------------------------------------------
     async def run_loop(self) -> None:
