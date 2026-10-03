@@ -4,7 +4,7 @@ import { isValidSymbol, readFiniteNumber, scanBooks } from "../lib/scanner.js";
 
 test("accepts plain spot symbols and rejects URL-like input", () => {
   assert.equal(isValidSymbol("BTCUSDT"), true);
-  assert.equal(isValidSymbol("BTC-USDT"), false);
+  assert.equal(isValidSymbol("BTC-USDT"), false);\n  assert.equal(isValidSymbol("BTCUSDC"), false);
   assert.equal(isValidSymbol("https://example.com"), false);
 });
 
