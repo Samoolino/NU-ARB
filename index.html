@@ -54,14 +54,85 @@
       const card = $(venue+"Card");
       const dot = card.querySelector(".venue-status .dot");
       const label = card.querySelector(".venue-status span");
-      if (!book){dot.className="dot error";label.textContent="Unavailable";$(venue+"-bid");card.querySelector('[data-latency="'+venue+'"]').textContent="Snapshot unavailable";}
+      if (!book){dot.className="dot error";label.textContent="Unavailable";card.querySelector('[data-price="'+venue+'-bid"]').textContent="—";card.querySelector('[data-price="'+venue+'-ask"]').textContent="—";card.querySelector('[data-latency="'+venue+'"]').textContent="Snapshot unavailable";}
       else {dot.className="dot on";label.textContent="Public REST live";card.querySelector('[data-price="'+venue+'-bid"]').textContent=currency(book.bestBid,2);card.querySelector('[data-price="'+venue+'-ask"]').textContent=currency(book.bestAsk,2);card.querySelector('[data-latency="'+venue+'"]').textContent="Request latency "+latency+" ms · snapshot received";}
     }
     function renderRows(opportunities){
       const rows=$("rows");
       if (!opportunities.length){rows.innerHTML='<tr><td colspan="8" class="empty">Both venues need a current order book to calculate an opportunity.</td></tr>';return}
-      rows.innerHTML=opportunities.map((o)=>{const positive=o.status==="positive_after_estimated_fees";const state=positive?"Positive estimate":"No net edge";
-        return '<tr><td>'+o.buyVenue+'</td><td>'+o.sellVenue+'</td><td>'+currency(o.quantityBase,6)+'</td><td>'+currency(o.buyVwap,2)+'</td><td>'+currency(o.sellVwap,2)+'</td><td>$'+currency(o.estimatedFeesUsd,4)+'</td><td class="'+(positive?"positive":"negative")+'">$'+(o.netPnlUsd>=0?"+":"")+currency(o.netPnlUsd,4)+' <small>('+currency(o.netReturnBps,2)+' bps)</small></td><td><span class="status-pill '+(positive?"":"neutral")+'">'+state+'</span></td></tr>';
+      rows.innerHTML=opportunities.map((o)=>{const complete=Number.isFinite(o.netPnlUsd);const positive=o.status==="positive_after_estimated_fees";const state=o.status==="insufficient_depth"?"Insufficient depth":positive?"Positive estimate":"No net edge";
+        const pnl=complete?'
+      }).join("");
+    }
+    async function scan(event){
+      event?.preventDefault();
+      $("error").classList.remove("show");$("error").textContent="";
+      $("globalStatus").textContent="Fetching public snapshots…";$("globalDot").className="dot";
+      $("scan").disabled=true;$("scan").textContent="Scanning…";
+      const params=new URLSearchParams({symbol:$("symbol").value.trim().toUpperCase(),size:$("size").value,binanceFeeBps:feeInput("binanceFee"),bybitFeeBps:feeInput("bybitFee")});
+      try{
+        const response=await fetch("/api/scan?"+params.toString(),{headers:{accept:"application/json"},cache:"no-store"});
+        const data=await response.json();
+        if(!response.ok) throw new Error(data.error||"Scan request failed.");
+        for(const venue of ["binance","bybit"]){
+          const status=data.venues.find((v)=>v.id===venue);
+          const latency=status?.latencyMs;
+          setVenue(venue,data.books[venue],latency);
+        }
+        renderRows(data.opportunities||[]);
+        const available=data.venues.filter((v)=>v.status==="live").length;
+        $("globalDot").className="dot "+(available===2?"on":"error");
+        $("globalStatus").textContent=available===2?"Public APIs responding":"Partial public data";
+        $("updatedAt").textContent="Snapshot · "+new Date(data.observedAt).toLocaleTimeString();
+        const failed=data.venues.filter((v)=>v.status!=="live");
+        if(failed.length){$("error").textContent=failed.map((v)=>v.name+": "+v.error).join(" · ");$("error").classList.add("show")}
+      }catch(error){
+        $("globalDot").className="dot error";$("globalStatus").textContent="Request failed";$("error").textContent=error.message||"Could not retrieve public market data.";$("error").classList.add("show");
+      }finally{$("scan").disabled=false;$("scan").textContent="Scan market"}
+    }
+    function setupTimer(){if(timer)clearInterval(timer);timer=$("auto").checked?setInterval(()=>scan(),15000):null}
+    $("controls").addEventListener("submit",scan);$("refresh").addEventListener("click",scan);$("auto").addEventListener("change",setupTimer);
+    scan();setupTimer();
+  </script>
+</body>
+</html>
++(o.netPnlUsd>=0?"+":"")+currency(o.netPnlUsd,4)+' <small>('+currency(o.netReturnBps,2)+' bps)</small>':'—';
+        return '<tr><td>'+o.buyVenue+'</td><td>'+o.sellVenue+'</td><td>'+currency(o.quantityBase,6)+'</td><td>'+currency(o.buyVwap,2)+'</td><td>'+currency(o.sellVwap,2)+'</td><td>'+(complete?'
+      }).join("");
+    }
+    async function scan(event){
+      event?.preventDefault();
+      $("error").classList.remove("show");$("error").textContent="";
+      $("globalStatus").textContent="Fetching public snapshots…";$("globalDot").className="dot";
+      $("scan").disabled=true;$("scan").textContent="Scanning…";
+      const params=new URLSearchParams({symbol:$("symbol").value.trim().toUpperCase(),size:$("size").value,binanceFeeBps:feeInput("binanceFee"),bybitFeeBps:feeInput("bybitFee")});
+      try{
+        const response=await fetch("/api/scan?"+params.toString(),{headers:{accept:"application/json"},cache:"no-store"});
+        const data=await response.json();
+        if(!response.ok) throw new Error(data.error||"Scan request failed.");
+        for(const venue of ["binance","bybit"]){
+          const status=data.venues.find((v)=>v.id===venue);
+          const latency=status?.latencyMs;
+          setVenue(venue,data.books[venue],latency);
+        }
+        renderRows(data.opportunities||[]);
+        const available=data.venues.filter((v)=>v.status==="live").length;
+        $("globalDot").className="dot "+(available===2?"on":"error");
+        $("globalStatus").textContent=available===2?"Public APIs responding":"Partial public data";
+        $("updatedAt").textContent="Snapshot · "+new Date(data.observedAt).toLocaleTimeString();
+        const failed=data.venues.filter((v)=>v.status!=="live");
+        if(failed.length){$("error").textContent=failed.map((v)=>v.name+": "+v.error).join(" · ");$("error").classList.add("show")}
+      }catch(error){
+        $("globalDot").className="dot error";$("globalStatus").textContent="Request failed";$("error").textContent=error.message||"Could not retrieve public market data.";$("error").classList.add("show");
+      }finally{$("scan").disabled=false;$("scan").textContent="Scan market"}
+    }
+    function setupTimer(){if(timer)clearInterval(timer);timer=$("auto").checked?setInterval(()=>scan(),15000):null}
+    $("controls").addEventListener("submit",scan);$("refresh").addEventListener("click",scan);$("auto").addEventListener("change",setupTimer);
+    scan();setupTimer();
+  </script>
+</body>
+</html>
++currency(o.estimatedFeesUsd,4):'—')+'</td><td class="'+(positive?"positive":"negative")+'">'+pnl+'</td><td><span class="status-pill '+(positive?"":"neutral")+'">'+state+'</span></td></tr>';
       }).join("");
     }
     async function scan(event){
