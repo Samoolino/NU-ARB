@@ -22,8 +22,8 @@ From the repository root, create and activate a virtual environment, install the
 
 ```powershell
 py -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
-python -m pip install -r arb_bot\\requirements.txt
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r arb_bot\requirements.txt
 Set-Location arb_bot
 python run.py selftest
 ```
