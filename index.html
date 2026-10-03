@@ -47,52 +47,110 @@
   </main>
   <script type="module">
     const $ = (id) => document.getElementById(id);
-    const currency = (n, digits = 4) => Number.isFinite(n) ? n.toLocaleString(undefined,{minimumFractionDigits:digits,maximumFractionDigits:digits}) : "—";
-    let timer = null;\n    let scanning = false;
-    function feeInput(id){return $(id).value}
-    function setVenue(venue, book, latency){
-      const card = $(venue+"Card");
+    const currency = (n, digits = 4) => Number.isFinite(n) ? n.toLocaleString(undefined, {minimumFractionDigits: digits, maximumFractionDigits: digits}) : "—";
+    let timer = null;
+    let scanning = false;
+
+    function setVenue(venue, book, latency) {
+      const card = $(venue + "Card");
       const dot = card.querySelector(".venue-status .dot");
       const label = card.querySelector(".venue-status span");
-      if (!book){dot.className="dot error";label.textContent="Unavailable";card.querySelector('[data-price="'+venue+'-bid"]').textContent="—";card.querySelector('[data-price="'+venue+'-ask"]').textContent="—";card.querySelector('[data-latency="'+venue+'"]').textContent="Snapshot unavailable";}
-      else {dot.className="dot on";label.textContent="Public REST live";card.querySelector('[data-price="'+venue+'-bid"]').textContent=currency(book.bestBid,2);card.querySelector('[data-price="'+venue+'-ask"]').textContent=currency(book.bestAsk,2);card.querySelector('[data-latency="'+venue+'"]').textContent="Request latency "+latency+" ms · snapshot received";}
+      const bid = card.querySelector('[data-price="' + venue + '-bid"]');
+      const ask = card.querySelector('[data-price="' + venue + '-ask"]');
+      const latencyLabel = card.querySelector('[data-latency="' + venue + '"]');
+      if (!book) {
+        dot.className = "dot error";
+        label.textContent = "Unavailable";
+        bid.textContent = "—";
+        ask.textContent = "—";
+        latencyLabel.textContent = "Snapshot unavailable";
+        return;
+      }
+      dot.className = "dot on";
+      label.textContent = "Public REST live";
+      bid.textContent = currency(book.bestBid, 2);
+      ask.textContent = currency(book.bestAsk, 2);
+      latencyLabel.textContent = "Request latency " + latency + " ms · snapshot received";
     }
-    function renderRows(opportunities){
-      const rows=$("rows");
-      if (!opportunities.length){rows.innerHTML='<tr><td colspan="8" class="empty">Both venues need a current order book to calculate an opportunity.</td></tr>';return}
-      rows.innerHTML=opportunities.map((o)=>{const complete=Number.isFinite(o.netPnlUsd);const positive=o.status==="positive_after_estimated_fees";const state=o.status==="insufficient_depth"?"Insufficient depth":positive?"Positive estimate":"No net edge";
-        const pnl=complete?'
+
+    function renderRows(opportunities) {
+      const rows = $("rows");
+      if (!opportunities.length) {
+        rows.innerHTML = '<tr><td colspan="8" class="empty">Both venues need a current order book to calculate an opportunity.</td></tr>';
+        return;
+      }
+      rows.innerHTML = opportunities.map((o) => {
+        const complete = Number.isFinite(o.netPnlUsd);
+        const positive = o.status === "positive_after_estimated_fees";
+        const state = o.status === "insufficient_depth" ? "Insufficient depth" : positive ? "Positive estimate" : "No net edge";
+        const pnl = complete ? "$" + (o.netPnlUsd >= 0 ? "+" : "") + currency(o.netPnlUsd, 4) + " <small>(" + currency(o.netReturnBps, 2) + " bps)</small>" : "—";
+        const fees = complete ? "$" + currency(o.estimatedFeesUsd, 4) : "—";
+        return '<tr><td>' + o.buyVenue + '</td><td>' + o.sellVenue + '</td><td>' + currency(o.quantityBase, 6) + '</td><td>' + currency(o.buyVwap, 2) + '</td><td>' + currency(o.sellVwap, 2) + '</td><td>' + fees + '</td><td class="' + (positive ? "positive" : "negative") + '">' + pnl + '</td><td><span class="status-pill ' + (positive ? "" : "neutral") + '">' + state + '</span></td></tr>';
       }).join("");
     }
-    async function scan(event){
+
+    async function scan(event) {
       event?.preventDefault();
-      $("error").classList.remove("show");$("error").textContent="";
-      $("globalStatus").textContent="Fetching public snapshots…";$("globalDot").className="dot";
-      $("scan").disabled=true;$("scan").textContent="Scanning…";
-      const params=new URLSearchParams({symbol:$("symbol").value.trim().toUpperCase(),size:$("size").value,binanceFeeBps:feeInput("binanceFee"),bybitFeeBps:feeInput("bybitFee")});
-      try{
-        const response=await fetch("/api/scan?"+params.toString(),{headers:{accept:"application/json"},cache:"no-store"});
-        const data=await response.json();
-        if(!response.ok) throw new Error(data.error||"Scan request failed.");
-        for(const venue of ["binance","bybit"]){
-          const status=data.venues.find((v)=>v.id===venue);
-          const latency=status?.latencyMs;
-          setVenue(venue,data.books[venue],latency);
+      if (scanning) return;
+      scanning = true;
+      $("error").classList.remove("show");
+      $("error").textContent = "";
+      $("globalStatus").textContent = "Fetching public snapshots…";
+      $("globalDot").className = "dot";
+      $("scan").disabled = true;
+      $("scan").textContent = "Scanning…";
+      const params = new URLSearchParams({
+        symbol: $("symbol").value.trim().toUpperCase(),
+        size: $("size").value,
+        binanceFeeBps: $("binanceFee").value,
+        bybitFeeBps: $("bybitFee").value
+      });
+
+      try {
+        const response = await fetch("/api/scan?" + params.toString(), {
+          headers: {accept: "application/json"},
+          cache: "no-store"
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Scan request failed.");
+        for (const venue of ["binance", "bybit"]) {
+          const status = data.venues.find((item) => item.id === venue);
+          setVenue(venue, data.books[venue], status?.latencyMs);
         }
-        renderRows(data.opportunities||[]);
-        const available=data.venues.filter((v)=>v.status==="live").length;
-        $("globalDot").className="dot "+(available===2?"on":"error");
-        $("globalStatus").textContent=available===2?"Public APIs responding":"Partial public data";
-        $("updatedAt").textContent="Snapshot · "+new Date(data.observedAt).toLocaleTimeString();
-        const failed=data.venues.filter((v)=>v.status!=="live");
-        if(failed.length){$("error").textContent=failed.map((v)=>v.name+": "+v.error).join(" · ");$("error").classList.add("show")}
-      }catch(error){
-        $("globalDot").className="dot error";$("globalStatus").textContent="Request failed";$("error").textContent=error.message||"Could not retrieve public market data.";$("error").classList.add("show");
-      }finally{scanning=false;$("scan").disabled=false;$("scan").textContent="Scan market"}
+        renderRows(data.opportunities || []);
+        const available = data.venues.filter((item) => item.status === "live").length;
+        $("globalDot").className = "dot " + (available === 2 ? "on" : "error");
+        $("globalStatus").textContent = available === 2 ? "Public APIs responding" : "Partial public data";
+        $("updatedAt").textContent = "Snapshot · " + new Date(data.observedAt).toLocaleTimeString();
+        const failed = data.venues.filter((item) => item.status !== "live");
+        if (failed.length) {
+          $("error").textContent = failed.map((item) => item.name + ": " + item.error).join(" · ");
+          $("error").classList.add("show");
+        }
+      } catch (error) {
+        for (const venue of ["binance", "bybit"]) setVenue(venue, null);
+        renderRows([]);
+        $("updatedAt").textContent = "No current snapshot";
+        $("globalDot").className = "dot error";
+        $("globalStatus").textContent = "Request failed";
+        $("error").textContent = error.message || "Could not retrieve public market data.";
+        $("error").classList.add("show");
+      } finally {
+        scanning = false;
+        $("scan").disabled = false;
+        $("scan").textContent = "Scan market";
+      }
     }
-    function setupTimer(){if(timer)clearInterval(timer);timer=$("auto").checked?setInterval(()=>scan(),15000):null}
-    $("controls").addEventListener("submit",scan);$("refresh").addEventListener("click",scan);$("auto").addEventListener("change",setupTimer);
-    scan();setupTimer();
+
+    function setupTimer() {
+      if (timer) clearInterval(timer);
+      timer = $("auto").checked ? setInterval(() => scan(), 15000) : null;
+    }
+    $("controls").addEventListener("submit", scan);
+    $("refresh").addEventListener("click", scan);
+    $("auto").addEventListener("change", setupTimer);
+    scan();
+    setupTimer();
   </script>
 </body>
 </html>
