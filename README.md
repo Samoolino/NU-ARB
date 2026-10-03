@@ -2,6 +2,10 @@
 
 ARBX is a Python spot-arbitrage bot for triangular and cross-exchange strategies. The application source is in [`arb_bot/`](arb_bot/), and the operating guide is in [`ARBX_README.md`](ARBX_README.md).
 
+## Workspace engineering agent
+
+The repository includes the **Enter** NU-ARB/ARBX engineering agent at [`.github/agents/Enter.agent.md`](.github/agents/Enter.agent.md). VS Code discovers workspace custom agents from `.github/agents`; select **Enter** in the chat agent picker for implementation, investigation, and verification tasks in this repository. Its instructions require preserving existing risk controls, using evidence-based exchange support claims, protecting credentials, and reporting only checks that actually ran. It does not authorize live orders or enable live trading.
+
 ## Vercel web dashboard
 
 The repository root includes a Vercel dashboard for public, read-only spot order-book scans. Choose two venues, a USDT-quoted symbol, a quote-currency notional, and estimated taker fees. The serverless API loads market metadata through CCXT, requests each selected order book, walks the visible depth, and estimates both buy/sell directions after the entered fee rates.
