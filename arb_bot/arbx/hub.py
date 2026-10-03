@@ -241,6 +241,17 @@ class Hub:
                 for t in tasks:
                     if t.done() and not t.cancelled() and t.exception():
                         self.risk.halt(f"worker crashed: {t.exception()!r}")
+                for worker in ok:
+                    health = worker.health_snapshot()
+                    if health["verifiedStreamRequired"] and health["privateWebSocket"]["state"] != "LIVE":
+                        self.risk.halt(f"[{worker.id}] authenticated private balance stream became stale or disconnected")
+                        break
+                    if self.cfg.mode == "live" and health["publicWebSocket"]["state"] != "LIVE":
+                        self.risk.halt(f"[{worker.id}] public market-data WebSocket became stale or disconnected")
+                        break
+                    if self.cfg.mode == "live" and health["restLatencyMs"]["p95"] > self.cfg.pause_rtt_ms:
+                        self.risk.halt(f"[{worker.id}] live latency exceeded the configured pause threshold")
+                        break
                 self._push()
                 await asyncio.sleep(0.5)
             if self.risk.halted:
