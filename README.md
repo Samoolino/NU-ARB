@@ -14,6 +14,8 @@ The account panel creates accounts and verifies saved exchange credentials using
 
 ### Enable the account panel
 
+See [the exchange support matrix](EXCHANGE_SUPPORT.md) for the credential fields, verification evidence, and venue-specific live-trading limits. Adapter availability and successful authentication are checked at runtime; a venue name in the picker is not a completed integration.
+
 Railway runs the durable Python control service separately from Vercel. The root `railway.json` selects `Dockerfile.control`, configures the `/healthz` health check, and retries failed service starts. Connect the repository to a Railway service with the service root set to the repository root so the Dockerfile can copy `arb_bot/` files. Attach a persistent volume mounted at `/data`, generate a Railway HTTPS domain, and keep one replica while the service uses SQLite.
 
 Set these Railway service variables:

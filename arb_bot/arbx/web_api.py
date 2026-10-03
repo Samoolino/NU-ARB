@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import queue
+import re
 import secrets
 import sqlite3
 import time
@@ -26,6 +27,7 @@ from arbx.permissions import inspect_permissions
 APP_DB = Path(os.getenv("ARBX_APP_DB", "arbx_app.sqlite3"))
 SESSION_COOKIE = "arbx_session"
 SESSION_TTL = 60 * 60 * 24 * 7
+VERIFICATION_TTL_SECONDS = 5 * 60
 VENUES = {
     "binance": "Binance", "bybit": "Bybit", "okx": "OKX", "kucoin": "KuCoin", "gateio": "Gate.io",
     "mexc": "MEXC", "htx": "HTX", "lbank": "LBank", "bitget": "Bitget", "kraken": "Kraken",
@@ -52,6 +54,7 @@ AUTH_SCHEMAS["binance"] = {"modes": [
     {"id": "ed25519", "label": "Ed25519 key pair", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "privateKey", "label": "Ed25519 private key"}]},
 ]}
 PYTHON_ADAPTERS = {"gateio": "gate"}
+PERMISSION_VERIFICATION_VENUES = {"binance"}
 app = FastAPI(title="ARBX Control API", version="1.0.0")
 engine_owner_id: str | None = None
 engine_hub = None
@@ -226,16 +229,32 @@ def _make_exchange(exchange_id: str, auth_mode: str, credentials: dict[str, str]
         raise HTTPException(501, "This venue has no CCXT Pro adapter in the installed runtime")
     config = dict(credentials)
     if exchange_id == "binance" and auth_mode in ("rsa", "ed25519"):
-        config["secret"] = config.pop("privateKey")
+        # CCXT's RSA/Ed25519 signing helpers consume PEM material as bytes.
+        config["secret"] = config.pop("privateKey").encode("utf-8")
     return cls({**config, "enableRateLimit": True, "timeout": 10000,
                 "options": {"defaultType": "spot"}})
+
+
+def _safe_exchange_error(exc: Exception, exchange) -> str:
+    """Keep useful venue diagnostics while removing keys, signatures, and private material."""
+    message = str(exc)[:1000]
+    for value in (getattr(exchange, "apiKey", None), getattr(exchange, "secret", None),
+                  getattr(exchange, "password", None)):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="ignore")
+        if isinstance(value, str) and value:
+            message = message.replace(value, "[REDACTED]")
+    message = re.sub(r"(?i)(api[-_]?key|signature|sign|passphrase|secret)=([^&\s]+)", r"\1=[REDACTED]", message)
+    message = re.sub(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", "[REDACTED PRIVATE KEY]", message, flags=re.S)
+    return f"{type(exc).__name__}: {message}"[:1200]
 
 
 async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict, dict | None, dict | None]:
     evidence = {"rest": False, "authentication": False, "account": False, "balances": False,
                 "publicWebSocket": False, "privateWebSocket": False,
                 "tradePermission": "unverified", "withdrawalsDisabled": "unverified",
-                "scannerEligible": False, "liveEligible": False}
+                "scannerEligible": False, "liveEligible": False,
+                "connectionState": "VERIFYING", "verificationStartedAt": datetime.now(timezone.utc).isoformat()}
     balance_summary = None
     book_summary = None
     market_ok = False
@@ -260,7 +279,7 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
                            for asset in (balance.get("total") or {})
                            if float((balance.get("total") or {}).get(asset) or 0) > 0}
     except Exception as exc:
-        evidence["accountError"] = type(exc).__name__
+        evidence["accountError"] = _safe_exchange_error(exc, exchange)
 
     if evidence["authentication"] and exchange.has.get("watchBalance") is True:
         try:
@@ -271,7 +290,7 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
             else:
                 evidence["privateWebSocketError"] = "No unified balance snapshot received"
         except Exception as exc:
-            evidence["privateWebSocketError"] = type(exc).__name__
+            evidence["privateWebSocketError"] = _safe_exchange_error(exc, exchange)
     elif evidence["authentication"]:
         evidence["privateWebSocketError"] = "Adapter does not advertise watchBalance support"
 
@@ -282,7 +301,7 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
             evidence["tradePermission"] = permission.get("tradePermission", "unverified")
             evidence["withdrawalsDisabled"] = permission.get("withdrawalsDisabled", "unverified")
         except Exception as exc:
-            evidence["permissionError"] = type(exc).__name__
+            evidence["permissionError"] = _safe_exchange_error(exc, exchange)
             evidence["permissions"] = {"liveEligible": False}
 
     if market_ok and exchange.has.get("watchOrderBook") is True:
@@ -296,13 +315,36 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
                                 "sequence": book.get("nonce")}
                 evidence["orderBook"] = book_summary
         except Exception as exc:
-            evidence["publicWebSocketError"] = type(exc).__name__
+            evidence["publicWebSocketError"] = _safe_exchange_error(exc, exchange)
 
-    evidence["scannerEligible"] = bool(evidence["authentication"] and evidence["balances"]
+    evidence["scannerEligible"] = bool(evidence["rest"] and evidence["authentication"] and evidence["account"]
+                                        and evidence["balances"]
                                         and evidence["privateWebSocket"] and evidence["publicWebSocket"])
     evidence["liveEligible"] = bool(evidence["scannerEligible"]
                                      and (evidence.get("permissions") or {}).get("liveEligible") is True)
+    if evidence["scannerEligible"]:
+        evidence["connectionState"] = "FULLY_VERIFIED"
+    elif evidence["authentication"] and evidence["account"] and evidence["balances"]:
+        evidence["connectionState"] = "ACCOUNT_DATA_CONNECTED"
+    elif evidence["authentication"]:
+        evidence["connectionState"] = "AUTHENTICATED"
+    elif evidence["publicWebSocket"]:
+        evidence["connectionState"] = "MARKET_DATA_CONNECTED"
+    else:
+        evidence["connectionState"] = "FAILED"
+    evidence["verifiedAt"] = datetime.now(timezone.utc).isoformat()
     return evidence, balance_summary, book_summary
+
+
+def _verification_is_fresh(verified_at: str | None, *, now: float | None = None) -> bool:
+    if not verified_at:
+        return False
+    try:
+        verified = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+        age = (time.time() if now is None else now) - verified.timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return 0 <= age <= VERIFICATION_TTL_SECONDS
 
 
 def _new_session(db, user_id: str, response: Response):
@@ -428,16 +470,58 @@ async def exchanges(request: Request):
             schema = AUTH_SCHEMAS[exchange_id]["modes"]
             row = rows.get(exchange_id)
             saved = json.loads(row["verification_json"]) if row else {}
+            fresh = bool(row and _verification_is_fresh(row["last_verified"]))
+            saved_evidence = saved.get("evidence", {})
+            saved_state = row["state"] if row else "NOT_CONFIGURED"
+            if row and not fresh and saved_state not in ("NOT_CONFIGURED", "FAILED", "DISABLED"):
+                saved_state = "STALE"
             result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
-                           "authenticationModes": schema, "state": row["state"] if row else "NOT_CONFIGURED",
+                           "authenticationModes": schema, "state": saved_state,
+                           "permissionVerificationAvailable": exchange_id in PERMISSION_VERIFICATION_VENUES,
+                           "liveTradingAvailable": exchange_id in PERMISSION_VERIFICATION_VENUES,
                            "lastVerified": row["last_verified"] if row else None,
-                           "evidence": saved.get("evidence", {}), "balances": saved.get("balances"),
+                           "verificationFresh": fresh,
+                           "evidence": saved_evidence, "balances": saved.get("balances"),
                            "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
-                           "scannerEligible": bool(saved.get("evidence", {}).get("scannerEligible")),
-                           "liveEligible": bool(saved.get("evidence", {}).get("liveEligible")),
-                           "executionEnabled": bool(saved.get("evidence", {}).get("liveEligible"))
+                           "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
+                           "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
+                           "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
                                and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
         return {"exchanges": result}
+    finally:
+        db.close()
+
+
+@app.get("/api/v1/capital-sources", dependencies=[Depends(_proxy_auth)])
+def capital_sources(request: Request):
+    """Return only fresh, authenticated balance snapshots; this endpoint never moves funds."""
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+        rows = db.execute(
+            "SELECT exchange_id,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
+            (uid,),
+        ).fetchall()
+        sources = []
+        for row in rows:
+            if not _verification_is_fresh(row["last_verified"]):
+                continue
+            saved = json.loads(row["verification_json"])
+            evidence = saved.get("evidence", {})
+            if not evidence.get("scannerEligible"):
+                continue
+            for asset, amounts in (saved.get("balances") or {}).items():
+                free = float(amounts.get("free") or 0)
+                used = float(amounts.get("used") or 0)
+                if free <= 0 and used <= 0:
+                    continue
+                sources.append({
+                    "exchangeId": row["exchange_id"], "exchange": VENUES.get(row["exchange_id"], row["exchange_id"]),
+                    "asset": asset, "available": free, "reserved": used, "usable": free,
+                    "valuationUsd": None, "valuationNote": "No external FX valuation is applied",
+                    "lastVerified": row["last_verified"],
+                })
+        return {"sources": sources, "fundsMoved": False}
     finally:
         db.close()
 
@@ -473,8 +557,8 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
             except Exception: pass
         live_eligible = evidence["liveEligible"]
         scanner_eligible = evidence["scannerEligible"]
-        state = "FULLY_VERIFIED" if live_eligible else "ACCOUNT_DATA_CONNECTED" if evidence["authentication"] else "FAILED"
-        verified_at = datetime.now(timezone.utc).isoformat() if evidence["authentication"] else None
+        state = evidence["connectionState"]
+        verified_at = evidence["verifiedAt"]
         key_preview = payload.credentials.get("apiKey", "")
         masked = f"{key_preview[:3]}••••{key_preview[-3:]}" if len(key_preview) >= 7 else "••••"
         encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
@@ -527,8 +611,40 @@ def engine_state(request: Request):
             "executionEnabled": engine_hub.cfg.mode == "live" and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
 
 
+@app.get("/api/v1/engine/journal", dependencies=[Depends(_proxy_auth)])
+def engine_journal(request: Request):
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+    finally:
+        db.close()
+    journal_path = APP_DB.parent / f"engine_{uid}.sqlite3"
+    if not journal_path.exists():
+        return {"trades": [], "realizedNetPnl": 0.0, "scope": "all durable engine sessions"}
+    journal_db = sqlite3.connect(f"file:{journal_path.as_posix()}?mode=ro", uri=True, timeout=5)
+    journal_db.row_factory = sqlite3.Row
+    try:
+        total = journal_db.execute(
+            "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE execution_status='FILLED'"
+        ).fetchone()[0]
+        records = journal_db.execute(
+            "SELECT id,session_id,timestamp,mode,exchange_a,exchange_b,strategy,path,symbols,"
+            "requested_quantity,executed_quantity,average_fill_price,fees,gross_pnl,slippage,net_pnl,"
+            "latency_ms,book_age_ms,execution_status,verification_status,risk_decision,failure_reason,"
+            "target_before,target_after,cumulative_realized_pnl FROM trades ORDER BY id DESC LIMIT 100"
+        ).fetchall()
+        return {"trades": [dict(record) for record in records], "realizedNetPnl": float(total),
+                "scope": "all durable engine sessions"}
+    except sqlite3.OperationalError:
+        return {"trades": [], "realizedNetPnl": 0.0, "scope": "all durable engine sessions"}
+    finally:
+        journal_db.close()
+
+
 @app.post("/api/v1/engine/start", dependencies=[Depends(_proxy_auth)])
 async def engine_start(payload: EngineStart, request: Request):
+    if not payload.require_private_stream:
+        raise HTTPException(422, "The authenticated engine requires a verified private balance stream in both paper and live modes")
     if payload.mode == "live":
         if os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") != "1":
             raise HTTPException(503, "Live execution is disabled by the control-service operator")
@@ -551,11 +667,7 @@ async def engine_start(payload: EngineStart, request: Request):
             for exchange_id in payload.exchange_ids:
                 row = rows.get(exchange_id)
                 if row is None:
-                    if payload.mode == "live" or payload.require_private_stream:
-                        raise HTTPException(409, f"Verify {VENUES[exchange_id]} before starting an authenticated scan or live mode")
-                    credentials_by_id[exchange_id] = {}
-                    auth_modes[exchange_id] = "ccxt"
-                    continue
+                    raise HTTPException(409, f"Verify {VENUES[exchange_id]} before starting an authenticated scan or live mode")
                 try:
                     credentials_by_id[exchange_id] = json.loads(_decrypt(row["encrypted_credentials"]).decode())
                 except Exception as exc:
@@ -575,7 +687,7 @@ async def engine_start(payload: EngineStart, request: Request):
                 exchange_cfgs.append(ExchangeCfg(id=adapter_id, api_key=credentials.get("apiKey", ""),
                                                  secret=credentials.get("secret", ""),
                                                  password=credentials.get("password", ""),
-                                                 require_private_stream=(payload.mode == "live" or payload.require_private_stream)))
+                                                 require_private_stream=True, auth_mode=auth_modes[exchange_id]))
             cfg = Config(mode=payload.mode, exchanges=exchange_cfgs, trade_size_usd=payload.trade_size_usd,
                          max_loss_usd=payload.max_loss_usd, target_profit_usd=payload.target_profit_usd,
                          cross_enabled=payload.mode == "paper", cross_live=False,
