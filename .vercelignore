@@ -1,0 +1,6 @@
+# The Python engine and its dependencies run on the persistent control service.
+arb_bot/
+tests/
+Dockerfile.control
+.env.control.example
+ARBX_README.md
