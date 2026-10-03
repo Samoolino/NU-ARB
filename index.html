@@ -48,7 +48,7 @@
   <script type="module">
     const $ = (id) => document.getElementById(id);
     const currency = (n, digits = 4) => Number.isFinite(n) ? n.toLocaleString(undefined,{minimumFractionDigits:digits,maximumFractionDigits:digits}) : "—";
-    let timer = null;
+    let timer = null;\n    let scanning = false;
     function feeInput(id){return $(id).value}
     function setVenue(venue, book, latency){
       const card = $(venue+"Card");
@@ -88,7 +88,7 @@
         if(failed.length){$("error").textContent=failed.map((v)=>v.name+": "+v.error).join(" · ");$("error").classList.add("show")}
       }catch(error){
         $("globalDot").className="dot error";$("globalStatus").textContent="Request failed";$("error").textContent=error.message||"Could not retrieve public market data.";$("error").classList.add("show");
-      }finally{$("scan").disabled=false;$("scan").textContent="Scan market"}
+      }finally{scanning=false;$("scan").disabled=false;$("scan").textContent="Scan market"}
     }
     function setupTimer(){if(timer)clearInterval(timer);timer=$("auto").checked?setInterval(()=>scan(),15000):null}
     $("controls").addEventListener("submit",scan);$("refresh").addEventListener("click",scan);$("auto").addEventListener("change",setupTimer);
