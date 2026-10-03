@@ -132,7 +132,7 @@
         const positive = o.status === "positive_after_estimated_fees";
         const state = o.status === "insufficient_depth" ? "Insufficient depth" : positive ? "Positive estimate" : "No net edge";
         const pnl = complete ? (o.netPnlUsdt >= 0 ? "+" : "") + currency(o.netPnlUsdt, 4) + " USDT" + " <small>(" + currency(o.netReturnBps, 2) + " bps)</small>" : "—";
-        const fees = complete ? currency(o.estimatedFeesUsd, 4) + " USDT" : "—";
+        const fees = complete ? currency(o.estimatedFeesUsdt, 4) + " USDT" : "—";
         return '<tr><td>' + venueNames[o.buyVenue] + '</td><td>' + venueNames[o.sellVenue] + '</td><td>' + currency(o.quantityBase, 6) + '</td><td>' + currency(o.buyVwap, 2) + '</td><td>' + currency(o.sellVwap, 2) + '</td><td>' + fees + '</td><td class="' + (positive ? "positive" : "negative") + '">' + pnl + '</td><td><span class="status-pill ' + (positive ? "" : "neutral") + '">' + state + '</span></td></tr>';
       }).join("");
     }
@@ -247,7 +247,7 @@
   </script>
 </body>
 </html>
-+currency(o.estimatedFeesUsd,4):'—')+'</td><td class="'+(positive?"positive":"negative")+'">'+pnl+'</td><td><span class="status-pill '+(positive?"":"neutral")+'">'+state+'</span></td></tr>';
++currency(o.estimatedFeesUsdt,4):'—')+'</td><td class="'+(positive?"positive":"negative")+'">'+pnl+'</td><td><span class="status-pill '+(positive?"":"neutral")+'">'+state+'</span></td></tr>';
       }).join("");
     }
     async function scan(event){
