@@ -7,6 +7,7 @@ from pathlib import Path
 from arbx.util import STABLES
 
 CCXT_ADAPTERS = {"gateio": "gate"}
+MAX_EXCHANGES = 18
 
 
 @dataclass
@@ -32,12 +33,12 @@ class Config:
     target_profit_usd: float | None = None       # session-wide realized net PnL target; stops new orders at attainment
     target_equity_usd: float | None = None                # halt (never withdraw) when reached
 
-    # ---- Profit/No-Loss gate ------------------------------------------------
+    # ---- Modeled profit-floor gate ------------------------------------------
     min_net_bps: float = 3.0          # expected edge after fees (VWAP over depth)
-    min_worst_bps: float = 0.5        # edge if EVERY leg fills at its limit price (hard guarantee)
+    min_worst_bps: float = 0.5        # modeled edge if every leg fills at its IOC limit
     limit_tol_bps: float = 1.0        # IOC limit = marginal price +/- this tolerance
-    min_profit_usd: float = 0.01      # guaranteed profit floor per trade
-    verify_slack_bps: float = 1.0     # post-trade: realized may miss guarantee by at most this
+    min_profit_usd: float = 0.01      # modeled net floor per trade
+    verify_slack_bps: float = 1.0     # halt tolerance when realized result misses modeled floor
 
     # ---- Latency / speed ----------------------------------------------------
     max_book_age_ms: float = 250.0    # local receive-time freshness
@@ -102,8 +103,8 @@ class Config:
         if not self.exchanges:
             raise ValueError("no exchanges configured (BOT_EXCHANGES)")
         venue_ids = [x.venue_id or x.id for x in self.exchanges]
-        if len(self.exchanges) > 4 or len(set(venue_ids)) != len(venue_ids):
-            raise ValueError("configure between one and four unique exchange venues")
+        if len(self.exchanges) > MAX_EXCHANGES or len(set(venue_ids)) != len(venue_ids):
+            raise ValueError(f"configure between one and {MAX_EXCHANGES} unique exchange venues")
         if self.target_profit_usd is not None and self.target_profit_usd <= 0:
             raise ValueError("BOT_TARGET_PROFIT_USD must be greater than zero")
         if self.max_loss_usd <= 0 or (self.mode == "live" and self.max_loss_usd > 3.0):

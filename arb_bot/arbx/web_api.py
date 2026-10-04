@@ -21,9 +21,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from arbx.config import CCXT_ADAPTERS
+from arbx.config import CCXT_ADAPTERS, MAX_EXCHANGES
 from arbx.market import orderbook_limit
-from arbx.permissions import inspect_permissions
+from arbx.permissions import (
+    LIVE_PERMISSION_VERIFICATION_VENUES,
+    PERMISSION_PROBE_VENUES,
+    inspect_permissions,
+)
 
 
 APP_DB = Path(os.getenv("ARBX_APP_DB", "arbx_app.sqlite3"))
@@ -56,7 +60,6 @@ AUTH_SCHEMAS["binance"] = {"modes": [
     {"id": "ed25519", "label": "Ed25519 key pair", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "privateKey", "label": "Ed25519 private key"}]},
 ]}
 PYTHON_ADAPTERS = CCXT_ADAPTERS
-PERMISSION_VERIFICATION_VENUES = {"binance"}
 app = FastAPI(title="ARBX Control API", version="1.0.0")
 engine_owner_id: str | None = None
 engine_hub = None
@@ -208,7 +211,7 @@ class ExchangeConnect(BaseModel):
 class EngineStart(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     mode: Literal["paper", "live"]
-    exchange_ids: list[str] = Field(min_length=1, max_length=4)
+    exchange_ids: list[str] = Field(min_length=1, max_length=MAX_EXCHANGES)
     trade_size_usd: float = Field(gt=0, le=25)
     max_loss_usd: float = Field(gt=0, le=3)
     target_profit_usd: float = Field(gt=0, le=1000)
@@ -510,8 +513,8 @@ async def exchanges(request: Request):
                 saved_state = "STALE"
             result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
                            "authenticationModes": schema, "state": saved_state,
-                           "permissionVerificationAvailable": exchange_id in PERMISSION_VERIFICATION_VENUES,
-                           "liveTradingAvailable": exchange_id in PERMISSION_VERIFICATION_VENUES,
+                           "permissionVerificationAvailable": exchange_id in PERMISSION_PROBE_VENUES,
+                           "liveTradingAvailable": exchange_id in LIVE_PERMISSION_VERIFICATION_VENUES,
                            "lastVerified": row["last_verified"] if row else None,
                            "verificationFresh": fresh,
                            "evidence": saved_evidence, "balances": saved.get("balances"),

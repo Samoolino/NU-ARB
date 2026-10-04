@@ -20,6 +20,20 @@ class ControlApiTests(unittest.TestCase):
                                       max_loss_usd=2, target_profit_usd=1, cross_live=True)
         self.assertTrue(payload.cross_live)
 
+    def test_all_registered_venues_can_be_selected_together(self):
+        exchange_ids = list(web_api.VENUES)
+        self.assertEqual(len(exchange_ids), 18)
+        payload = web_api.EngineStart(
+            mode="paper", exchange_ids=exchange_ids, trade_size_usd=5,
+            max_loss_usd=2, target_profit_usd=1,
+        )
+        self.assertEqual(payload.exchange_ids, exchange_ids)
+        with self.assertRaises(ValueError):
+            web_api.EngineStart(
+                mode="paper", exchange_ids=exchange_ids + ["unknown"], trade_size_usd=5,
+                max_loss_usd=2, target_profit_usd=1,
+            )
+
     def setUp(self):
         self.db_path = pathlib.Path(__file__).resolve().parent / ".control-test.sqlite3"
         for suffix in ("", "-wal", "-shm"):

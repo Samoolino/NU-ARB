@@ -134,10 +134,18 @@ def main(argv=None) -> None:
                 print("No qualifying opportunities have been recorded.")
             for row in rows:
                 route = row["exchange_a"] + (f" -> {row['exchange_b']}" if row["exchange_b"] else "")
+                evidence = row["evidence"]
+                rank = evidence.get("priorityRank")
+                rank_text = f"rank={rank} " if rank is not None else ""
+                available = evidence.get("availableQuoteUsd")
+                funds_text = f"quote-free=${available:.4f} " if isinstance(available, (int, float)) else ""
+                utilization = evidence.get("capitalUtilization")
+                utilization_text = f"utilization={utilization:.1%} " if isinstance(utilization, (int, float)) else ""
                 print(f"{row['timestamp']} {row['decision']:<18} {route:<22} {row['symbol']:<20} "
+                      f"{rank_text}size=${row['requested_usd']:.4f} "
                       f"expected=${row['expected_net_usd']:+.4f} "
                       f"worst-case=${row['worst_case_net_usd']:+.4f} "
-                      f"age={row['book_age_ms']:.1f}ms"
+                      f"{funds_text}{utilization_text}age={row['book_age_ms']:.1f}ms"
                       + (f" reason={row['rejection_reason']}" if row["rejection_reason"] else ""))
         finally:
             journal.close()

@@ -1,11 +1,11 @@
-"""The Profit / No-Loss gate. EVERY order path (triangular and cross-exchange) must pass through here.
+"""The modeled-profit gate. EVERY order path (triangular and cross-exchange) must pass through here.
 
-What it guarantees (and what it does not):
+What the modeled floor covers (and what it does not):
   * Each leg is sent as an IOC limit order at a price computed BEFORE sending. If every leg fills, each fill is at
-    or better than its limit, so the cycle result is >= `worst_final` (fees included). The gate refuses any trade
-    whose worst case is below `min_worst_bps` / `min_profit_usd`. That is a deterministic floor for completed cycles.
-  * It CANNOT remove execution risk: a leg can be missed after an earlier leg filled (price moved in between).
-    That case triggers a bounded unwind attempt and halts the bot. Losses are limited, not impossible.
+    or better than its limit, so the modeled cycle result is >= `worst_final` (estimated fees included). The gate refuses
+    candidates whose modeled floor is below `min_worst_bps` / `min_profit_usd`.
+  * It cannot guarantee realized profit: a leg can be missed after an earlier leg fills, cross-venue orders are not
+    atomic, actual fees may differ, and unwind prices can move. Those cases halt for recovery and can lose money.
 """
 from __future__ import annotations
 

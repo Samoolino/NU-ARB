@@ -113,7 +113,7 @@ class LiveExecutor:
 
 
 class CrossExecutor:
-    """Simultaneous IOC limit buy on one exchange and IOC limit sell on another (inventory pre-funded)."""
+    """Simultaneous IOC limit orders using pre-funded inventory; unmatched fills halt for manual review."""
 
     def __init__(self, exchanges: dict):
         self.exs = exchanges
@@ -131,7 +131,7 @@ class CrossExecutor:
         fb, fs = float(rb.get("filled") or 0.0), float(rs.get("filled") or 0.0)
         if fb <= 0 and fs <= 0:
             return TradeResult(0.0, ok=False)
-        if abs(fb - fs) > 0.01 * size:
+        if fb != fs:
             raise LegFailure(f"inventory imbalance: bought {fb} vs sold {fs} {o.symbol} - REBALANCE MANUALLY")
         cost = float(rb.get("cost") or fb * o.limit_buy)
         proceeds = float(rs.get("cost") or fs * o.limit_sell)

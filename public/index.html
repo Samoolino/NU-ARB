@@ -8,13 +8,14 @@
   <title>ARBX | Market Scanner</title>
   <style>
     :root{color-scheme:dark;--bg:#080b0d;--panel:#101619;--panel2:#141c20;--line:#263238;--muted:#8a9a9e;--text:#e9f1ef;--green:#6de0b2;--red:#ff6b78;--amber:#e7bd69;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 75% -15%,#17342b 0,transparent 35%),var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
+    *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:radial-gradient(ellipse at 75% -15%,#17342b 0,transparent 35%),var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
     .shell{max-width:1320px;margin:auto;padding:26px 30px 50px}.top{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:4px 0 22px}.brand{display:flex;align-items:center;gap:12px}.mark{width:38px;height:38px;border:1px solid #39755d;border-radius:11px;display:grid;place-items:center;color:var(--green);font:700 17px var(--mono);background:#0e211a}.brand-name{font-weight:650;letter-spacing:.02em}.brand-sub{font-size:12px;color:var(--muted);margin-top:3px}.live-label{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:99px;padding:8px 12px;color:#c2cecb;font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--green);box-shadow:0 0 12px #6de0b277}.dot.error{background:var(--red)}
     .hero{display:flex;justify-content:space-between;align-items:end;padding:35px 0 24px}.hero h1{font-size:clamp(27px,4vw,38px);letter-spacing:-.04em;margin:0 0 8px}.hero p{margin:0;color:var(--muted);font-size:14px}.stamp{font:12px var(--mono);color:var(--muted)}
     .controls,.panel{background:linear-gradient(145deg,#11191c,#0d1215);border:1px solid var(--line);border-radius:14px}.controls{display:flex;align-items:end;gap:14px;padding:17px;flex-wrap:wrap}.field{display:flex;flex-direction:column;gap:7px;min-width:125px}.field label{font-size:11px;color:#9aa9a8;letter-spacing:.04em}.field input{height:39px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:14px var(--mono);padding:0 11px;outline:none}.field input:focus{border-color:#4e9e7d}.field.small{max-width:145px}.field.exchange{max-width:180px}.field select{height:39px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.field.symbol{max-width:160px}.field.amount{max-width:165px}.fee-group{display:flex;gap:10px}.actions{display:flex;align-items:center;gap:10px;margin-left:auto}.button{height:39px;border-radius:7px;padding:0 15px;font-weight:620;cursor:pointer}.primary{background:var(--green);color:#07100d;border:0}.primary:hover{background:#93edc8}.secondary{background:#172126;color:#dce7e3;border:1px solid #344348}.secondary:hover{background:#202e33}.toggle{color:#9aa9a8;font-size:12px;display:flex;align-items:center;gap:7px}
     .venues{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:16px 0}.panel{padding:17px 19px}.venue-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:17px}.venue-name{display:flex;align-items:center;gap:10px;font-weight:620}.venue-code{font:11px var(--mono);color:var(--muted);border:1px solid var(--line);padding:4px 7px;border-radius:5px}.venue-status{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px}.book{display:grid;grid-template-columns:1fr 1fr;gap:14px}.book label{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px}.price{font:21px var(--mono);letter-spacing:-.05em}.price.ask{color:#e9b982}.price.bid{color:var(--green)}.latency{margin-top:14px;color:#788a8d;font:11px var(--mono)}
     .section-head{display:flex;justify-content:space-between;align-items:center;margin:28px 2px 12px}.section-head h2{margin:0;font-size:15px;font-weight:620}.section-head span{color:var(--muted);font-size:12px}.table-wrap{overflow:auto}.opps{width:100%;border-collapse:collapse;min-width:690px}.opps th{text-align:left;color:#829397;font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:550;padding:11px 14px;border-bottom:1px solid var(--line)}.opps td{padding:14px;border-bottom:1px solid #1c272b;font:13px var(--mono)}.opps tr:last-child td{border:0}.positive{color:var(--green)}.negative{color:#a3adae}.status-pill{font:10px var(--sans);letter-spacing:.02em;border:1px solid #30413a;color:#a9d9c2;background:#13211b;border-radius:99px;padding:5px 8px;white-space:nowrap}.status-pill.neutral{background:#1a1d1f;color:#aab3b4;border-color:#343b3d}.empty{padding:29px 14px;text-align:center;color:var(--muted);font-size:13px}.fineprint{display:flex;gap:10px;align-items:flex-start;color:#829093;font-size:11px;line-height:1.6;margin-top:19px;padding:13px 15px;border-left:2px solid #a47e38;background:#15130e;border-radius:0 8px 8px 0}.fineprint strong{color:#d4b572;font-weight:600}.error-banner{display:none;margin-top:14px;padding:12px 14px;background:#291619;border:1px solid #51252a;color:#ffadb4;border-radius:8px;font-size:12px}.error-banner.show{display:block}.footer{color:#657579;font:11px var(--mono);display:flex;justify-content:space-between;margin-top:30px;padding-top:16px;border-top:1px solid var(--line)}
     .account{margin-top:24px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:620}.account-note,.account-status{color:var(--muted);font-size:12px;line-height:1.6}.account-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0d1316}.account-box h3{font-size:13px;margin:0 0 13px}.account-form{display:grid;gap:10px}.account-form input,.account-form select{height:38px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:11px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px}.balance-list{font:12px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto}.disabled-note{color:var(--amber);font-size:11px;line-height:1.5}
+    .field.selection{flex:1 1 250px;max-width:340px;min-width:220px}.field.selection select{height:auto;min-height:145px;padding:5px 10px}.field.selection option{padding:4px}.field.selection .account-note{margin-top:1px}
     @media(max-width:760px){.shell{padding:18px 15px 35px}.top{padding-bottom:16px}.hero{align-items:start;flex-direction:column;gap:13px;padding:27px 0 19px}.venues{grid-template-columns:1fr}.controls{gap:10px}.field{flex:1 1 42%}.actions{margin:5px 0 0;width:100%}.actions .button{flex:1}.fee-group{flex:1 1 100%}.fee-group .field{max-width:none}.stamp{font-size:10px}.footer{gap:10px;flex-direction:column}.account-grid{grid-template-columns:1fr}}
     .account{margin-top:24px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:620}.account-note,.account-status{color:var(--muted);font-size:12px;line-height:1.6}.account-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0d1316}.account-box h3{font-size:13px;margin:0 0 13px}.account-form{display:grid;gap:10px}.account-form input,.account-form select{height:38px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:11px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px}.balance-list{font:12px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto}.disabled-note{color:var(--amber);font-size:11px;line-height:1.5}
   </style>
@@ -27,63 +28,33 @@
     </header>
     <section class="hero"><div><h1>Market edge, measured.</h1><p>Choose from 18 public spot venues. Depth-aware estimates. No orders sent.</p></div><div class="stamp" id="updatedAt">—</div></section>
     <form class="controls" id="controls">
-      <div class="field symbol"><label for="symbol">SPOT MARKET · USDT</label><input id="symbol" value="BTCUSDT" maxlength="20" pattern="[A-Za-z0-9]{2,16}USDT" autocomplete="off"></div>
-      <div class="field amount"><label for="size">TRADE SIZE · USDT</label><input id="size" type="number" min="10" max="100000" step="10" value="100"></div>
-      <div class="field exchange"><label for="exchangeA">BUY / SELL VENUE A</label><select id="exchangeA">          <option value="binance">Binance</option>
-          <option value="bybit">Bybit</option>
-          <option value="okx">OKX</option>
-          <option value="kucoin">KuCoin</option>
-          <option value="gateio">Gate.io</option>
-          <option value="mexc">MEXC</option>
-          <option value="htx">HTX</option>
-          <option value="lbank">LBank</option>
-          <option value="bitget">Bitget</option>
-          <option value="kraken">Kraken</option>
-          <option value="coinbaseexchange">Coinbase Exchange</option>
-          <option value="bitfinex">Bitfinex</option>
-          <option value="bitstamp">Bitstamp</option>
-          <option value="gemini">Gemini</option>
-          <option value="cryptocom">Crypto.com Exchange</option>
-          <option value="coinex">CoinEx</option>
-          <option value="bingx">BingX</option>
-          <option value="whitebit">WhiteBIT</option></select></div>
-      <div class="field exchange"><label for="exchangeB">BUY / SELL VENUE B</label><select id="exchangeB">          <option value="binance">Binance</option>
-          <option value="bybit">Bybit</option>
-          <option value="okx">OKX</option>
-          <option value="kucoin">KuCoin</option>
-          <option value="gateio">Gate.io</option>
-          <option value="mexc">MEXC</option>
-          <option value="htx">HTX</option>
-          <option value="lbank">LBank</option>
-          <option value="bitget">Bitget</option>
-          <option value="kraken">Kraken</option>
-          <option value="coinbaseexchange">Coinbase Exchange</option>
-          <option value="bitfinex">Bitfinex</option>
-          <option value="bitstamp">Bitstamp</option>
-          <option value="gemini">Gemini</option>
-          <option value="cryptocom">Crypto.com Exchange</option>
-          <option value="coinex">CoinEx</option>
-          <option value="bingx">BingX</option>
-          <option value="whitebit">WhiteBIT</option></select></div>
-      <div class="fee-group">
-        <div class="field small"><label id="feeLabelA" for="feeA">VENUE A TAKER · BPS</label><input id="feeA" type="number" min="0" max="100" step="0.1" value="10"></div>
-        <div class="field small"><label id="feeLabelB" for="feeB">VENUE B TAKER · BPS</label><input id="feeB" type="number" min="0" max="100" step="0.1" value="10"></div>
-      </div>
-      <div class="actions"><label class="toggle"><input id="auto" type="checkbox" checked> Auto refresh · 15s</label><button class="button secondary" id="refresh" type="button">Refresh now</button><button class="button primary" id="scan" type="submit">Scan market</button></div>
+      <div class="field selection"><label for="markets">SPOT PAIRS · BASE/QUOTE</label><select id="markets" multiple size="6" required>
+        <option value="BTC/USDT" selected>BTC / USDT</option><option value="BNB/USDT">BNB / USDT</option><option value="ETH/USDT" selected>ETH / USDT</option>
+        <option value="BTC/USDC" selected>BTC / USDC</option><option value="ETH/USDC">ETH / USDC</option><option value="DAI/USDC">DAI / USDC</option>
+        <option value="USDC/USDT">USDC / USDT</option><option value="BTC/DAI">BTC / DAI</option><option value="ETH/DAI">ETH / DAI</option>
+      </select><small class="account-note">Select up to 12 markets. Stable quotes are valued at $1 for estimates.</small></div>
+      <div class="field selection"><label for="venues">EXCHANGES · select multiple</label><select id="venues" multiple size="7" required>
+        <option value="binance" selected>Binance</option><option value="bybit" selected>Bybit</option><option value="okx" selected>OKX</option>
+        <option value="kucoin" selected>KuCoin</option><option value="gateio" selected>Gate.io</option><option value="mexc" selected>MEXC</option>
+        <option value="htx" selected>HTX</option><option value="lbank" selected>LBank</option><option value="bitget" selected>Bitget</option>
+        <option value="kraken" selected>Kraken</option><option value="coinbaseexchange" selected>Coinbase Exchange</option><option value="bitfinex" selected>Bitfinex</option>
+        <option value="bitstamp" selected>Bitstamp</option><option value="gemini" selected>Gemini</option><option value="cryptocom" selected>Crypto.com</option>
+        <option value="coinex" selected>CoinEx</option><option value="bingx" selected>BingX</option><option value="whitebit" selected>WhiteBIT</option>
+      </select><div class="account-actions"><button class="button secondary" id="selectAllVenues" type="button">Select all</button><button class="button secondary" id="clearVenues" type="button">Clear</button></div></div>
+      <div class="field amount"><label for="size">NOTIONAL · USD-EQUIVALENT</label><input id="size" type="number" min="1" max="100000" step="1" value="100" required></div>
+      <div class="field small"><label for="takerFee">ASSUMED TAKER FEE · BPS / VENUE</label><input id="takerFee" type="number" min="0" max="100" step="0.1" value="10" required></div>
+      <div class="field small"><label for="minNetBps">MIN ESTIMATED NET EDGE · BPS</label><input id="minNetBps" type="number" min="0" max="500" step="0.1" value="5" required></div>
+      <div class="actions"><label class="toggle"><input id="auto" type="checkbox"> Auto refresh · 30s</label><button class="button secondary" id="refresh" type="button">Refresh now</button><button class="button primary" id="scan" type="submit">Scan selected markets</button></div>
     </form>
     <div id="error" class="error-banner" role="status"></div>
-    <section class="venues" aria-label="Exchange order books">
-      <article class="panel" id="venueACard"><div class="venue-head"><div class="venue-name"><span class="venue-code">A</span><span data-venue-name="a">Binance</span><span class="venue-code">PUBLIC REST</span></div><div class="venue-status"><i class="dot"></i><span>Waiting</span></div></div><div class="book"><div><label>Best bid</label><div class="price bid" data-price="a-bid">—</div></div><div><label>Best ask</label><div class="price ask" data-price="a-ask">—</div></div></div><div class="latency" data-latency="a">Snapshot latency —</div></article>
-      <article class="panel" id="venueBCard"><div class="venue-head"><div class="venue-name"><span class="venue-code">B</span><span data-venue-name="b">Bybit</span><span class="venue-code">PUBLIC REST</span></div><div class="venue-status"><i class="dot"></i><span>Waiting</span></div></div><div class="book"><div><label>Best bid</label><div class="price bid" data-price="b-bid">—</div></div><div><label>Best ask</label><div class="price ask" data-price="b-ask">—</div></div></div><div class="latency" data-latency="b">Snapshot latency —</div></article>
-    </section>
     <section>
       <div class="section-head"><h2>Cross-venue opportunities</h2><span id="marketMeta">Estimated from visible REST depth</span></div>
-      <div class="panel table-wrap"><table class="opps"><thead><tr><th>Buy</th><th>Sell</th><th>Base qty</th><th>Buy VWAP</th><th>Sell VWAP</th><th>Est. fees · USDT</th><th>Net PnL · USDT</th><th>State</th></tr></thead><tbody id="rows"><tr><td colspan="8" class="empty">Scan to request current public order-book snapshots.</td></tr></tbody></table></div>
+      <div class="panel table-wrap"><table class="opps"><thead><tr><th>Pair</th><th>Buy</th><th>Sell</th><th>Base qty</th><th>Buy VWAP</th><th>Sell VWAP</th><th>Est. fees · USD</th><th>Net est. · USD / BPS</th><th>State</th></tr></thead><tbody id="rows"><tr><td colspan="9" class="empty">Select pairs and venues, then request public order-book snapshots.</td></tr></tbody></table></div>
     </section>
-    <div class="fineprint"><strong>Read-only estimates.</strong><span>Fees are the values you enter; actual account fee tiers, rebates, balances, transfer costs, execution latency, and slippage may differ. Public REST snapshots are not a streaming feed. A positive estimate is not guaranteed or executable profit. The separate engine panel uses the existing risk-gated Python strategy.</span></div>
+    <div class="fineprint"><strong>Read-only estimates.</strong><span>Snapshots use public REST depth; stable quote values are assumed to be $1. Enter your estimated taker fee and minimum net edge in BPS. Fees, actual inventory, latency, partial fills, and slippage can differ. These estimates do not place orders or assure profit. The separate engine panel preserves account-level live eligibility checks.</span></div>
     <details class="account" id="accountPanel">
       <summary>Account and exchange verification</summary>
-      <p class="account-note">Create an application account to verify an exchange. Passwords are hashed and exchange credentials are encrypted by the persistent HTTPS control service. Verification uses live authenticated REST and WebSocket requests. Live eligibility requires fresh account and stream checks, spot execution support, and venue-specific key-permission evidence. Binance reports combined spot/margin trading permission; Bitfinex reports key scopes that do not establish spot-only orders or IP restriction. Other venues remain unverified.</p>
+      <p class="account-note">Create an application account to verify exchange connections. Passwords are hashed and exchange credentials are encrypted at rest. All 18 registry venues can be selected for verification where an adapter is available. Live eligibility is separate: only Binance, Bybit, and KuCoin currently have permission probes that may satisfy the strict checks, and every account must pass fresh balance, scope, spot execution, and stream checks. A listed venue is not automatically live-enabled.</p>
       <div class="account-grid">
         <section class="account-box" id="authBox">
           <h3 id="authTitle">Sign in or create an account</h3>
@@ -114,7 +85,7 @@
           <p class="account-note">The engine streams spot markets and runs the existing paper or live strategy. Paper mode uses virtual execution. Live orders remain operator-disabled by default and require fresh account, permission, private-stream, market-data, and latency checks before activation.</p>
           <form class="account-form" id="engineForm">
             <label class="field"><span>Mode</span><select id="engineMode"><option value="paper">Paper scan</option><option value="live">Live orders</option></select></label>
-            <label class="field"><span>Exchanges (choose up to 4)</span><select id="engineVenue" multiple size="4" style="height:auto;min-height:120px"></select></label>
+            <label class="field"><span>Exchanges (choose up to all 18 registered venues)</span><select id="engineVenue" multiple size="8" style="height:auto;min-height:160px"></select></label>
             <label class="field"><span>Trade size · USD (max $25)</span><input id="engineTradeSize" type="number" min="0.01" max="25" step="0.01" value="5" required></label>
             <label class="field"><span>Session loss stop · USD (max $3 pilot limit)</span><input id="engineMaxLoss" type="number" min="0.01" max="3" step="0.01" value="3" required></label>
             <label class="field"><span>Realized profit stop · USD (per ignition)</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="200" required></label>
@@ -156,52 +127,23 @@
     let runtimeSettings = {liveTradingEnabled: false};
     let engineTimer = null;
 
-    function syncVenueNames() {
-  $("engineVenue").addEventListener("change", updateEngineChoices);
-      const a = $("exchangeA").value;
-      if ($("exchangeB").value === a) $("exchangeB").value = EXCHANGES.find((exchange) => exchange.id !== a).id;
-      const b = $("exchangeB").value;
-      $("feeLabelA").textContent = nameById[a] + " TAKER · BPS";
-      $("feeLabelB").textContent = nameById[b] + " TAKER · BPS";
-      document.querySelector('[data-venue-name="a"]').textContent = nameById[a];
-      document.querySelector('[data-venue-name="b"]').textContent = nameById[b];
+    function selectedValues(select) {
+      return Array.from(select.selectedOptions, (option) => option.value);
     }
 
-    function setVenue(slot, venue, book) {
-      const card = $(slot === "a" ? "venueACard" : "venueBCard");
-      const dot = card.querySelector(".venue-status .dot");
-      const label = card.querySelector(".venue-status span");
-      const bid = card.querySelector('[data-price="' + slot + '-bid"]');
-      const ask = card.querySelector('[data-price="' + slot + '-ask"]');
-      const latency = card.querySelector('[data-latency="' + slot + '"]');
-      if (!venue || venue.status !== "live" || !book) {
-        dot.className = "dot error";
-        label.textContent = venue?.status === "unsupported" ? "Unsupported" : "Unavailable";
-        bid.textContent = "—";
-        ask.textContent = "—";
-        latency.textContent = venue?.error || "Snapshot unavailable";
-        return;
-      }
-      dot.className = "dot on";
-      label.textContent = "Public REST live";
-      bid.textContent = currency(book.bestBid, 2);
-      ask.textContent = currency(book.bestAsk, 2);
-      latency.textContent = "Request latency " + venue.latencyMs + " ms · snapshot received";
-    }
-
-    function renderRows(opportunities, venueNames) {
+    function renderRows(opportunities) {
       const rows = $("rows");
       if (!opportunities.length) {
-        rows.innerHTML = '<tr><td colspan="8" class="empty">Both selected exchanges need current books and a shared spot market.</td></tr>';
+        rows.innerHTML = '<tr><td colspan="9" class="empty">No complete cross-venue depth estimate is available for the selected markets.</td></tr>';
         return;
       }
       rows.innerHTML = opportunities.map((o) => {
-        const complete = Number.isFinite(o.netPnlUsdt);
-        const positive = o.status === "positive_after_estimated_fees";
-        const state = o.status === "insufficient_depth" ? "Insufficient depth" : positive ? "Positive estimate" : "No net edge";
-        const pnl = complete ? (o.netPnlUsdt >= 0 ? "+" : "") + currency(o.netPnlUsdt, 4) + " USDT" + " <small>(" + currency(o.netReturnBps, 2) + " bps)</small>" : "—";
-        const fees = complete ? currency(o.estimatedFeesUsdt, 4) + " USDT" : "—";
-        return '<tr><td>' + venueNames[o.buyVenue] + '</td><td>' + venueNames[o.sellVenue] + '</td><td>' + currency(o.quantityBase, 6) + '</td><td>' + currency(o.buyVwap, 2) + '</td><td>' + currency(o.sellVwap, 2) + '</td><td>' + fees + '</td><td class="' + (positive ? "positive" : "negative") + '">' + pnl + '</td><td><span class="status-pill ' + (positive ? "" : "neutral") + '">' + state + '</span></td></tr>';
+        const meets = o.status === "meets_minimum_estimated_edge";
+        const positive = o.netPnlUsd > 0;
+        const state = meets ? "Meets estimated edge" : positive ? "Below minimum edge" : "No net edge";
+        const pnl = (positive ? "+" : "") + currency(o.netPnlUsd, 4) + " <small>(" + currency(o.netBps, 2) + " bps)</small>";
+        const fees = currency(o.estimatedFeesUsd, 4);
+        return '<tr><td>' + o.symbol + '</td><td>' + nameById[o.buyVenue] + '</td><td>' + nameById[o.sellVenue] + '</td><td>' + currency(o.quantityBase, 8) + '</td><td>' + currency(o.buyVwap, 6) + '</td><td>' + currency(o.sellVwap, 6) + '</td><td>' + fees + '</td><td class="' + (positive ? "positive" : "negative") + '">' + pnl + '</td><td><span class="status-pill ' + (meets ? "" : "neutral") + '">' + state + '</span></td></tr>';
       }).join("");
     }
 
@@ -215,41 +157,45 @@
       $("globalDot").className = "dot";
       $("scan").disabled = true;
       $("scan").textContent = "Scanning…";
+      const venues = selectedValues($("venues"));
+      const symbols = selectedValues($("markets"));
+      if (venues.length < 2 || venues.length > 18 || symbols.length < 1 || symbols.length > 12) {
+        $("error").textContent = "Select 2–18 venues and 1–12 spot markets.";
+        $("error").classList.add("show");
+        $("globalStatus").textContent = "Selection required";
+        $("globalDot").className = "dot error";
+        scanning = false;
+        $("scan").disabled = false;
+        $("scan").textContent = "Scan selected markets";
+        return;
+      }
       const params = new URLSearchParams({
-        symbol: $("symbol").value.trim().toUpperCase(),
-        size: $("size").value,
-        exchangeA: $("exchangeA").value,
-        exchangeB: $("exchangeB").value,
-        feeA: $("feeA").value,
-        feeB: $("feeB").value
+        venues: venues.join(","),
+        symbols: symbols.join(","),
+        notionalUsd: $("size").value,
+        takerFeeBps: $("takerFee").value,
+        minNetBps: $("minNetBps").value
       });
 
       try {
         const response = await fetch("/api/scan?" + params.toString(), {headers: {accept: "application/json"}, cache: "no-store"});
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Scan request failed.");
-        syncVenueNames();
-        for (let i = 0; i < data.venues.length; i++) {
-          const slot = i === 0 ? "a" : "b";
-          setVenue(slot, data.venues[i], data.books[data.venues[i].id]);
-        }
-        const venueNames = Object.fromEntries(data.venues.map((venue) => [venue.id, venue.name]));
-        renderRows(data.opportunities || [], venueNames);
-        const available = data.venues.filter((venue) => venue.status === "live").length;
-        $("globalDot").className = "dot " + (available === 2 ? "on" : "error");
-        $("globalStatus").textContent = available === 2 ? "Public APIs responding" : "Partial public data";
-        $("updatedAt").textContent = "Snapshot · " + new Date(data.observedAt).toLocaleTimeString();
-        $("marketMeta").textContent = data.symbol + " · REST snapshots · fee estimates";
-        const failed = data.venues.filter((venue) => venue.status !== "live");
-        if (failed.length) {
-          $("error").textContent = failed.map((venue) => venue.name + ": " + venue.error).join(" · ");
+        renderRows(data.opportunities || []);
+        const available = data.venues.filter((venue) => venue.status === "available").length;
+        $("globalDot").className = "dot " + (available === data.venues.length ? "on" : "error");
+        $("globalStatus").textContent = available + " of " + data.venues.length + " venue snapshots responding";
+        $("updatedAt").textContent = "Snapshot · " + new Date(data.observedAt * 1000).toLocaleTimeString();
+        $("marketMeta").textContent = symbols.length + " spot pairs · " + venues.length + " venues · public REST · " + data.takerFeeBps + " fee bps";
+        const warnings = data.venues.flatMap((venue) =>
+          Object.entries(venue.errors || {}).map(([symbol, detail]) =>
+            nameById[venue.id] + " " + symbol + ": " + detail));
+        if (warnings.length) {
+          $("error").textContent = warnings.join(" · ");
           $("error").classList.add("show");
         }
       } catch (error) {
-        syncVenueNames();
-        setVenue("a", null, null);
-        setVenue("b", null, null);
-        renderRows([]);
+        $("rows").innerHTML = '<tr><td colspan="9" class="empty">No snapshot results.</td></tr>';
         $("updatedAt").textContent = "No current snapshot";
         $("globalDot").className = "dot error";
         $("globalStatus").textContent = "Request failed";
@@ -258,8 +204,20 @@
       } finally {
         scanning = false;
         $("scan").disabled = false;
-        $("scan").textContent = "Scan market";
+        $("scan").textContent = "Scan selected markets";
       }
+    }
+    function setSignupMode(enabled, message) {
+      signupMode = enabled;
+      $("confirmField").hidden = !enabled;
+      $("accountPasswordConfirm").required = enabled;
+      $("accountPassword").setAttribute("autocomplete", enabled ? "new-password" : "current-password");
+      $("authTitle").textContent = enabled ? "Create an application account" : "Sign in to your application account";
+      $("authStatus").textContent = message || (enabled
+        ? "Use a unique password with at least 12 characters and enter it again to confirm."
+        : "Sign in with your application account.");
+      $("loginButton").textContent = enabled ? "Create account" : "Sign in";
+      $("signupButton").textContent = enabled ? "Already have an account? Sign in" : "Create account";
     }
 
     async function control(path, options = {}) {
@@ -395,7 +353,7 @@
         select.append(option);
       }
       if (!select.selectedOptions.length && eligible.length) select.options[0].selected = true;
-      while (select.selectedOptions.length > 4) select.options[select.selectedOptions.length - 1].selected = false;
+      while (select.selectedOptions.length > EXCHANGES.length) select.options[select.selectedOptions.length - 1].selected = false;
       const crossReady = mode === "live" && select.selectedOptions.length >= 2 && runtimeSettings.liveTradingEnabled;
       $("liveCrossField").hidden = mode !== "live";
       $("engineCrossLive").disabled = !crossReady;
@@ -448,26 +406,34 @@
       event.preventDefault();
       const email = $("accountEmail").value.trim();
       const password = $("accountPassword").value;
+      if (signupMode && password !== $("accountPasswordConfirm").value) {
+        authMessage("The passwords do not match. Re-enter the same password in both fields.", true);
+        $("accountPasswordConfirm").focus();
+        return;
+      }
       try {
         const result = signupMode
           ? await control("/api/v1/auth/signup", {method: "POST", body: {email, password, password_confirmation: $("accountPasswordConfirm").value}})
           : await control("/api/v1/auth/login", {method: "POST", body: {email, password}});
         setSignedIn(result.user);
-      } catch (error) { authMessage(error.message, true); }
+      } catch (error) {
+        if (signupMode && error.message.toLowerCase().includes("already exists")) {
+          $("accountPassword").value = "";
+          $("accountPasswordConfirm").value = "";
+          setSignupMode(false, "An account already exists for this email. Sign in with its password, or use a different email to register.");
+        } else {
+          authMessage(error.message, true);
+        }
+      }
     });
     $("signupButton").addEventListener("click", () => {
-      signupMode = !signupMode;
-      $("confirmField").hidden = !signupMode;
-      $("accountPassword").setAttribute("autocomplete", signupMode ? "new-password" : "current-password");
-      $("authTitle").textContent = signupMode ? "Create an application account" : "Sign in to your application account";
-      $("authStatus").textContent = signupMode ? "Use a unique password with at least 12 characters." : "Sign in with your application account.";
-      $("loginButton").textContent = signupMode ? "Create account" : "Sign in";
-      $("signupButton").textContent = signupMode ? "Already have an account? Sign in" : "Create account";
+      setSignupMode(!signupMode);
     });
     $("logoutButton").addEventListener("click", async () => {
       try { await control("/api/v1/auth/logout", {method: "POST"}); }
       catch (error) { authMessage(error.message, true); return; }
       setSignedIn(null);
+      setSignupMode(false);
       authMessage("Signed out.");
     });
     $("credentialVenue").addEventListener("change", updateAuthModes);
@@ -529,21 +495,20 @@
     $("engineRefresh").addEventListener("click", loadEngineState);
     $("capitalRefresh").addEventListener("click", loadCapitalSources);
     $("journalRefresh").addEventListener("click", loadJournal);
-    $("exchangeA").value = "binance";
-    $("exchangeB").value = "bybit";
-    syncVenueNames();
-    $("exchangeA").addEventListener("change", () => { syncVenueNames(); scan(); });
-    $("exchangeB").addEventListener("change", () => { syncVenueNames(); scan(); });
-    for (const field of ["symbol", "size", "feeA", "feeB"]) $(field).addEventListener("change", scan);
+    $("engineVenue").addEventListener("change", updateEngineChoices);
+    $("selectAllVenues").addEventListener("click", () => {
+      for (const option of $("venues").options) option.selected = true;
+    });
+    $("clearVenues").addEventListener("click", () => {
+      for (const option of $("venues").options) option.selected = false;
+    });
     $("controls").addEventListener("submit", scan);
     $("refresh").addEventListener("click", scan);
     $("auto").addEventListener("change", () => {
       if (timer) clearInterval(timer);
-      timer = $("auto").checked ? setInterval(() => scan(), 15000) : null;
+      timer = $("auto").checked ? setInterval(() => scan(), 30000) : null;
     });
     control("/api/v1/auth/me").then((data) => setSignedIn(data.user)).catch((error) => authMessage(error.message));
-    scan();
-    timer = $("auto").checked ? setInterval(() => scan(), 15000) : null;
   </script>
 </body>
 </html>

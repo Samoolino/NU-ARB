@@ -1,5 +1,4 @@
-"""Opportunity evaluation. Pure functions: books in -> Opp out. Every Opp already carries the IOC limit price
-per leg and the WORST-CASE result if every leg fills at its limit (the basis of the no-loss guarantee)."""
+"""Depth-based opportunity estimates. Each result includes an IOC-limit floor for matched completed fills."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -71,12 +70,16 @@ def evaluate_triangle(tri, books, size, fee_of, min_net_bps, tol_bps, round_px, 
 
 def evaluate_cross(sym, bw, sw, bb, sb, size_usd, cfg, now):
     """Buy `sym` on worker bw (book bb), sell on worker sw (book sb). Inventory is pre-funded on both sides."""
-    if not bb.asks or not sb.bids:
+    if size_usd <= 0 or not bb.asks or not sb.bids:
         return None
     age = max(now - bb.recv, now - sb.recv) * 1000.0
     if age > cfg.max_book_age_ms:
         return None
-    base = size_usd / bb.asks[0][0]
+    base = min(size_usd / bb.asks[0][0],
+               sum(level[1] for level in bb.asks),
+               sum(level[1] for level in sb.bids))
+    if base <= 0:
+        return None
     c, s = walk_base(bb.asks, base), walk_base(sb.bids, base)
     if c is None or s is None:
         return None
@@ -95,3 +98,29 @@ def evaluate_cross(sym, bw, sw, bb, sb, size_usd, cfg, now):
     m = bw.ex.markets[sym]
     return CrossOpp(sym, bw.id, sw.id, base, lim_buy, lim_sell, cost, net, worst_net, net_bps,
                     worst_net / worst_cost * 1e4, age, m["base"], m["quote"])
+
+
+def cross_candidate_sizes(buy_book, sell_book, max_usd):
+    """Return size breakpoints where the marginal price can change, capped by available book depth."""
+    if max_usd <= 0 or not buy_book.asks or not sell_book.bids:
+        return []
+    top_ask = buy_book.asks[0][0]
+    if top_ask <= 0:
+        return []
+    max_base = min(
+        max_usd / top_ask,
+        sum(level[1] for level in buy_book.asks),
+        sum(level[1] for level in sell_book.bids),
+    )
+    if max_base <= 0:
+        return []
+
+    base_sizes = {max_base}
+    for levels in (buy_book.asks, sell_book.bids):
+        cumulative = 0.0
+        for _, amount in levels:
+            cumulative += amount
+            if cumulative >= max_base:
+                break
+            base_sizes.add(cumulative)
+    return sorted(size * top_ask for size in base_sizes)

@@ -14,7 +14,7 @@ from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
 from arbx.gate import ProfitGate, RiskManager
 from arbx.journal import TradeJournal
-from arbx.strategy import evaluate_cross
+from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
 
 
@@ -58,6 +58,8 @@ class Hub:
         self.workers: list[ExchangeWorker] = []
         self.cross_syms: set = set()
         self.cross_exec = None
+        self._cross_scan_lock = asyncio.Lock()
+        self._cross_scan_last = 0.0
         self._opportunity_last_written: dict[str, float] = {}
         self._paper = PaperExecutor(cfg)
         self._loop = self._stop = None
@@ -120,7 +122,7 @@ class Hub:
         })
 
     def settle(self, ex, name, start, res, worst_bps, ms) -> None:
-        """Post-trade verification: realized result must respect the pre-trade guarantee."""
+        """Post-trade verification compares realized PnL with the modeled pre-trade floor."""
         st = self.stats
         target_before = self.risk.pnl
         self.risk.record(res.pnl, res.ok)
@@ -131,7 +133,7 @@ class Hub:
             st.trades += 1
             realized = res.pnl / start * 1e4
             if realized < worst_bps - self.cfg.verify_slack_bps:
-                self.risk.halt(f"ASSURANCE VIOLATED on {name}: realized {realized:.2f}bps < guaranteed "
+                self.risk.halt(f"MODELED FLOOR BREACHED on {name}: realized {realized:.2f}bps < modeled floor "
                                f"{worst_bps:.2f}bps (wrong fee tier? tick rounding? partial fills?)")
             self.log("trade", f"[{ex}] {name} pnl={res.pnl:+.5f} ({realized:+.1f}bps, floor {worst_bps:+.1f}) {ms:.0f}ms")
         else:
@@ -149,10 +151,11 @@ class Hub:
                            symbol: str, requested_usd: float, expected_net_usd: float,
                            worst_case_net_usd: float, expected_net_bps: float,
                            worst_case_net_bps: float, book_age_ms: float, approved: bool,
-                           rejection_reason: str | None, evidence: dict) -> None:
+                           rejection_reason: str | None, evidence: dict,
+                           decision: str | None = None, force: bool = False) -> None:
         key = f"{strategy}:{exchange_a}:{exchange_b or ''}:{symbol}"
         now = time.monotonic()
-        if now - self._opportunity_last_written.get(key, 0.0) < 1.0:
+        if not force and now - self._opportunity_last_written.get(key, 0.0) < 1.0:
             return
         self._opportunity_last_written[key] = now
         self.journal_store.append_opportunity({
@@ -168,7 +171,7 @@ class Hub:
             "expected_net_bps": expected_net_bps,
             "worst_case_net_bps": worst_case_net_bps,
             "book_age_ms": book_age_ms,
-            "decision": "APPROVED_BY_GATE" if approved else "REJECTED_BY_GATE",
+            "decision": decision or ("APPROVED_BY_GATE" if approved else "REJECTED_BY_GATE"),
             "rejection_reason": rejection_reason,
             "evidence": evidence,
         })
@@ -187,24 +190,96 @@ class Hub:
         common = sorted(((min(v), s) for s, v in counts.items() if len(v) >= 2), reverse=True)
         return {s for _, s in common[: self.cfg.cross_top_n]}
 
-    async def scan_cross(self, w, dirty) -> None:
-        cfg, now, size, best = self.cfg, time.monotonic(), self.trade_size(), None
-        for sym in dirty & self.cross_syms:
-            b1 = w.md.books.get(sym)
-            if not b1:
-                continue
-            for o in self.workers:
-                b2 = o.md.books.get(sym) if o is not w else None
-                if not b2:
-                    continue
-                for bw, sw, bb, sb in ((w, o, b1, b2), (o, w, b2, b1)):
-                    x = evaluate_cross(sym, bw, sw, bb, sb, size, cfg, now)
-                    if x and (best is None or x.worst_bps > best[0].worst_bps):
-                        best = (x, bw, sw)
-        if best:
-            await self._fire_cross(*best)
+    def _cross_budget_usd(self, bw, sw, symbol: str, buy_book) -> tuple[float, float, float]:
+        if self.cfg.mode != "live":
+            size = self.trade_size()
+            return size, math.inf, math.inf
+        if not buy_book.asks:
+            return 0.0, 0.0, 0.0
+        market = bw.ex.markets[symbol]
+        quote, base = market["quote"], market["base"]
+        free_quote = float(bw.free.get(quote, 0.0))
+        free_base = float(sw.free.get(base, 0.0))
+        ask = float(buy_book.asks[0][0])
+        fee = max(0.0, bw.fee_of(symbol))
+        quote_budget = free_quote / (1.0 + fee + 0.002)
+        size = min(self.cfg.trade_size_usd, quote_budget, free_base * ask)
+        return max(0.0, size), free_quote, free_base
 
-    async def _fire_cross(self, x, bw, sw) -> None:
+    def _best_cross_for_direction(self, symbol, bw, sw, buy_book, sell_book, now):
+        size, free_quote, free_base = self._cross_budget_usd(bw, sw, symbol, buy_book)
+        best = None
+        for candidate_size in cross_candidate_sizes(buy_book, sell_book, size):
+            opportunity = evaluate_cross(symbol, bw, sw, buy_book, sell_book,
+                                         candidate_size, self.cfg, now)
+            if opportunity is None:
+                continue
+            decision = self.gate.check_cross(
+                opportunity, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
+                free_quote, free_base,
+            )
+            utilization = opportunity.cost / free_quote if free_quote > 0 and math.isfinite(free_quote) else 0.0
+            key = (decision.ok, opportunity.worst_usd, opportunity.expected_usd,
+                   utilization, opportunity.worst_bps, opportunity.cost)
+            if best is None or key > best[0]:
+                best = (key, opportunity, decision, free_quote, free_base, utilization)
+        return best
+
+    async def scan_cross(self, w, dirty) -> None:
+        if self._cross_scan_lock.locked() or self.risk.halted:
+            return
+        now = time.monotonic()
+        if now - self._cross_scan_last < 0.1:
+            return
+        self._cross_scan_last = now
+        async with self._cross_scan_lock:
+            ranked = []
+            workers = self.workers
+            for symbol in self.cross_syms:
+                available = [(worker, worker.md.books.get(symbol)) for worker in workers]
+                available = [(worker, book) for worker, book in available if book is not None]
+                for index, (buy_worker, buy_book) in enumerate(available):
+                    for sell_worker, sell_book in available[index + 1:]:
+                        if (buy_worker.lock.locked() or sell_worker.lock.locked()) and self.cfg.mode == "live":
+                            continue
+                        for bw, sw, bb, sb in (
+                            (buy_worker, sell_worker, buy_book, sell_book),
+                            (sell_worker, buy_worker, sell_book, buy_book),
+                        ):
+                            candidate = self._best_cross_for_direction(symbol, bw, sw, bb, sb, now)
+                            if candidate:
+                                _, opportunity, decision, free_quote, free_base, utilization = candidate
+                                ranked.append((decision.ok, opportunity.worst_usd, opportunity.expected_usd,
+                                               utilization, opportunity.worst_bps, opportunity.cost,
+                                               opportunity, bw, sw, decision, free_quote, free_base, utilization))
+            ranked.sort(key=lambda item: item[:6], reverse=True)
+            if not ranked:
+                return
+
+            selected = ranked[0]
+            for rank, candidate in enumerate(ranked[1:21], start=2):
+                _, _, _, _, _, _, opportunity, bw, sw, decision, free_quote, free_base, utilization = candidate
+                reason = decision.reason if not decision.ok else "lower_priority_than_selected"
+                self.record_opportunity(
+                    strategy="cross_exchange", exchange_a=opportunity.buy_ex, exchange_b=opportunity.sell_ex,
+                    symbol=opportunity.symbol, requested_usd=opportunity.cost,
+                    expected_net_usd=opportunity.expected_usd, worst_case_net_usd=opportunity.worst_usd,
+                    expected_net_bps=opportunity.net_bps, worst_case_net_bps=opportunity.worst_bps,
+                    book_age_ms=opportunity.age_ms, approved=False, rejection_reason=reason,
+                    decision="REJECTED_BY_GATE" if not decision.ok else "RANKED_NOT_SELECTED",
+                    evidence={"priorityRank": rank, "selectedFloorUsd": selected[1],
+                              "availableQuoteUsd": free_quote if math.isfinite(free_quote) else None,
+                              "availableBase": free_base if math.isfinite(free_base) else None,
+                              "capitalUtilization": utilization},
+                )
+            _, _, _, _, _, _, opportunity, bw, sw, _, free_quote, free_base, utilization = selected
+            await self._fire_cross(opportunity, bw, sw, priority_rank=1,
+                                   compared_count=len(ranked), free_quote=free_quote,
+                                   free_base=free_base, utilization=utilization)
+
+    async def _fire_cross(self, x, bw, sw, *, priority_rank: int = 1, compared_count: int = 1,
+                          free_quote: float = 0.0, free_base: float = 0.0,
+                          utilization: float = 0.0) -> None:
         self.stats.signals += 1
         if bw.lock.locked() or sw.lock.locked():
             return
@@ -224,14 +299,13 @@ class Hub:
             if buy_book is None or sell_book is None:
                 self.stats.rejects["missing_order_book"] += 1
                 return
-            refreshed = evaluate_cross(x.symbol, bw, sw, buy_book, sell_book,
-                                       self.trade_size(), self.cfg, time.monotonic())
-            if refreshed is None:
+            candidate = self._best_cross_for_direction(x.symbol, bw, sw, buy_book, sell_book,
+                                                        time.monotonic())
+            if candidate is None:
                 self.stats.rejects["opportunity_disappeared"] += 1
                 return
-            x = refreshed
-            d = self.gate.check_cross(x, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
-                                      bw.free_of(x.quote_ccy), sw.free.get(x.base_ccy, 0.0) if live else math.inf)
+            _, x, d, free_quote, free_base, utilization = candidate
+            utilization = x.cost / free_quote if free_quote > 0 and math.isfinite(free_quote) else 0.0
             self.record_opportunity(
                 strategy="cross_exchange", exchange_a=x.buy_ex, exchange_b=x.sell_ex, symbol=x.symbol,
                 requested_usd=x.cost, expected_net_usd=x.expected_usd, worst_case_net_usd=x.worst_usd,
@@ -244,7 +318,12 @@ class Hub:
                     "buyBookExchangeTimestamp": buy_book.timestamp_exchange,
                     "sellBookExchangeTimestamp": sell_book.timestamp_exchange,
                     "rebalanceHaircutBps": self.cfg.rebalance_haircut_bps,
+                    "priorityRank": priority_rank, "comparedCandidateCount": compared_count,
+                    "availableQuoteUsd": free_quote if math.isfinite(free_quote) else None,
+                    "availableBase": free_base if math.isfinite(free_base) else None,
+                    "capitalUtilization": utilization,
                 },
+                force=True,
             )
             if not d.ok:
                 self.stats.rejects[d.reason] += 1

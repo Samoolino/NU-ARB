@@ -1,6 +1,6 @@
 # ARBX 2.0 - multi-exchange triangular + cross-exchange arbitrage engine
 
-**Read first.** This code enforces a *pre-trade worst-case floor* and *post-trade verification* on every order. It does **not** and cannot guarantee profit: fees, latency and missed legs decide the outcome. On liquid spot markets, most scans show no edge. Paper mode will tell you honestly how often one appears.
+**Read first.** This code enforces a *modeled pre-trade minimum floor* and *post-trade verification*. It does **not** and cannot assure realized profit: fee-tier differences, latency, partial fills, non-atomic cross-venue orders, and unwind prices can still create losses. On liquid spot markets, most scans show no edge.
 
 ## 0. What is in the box
 
@@ -10,15 +10,15 @@
 | Discovery | `graph.py` | every spot market -> all triangles from stablecoin starts; ranked by liquidity tier, then **lowest total taker fee** (the low-fee "vehicle"); trimmed to your WebSocket budget |
 | Streams | `market.py` | one WS watcher per order book, auto-reconnect, local-receive-time staleness, `LatencyGuard` |
 | Strategy | `strategy.py` | depth-walking (VWAP) cycle math, IOC limit price per leg, worst-case result |
-| **Gate** | `gate.py` | the Profit/No-Loss gate + risk kill-switch (every trade passes it) |
+| **Gate** | `gate.py` | the modeled profit-floor gate + risk kill-switch (every trade passes it) |
 | Execution | `execute.py` | Paper / Live (IOC limits, real fills feed next leg, unwind on missed leg) / Cross |
 | Orchestration | `worker.py`, `hub.py` | one async worker per exchange, cross-exchange scanner, settle + verify + journal |
 | Transfers | `network.py` | cheapest token+chain to *rebalance* inventory between exchanges |
 | Ops | `cli.py`, `ui.py`, `selftest.py` | `run`, `probe`, `transfer-plan`, `selftest`, dashboard |
 
-**Deliberate limits:** `Bitunix` is not in ccxt/ccxt.pro (checked, v4.5.84), so it is not supported here; it needs a custom adapter. Supported examples: binance, bybit, okx, kucoin, gate, mexc, bitget, htx. "Every token" = every *spot* market the exchange lists, capped by `BOT_MAX_SYMBOLS` streams per exchange (ranked by volume); subscribing to thousands of books adds latency without adding edge. On-chain transfers are never in the trading loop (minutes, not milliseconds); cross-exchange trading uses **pre-funded balances on both sides**.
+**Deliberate limits:** The registry includes 18 venues, including Binance, Bybit, MEXC, HTX, KuCoin, and Bitfinex. `Bitunix` has no installed ccxt/ccxt.pro adapter and requires a custom integration. "Every token" = every *spot* market the exchange lists, capped by `BOT_MAX_SYMBOLS` streams per venue; subscribing to thousands of books adds latency without adding edge. On-chain transfers are never in the trading loop; cross-exchange trading uses **pre-funded balances on both sides**.
 
-Live cross-venue mode requires at least two venues to pass the fresh REST balance, authenticated balance WebSocket, public spot-book WebSocket, latency, execution-capability, and venue permission checks. Every selected venue must pass; a single failure stops the entire live startup. Balances are fetched again after a candidate is found and the opportunity is recomputed from the latest books before any order is considered. Current permission probes can qualify Binance only, so live multi-venue mode remains fail-closed until another venue has an independently verified permission probe. Exchange listings, account connectivity, profitable paper results, and a calculated price floor are not proof of future profit.
+The registry includes 18 venues and allows selecting up to all 18 for verification/scanning; it does not automatically add credentials or start every venue. Permission probes now cover Binance, Bybit, KuCoin, HTX, MEXC, OKX, and Bitfinex. Only Binance, Bybit, or KuCoin can potentially pass the current strict account-scope checks; per-key evidence, authenticated streams, IOC capabilities, and fresh balances still decide eligibility. Cross-exchange scans compare depth breakpoints and available inventory, then rank by the largest modeled dollar floor, with expected return and capital utilization as tie-breakers. A modeled floor is not a promise of realized profit.
 
 ## 1. The no-loss gate, precisely
 
@@ -26,11 +26,10 @@ For every trade, before any order is sent:
 1. Books fresh (`max_book_age_ms`, local monotonic clock) and REST RTT p95 healthy.
 2. Depth-walked expected edge >= `min_net_bps` after **per-market taker fees on every leg**.
 3. Each leg gets an **IOC limit price** = marginal book price +/- `limit_tol_bps`.
-4. **Worst case** = every leg filled *exactly at its limit*, fees included. Must be >= `min_worst_bps` and >= `min_profit_usd`. Any fill within limits is at least this good.
+4. **Modeled floor** = every leg filled *exactly at its IOC limit*, using estimated fees. It must be >= `min_worst_bps` and >= `min_profit_usd`; this is not an execution or realized-PnL guarantee.
 5. Exchange min amount / min notional, balance/inventory, trades-per-minute cap, global halt flag.
 
-After every trade: realized PnL must be >= guaranteed floor - `verify_slack_bps`; otherwise the bot **halts** ("ASSURANCE VIOLATED": wrong fee tier, rounding, etc.).
-**Not covered:** a later leg missing after an earlier leg filled. The bot then market-unwinds the executed legs (bounded loss), **halts**, and tells you to check the account.
+After every trade, realized PnL is compared with the modeled floor; a miss beyond `verify_slack_bps` halts the bot. **Not covered:** partial/missed legs, non-atomic cross-exchange fills, actual fee differences, and market unwind losses.
 
 ## 2. Speed optimizers (what is actually applied)
 
@@ -89,7 +88,7 @@ export BOT_BYBIT_KEY="..."   BOT_BYBIT_SECRET="..."
 python run.py --headless 2>&1 | tee paper.log     # or dashboard: python run.py
 ```
 Review `trade_journal.csv`. **Go-live criteria - all must hold:**
-- >= 100 paper trades, PnL > 0 **after** `paper_penalty_bps`, no "ASSURANCE VIOLATED".
+- >= 100 paper trades, PnL > 0 **after** `paper_penalty_bps`, no "MODELED FLOOR BREACHED".
 - Rejections dominated by `net_edge` (healthy). Many `stale_book`/`latency_degraded` -> host too slow.
 - If there are ~0 trades: that is the true answer for those markets; do not loosen the gate to force trades.
 - Check the fee tier you configured equals the exchange's real tier (`BOT_DEFAULT_TAKER_BPS`).
@@ -97,7 +96,7 @@ Review `trade_journal.csv`. **Go-live criteria - all must hold:**
 ### F. Live pilot (cross-venue, guarded)
 The live pilot target defaults to **$200 realized net PnL per ignition**. The hard session-loss ceiling is **$3** (a smaller value is allowed); trade size is capped at **$25**. The operator must choose a positive worst-case edge and minimum profit floor. These bounds do not assure profit or cap the loss from a missed fill, exchange outage, or unwind.
 
-1. Live mode requires at least two venues and explicit `BOT_CROSS_LIVE=1`. Every venue must pass live permission verification; **with the current probes, live cross-venue startup cannot yet pass because only Binance's permission probe qualifies. Do not bypass this check.**
+1. Live mode requires at least two venues and explicit `BOT_CROSS_LIVE=1`. Every selected venue must pass read-only account, scope, stream, and execution preflight. Permission evidence is available for seven venues; Binance, Bybit, and KuCoin can potentially pass strict scope checks. No account has been verified in this environment.
 2. The transfer planner ranks withdrawal/deposit routes and estimated network costs only. No funds are moved automatically. Cross-venue IOC trades require pre-funded quote balance at the buy venue and base-asset inventory at the sell venue; chain bridges are not atomic with exchange orders and are not an execution leg.
 3. `python run.py live-preflight` performs current read-only account, balances, permission, and websocket checks; it places no orders or transfers. `python run.py run --headless` repeats the preflight and starts only if all selected venues pass. An opportunity is reevaluated after balance refresh, but it can still disappear and a partial/missed fill can lose money.
 4. `python run.py opportunities` prints the latest persisted depth/latency/edge/gate evidence. `trade_journal.sqlite3` holds opportunity records; `trade_journal.csv` and its SQLite companion record executions. A halt requires an operator review before a new ignition.
@@ -108,28 +107,19 @@ The supported runtime here is native Windows with Python 3.12 and the repository
 & ..\.venv\Scripts\python.exe -m pip install -r requirements.txt
 & ..\.venv\Scripts\python.exe run.py selftest
 ```
-Exchange credentials must be entered into the current PowerShell process (never commit or paste them into chat). Example for two HMAC venues; use the exact key/passphrase fields required by each venue:
+To access the credential and account-verification UI locally, start from the repository root:
 ```powershell
-$env:BOT_EXCHANGES = "binance,bybit"
-$env:BOT_MODE = "live"
-$env:BOT_CROSS = "1"
-$env:BOT_CROSS_LIVE = "1"
-$env:BOT_TRADE_SIZE_USD = "5"
-$env:BOT_MAX_LOSS_USD = "3"
-$env:BOT_TARGET_PROFIT_USD = "200"
-$env:BOT_BINANCE_KEY = Read-Host "Binance API key"
-$secret = Read-Host "Binance API secret" -AsSecureString
-$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
-try { $env:BOT_BINANCE_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
-finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
-$env:BOT_BYBIT_KEY = Read-Host "Bybit API key"
-$secret = Read-Host "Bybit API secret" -AsSecureString
-$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
-try { $env:BOT_BYBIT_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
-finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
-& ..\.venv\Scripts\python.exe run.py live-preflight
+Set-Location C:\Users\saME\Downloads\NU-ARB
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-local.ps1
 ```
-Only continue to `run.py run --headless` if every selected venue reports `liveEligible=true`; at present a second venue will fail this permission gate. Windows dependency health can be checked with `python -m pip check`. Docker and WSL are not application requirements. Keep the process attached in the terminal; stopping the process cancels new orders but does not reverse existing exchange holdings.
+The browser opens at `http://127.0.0.1:8765`. The local host binds to loopback only; it stores encrypted credentials under `%LOCALAPPDATA%\ARBX`, with the encryption key protected for the current Windows user. Its public scanner can compare selected spot markets across the registered public adapters using REST order-book snapshots, a shared USD-equivalent notional, assumed taker-fee BPS, and a minimum estimated net-edge threshold. USDT, USDC, and DAI are assumed to equal $1 for these estimates. This scanner is read-only and does not use account balances, streams, or place orders; a positive estimate is not assured profit. Live orders are disabled by default. The optional `-EnableLive` switch requires an additional terminal confirmation before enabling live-order requests in the browser; saved venue permissions and fresh preflight checks still apply.
+
+For an interactive local run, start from the repository root (the folder containing `arb_bot`) and launch the root-level helper. It accepts credentials through masked prompts, retains them only in the current PowerShell process while the bot runs, runs the offline self-test and read-only account/balance/scope/WebSocket preflight, and asks for an explicit final confirmation before starting live orders. It supports HMAC credentials for Binance, Bybit, and KuCoin; KuCoin also requires its API passphrase. It does not write credentials to disk or send them to chat.
+```powershell
+Set-Location C:\Users\saME\Downloads\NU-ARB
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-live.ps1
+```
+The helper proceeds only if every selected venue reports `liveEligible=true`; the read-only preflight itself never places orders. It defaults to a $5 per-engagement cap (maximum $25), the existing $3 session-loss halt, and the $200 realized-profit stop. Those controls do not guarantee or strictly cap realized loss. Keep the process attached in the terminal; stopping it does not reverse exchange holdings. Docker and WSL are not application requirements.
 
 ### H. Linux/VPS live deployment
 1. `export BOT_MODE=live BOT_TRADE_SIZE_USD=10 BOT_MAX_LOSS_USD=3 BOT_TARGET_PROFIT_USD=200 BOT_CROSS=1 BOT_CROSS_LIVE=1`.
@@ -149,13 +139,13 @@ Restart=no
 WantedBy=multi-user.target
 ```
 (`Restart=no` on purpose: a halt means a human must look.) `sudo systemctl enable --now arbx` -> `journalctl -u arbx -f`.
-3. After the first 20 live trades compare `trade_journal.csv` with exchange trade history. Scale size **only** if realized ~ guaranteed floor.
+3. After the first 20 live trades compare `trade_journal.csv` with exchange trade history. Scale size only after verifying fees, fills, and unwind outcomes; the modeled floor is not guaranteed.
 
 ### I. If it halts
 | Log line | Meaning | Action |
 |---|---|---|
 | `LEG FAILURE ... unwind attempted` | a later leg missed | open the exchange, confirm holdings, flatten manually, review latency |
-| `ASSURANCE VIOLATED` | realized < guaranteed | check fee tier / fee token / tick sizes before restarting |
+| `MODELED FLOOR BREACHED` | realized PnL missed the model floor | check fee tier / fee token / tick sizes before restarting |
 | `max loss reached` | risk limit | stop; review journal; raise limits only with evidence |
 | `disabled: median RTT ...` | host too far | move host region (step A) |
 | `not supported by ccxt.pro` | bad exchange id | use an id from `ccxt.pro.exchanges` |
@@ -165,7 +155,7 @@ WantedBy=multi-user.target
 | Env var | Default | Effect |
 |---|---|---|
 | `BOT_MIN_NET_BPS` | 3 | expected edge after fees |
-| `BOT_MIN_WORST_BPS` | 0.5 | guaranteed floor (raise for safety) |
+| `BOT_MIN_WORST_BPS` | 0.5 | modeled floor in basis points (not a realized-profit guarantee) |
 | `BOT_LIMIT_TOL_BPS` | 1 | IOC price tolerance: bigger = more fills, thinner floor |
 | `BOT_MAX_RTT_MS` | 80 | live refuses above this median RTT |
 | `BOT_MAX_SYMBOLS` | 120 | order-book streams per exchange |

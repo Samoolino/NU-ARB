@@ -9,10 +9,13 @@ test("registers the 18 requested public spot venues without duplicate ids", () =
   assert.equal(EXCHANGE_BY_ID.cryptocom.name, "Crypto.com Exchange");
 });
 
-test("accepts only plain USDT-quoted spot symbols", () => {
-  assert.equal(isValidSymbol("BTCUSDT"), true);
+test("accepts spot market pairs quoted in supported stablecoins", () => {
+  assert.equal(isValidSymbol("BTC/USDT"), true);
+  assert.equal(isValidSymbol("BTC/USDC"), true);
+  assert.equal(isValidSymbol("ETH/DAI"), true);
+  assert.equal(isValidSymbol("BTCUSDT"), false);
   assert.equal(isValidSymbol("BTC-USDT"), false);
-  assert.equal(isValidSymbol("BTCUSDC"), false);
+  assert.equal(isValidSymbol("BTC/USD"), false);
   assert.equal(isValidSymbol("https://example.com"), false);
 });
 
@@ -56,4 +59,35 @@ test("marks a direction unavailable when the sell book lacks matched depth", () 
 
 test("requires distinct selected exchanges", () => {
   assert.throws(() => scanBooks({ exchangeA: "binance", exchangeB: "binance", books: {}, tradeSizeUsdt: 100, feesBps: {} }));
+});
+
+test("ranks multi-pair opportunities across every selected venue and applies the BPS floor", async () => {
+  const { scanAllVenues } = await import("../lib/scanner.js");
+  const opportunities = scanAllVenues({
+    venueIds: ["binance", "bybit", "okx"],
+    symbols: ["BTC/USDT", "ETH/USDC"],
+    booksBySymbol: {
+      "BTC/USDT": {
+        binance: { asks: [[100, 2]], bids: [[99, 2]] },
+        bybit: { asks: [[103, 2]], bids: [[102, 2]] },
+        okx: { asks: [[102, 2]], bids: [[101, 2]] },
+      },
+      "ETH/USDC": {
+        binance: { asks: [[10, 20]], bids: [[9.9, 20]] },
+        bybit: { asks: [[11, 20]], bids: [[10.9, 20]] },
+        okx: { asks: [[10.8, 20]], bids: [[10.7, 20]] },
+      },
+    },
+    notionalUsd: 100,
+    feesBps: { binance: 10, bybit: 10, okx: 10 },
+    minNetBps: 5,
+  });
+
+  assert.ok(opportunities.length > 2);
+  assert.equal(opportunities[0].symbol, "ETH/USDC");
+  assert.equal(opportunities[0].buyVenue, "binance");
+  assert.equal(opportunities[0].sellVenue, "bybit");
+  assert.equal(opportunities[0].status, "meets_minimum_estimated_edge");
+  assert.ok(opportunities.some((opportunity) => opportunity.symbol === "BTC/USDT"));
+  assert.ok(opportunities.every((opportunity) => opportunity.executionEnabled === false));
 });

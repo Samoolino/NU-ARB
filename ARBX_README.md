@@ -1,6 +1,6 @@
 # ARBX 2.0 - multi-exchange triangular + cross-exchange arbitrage engine
 
-**Read first.** This code enforces a *pre-trade worst-case floor* and *post-trade verification* on every order. It does **not** and cannot guarantee profit: fees, latency and missed legs decide the outcome. On liquid spot markets, most scans show no edge. Paper mode will tell you honestly how often one appears.
+**Read first.** This code enforces a *modeled pre-trade minimum floor* and *post-trade verification*. It does **not** and cannot assure realized profit: fee-tier differences, latency, partial fills, non-atomic cross-venue orders, and unwind prices can still create losses. On liquid spot markets, most scans show no edge.
 
 ## 0. What is in the box
 
@@ -10,13 +10,13 @@
 | Discovery | `graph.py` | every spot market -> all triangles from stablecoin starts; ranked by liquidity tier, then **lowest total taker fee** (the low-fee "vehicle"); trimmed to your WebSocket budget |
 | Streams | `market.py` | one WS watcher per order book, auto-reconnect, local-receive-time staleness, `LatencyGuard` |
 | Strategy | `strategy.py` | depth-walking (VWAP) cycle math, IOC limit price per leg, worst-case result |
-| **Gate** | `gate.py` | the Profit/No-Loss gate + risk kill-switch (every trade passes it) |
+| **Gate** | `gate.py` | the modeled profit-floor gate + risk kill-switch (every trade passes it) |
 | Execution | `execute.py` | Paper / Live (IOC limits, real fills feed next leg, unwind on missed leg) / Cross |
 | Orchestration | `worker.py`, `hub.py` | one async worker per exchange, cross-exchange scanner, settle + verify + journal |
 | Transfers | `network.py` | cheapest token+chain to *rebalance* inventory between exchanges |
 | Ops | `cli.py`, `ui.py`, `selftest.py` | `run`, `probe`, `transfer-plan`, `selftest`, dashboard |
 
-**Deliberate limits:** `Bitunix` is not in ccxt/ccxt.pro (checked, v4.5.84), so it is not supported here; it needs a custom adapter. Supported examples: binance, bybit, okx, kucoin, gate, mexc, bitget, htx. "Every token" = every *spot* market the exchange lists, capped by `BOT_MAX_SYMBOLS` streams per exchange (ranked by volume); subscribing to thousands of books adds latency without adding edge. On-chain transfers are never in the trading loop (minutes, not milliseconds); cross-exchange trading uses **pre-funded balances on both sides**.
+**Deliberate limits:** The registry includes 18 venues, including Binance, Bybit, MEXC, HTX, KuCoin, and Bitfinex. `Bitunix` has no installed ccxt/ccxt.pro adapter and requires a custom integration. "Every token" = every *spot* market the exchange lists, capped by `BOT_MAX_SYMBOLS` streams per venue; subscribing to thousands of books adds latency without adding edge. On-chain transfers are never in the trading loop; cross-exchange trading uses **pre-funded balances on both sides**.
 
 ## 1. The no-loss gate, precisely
 
@@ -24,11 +24,10 @@ For every trade, before any order is sent:
 1. Books fresh (`max_book_age_ms`, local monotonic clock) and REST RTT p95 healthy.
 2. Depth-walked expected edge >= `min_net_bps` after **per-market taker fees on every leg**.
 3. Each leg gets an **IOC limit price** = marginal book price +/- `limit_tol_bps`.
-4. **Worst case** = every leg filled *exactly at its limit*, fees included. Must be >= `min_worst_bps` and >= `min_profit_usd`. Any fill within limits is at least this good.
+4. **Modeled floor** = every leg filled *exactly at its IOC limit*, using estimated fees. It must be >= `min_worst_bps` and >= `min_profit_usd`; this is not an execution or realized-PnL guarantee.
 5. Exchange min amount / min notional, balance/inventory, trades-per-minute cap, global halt flag.
 
-After every trade: realized PnL must be >= guaranteed floor - `verify_slack_bps`; otherwise the bot **halts** ("ASSURANCE VIOLATED": wrong fee tier, rounding, etc.).
-**Not covered:** a later leg missing after an earlier leg filled. The bot then market-unwinds the executed legs (bounded loss), **halts**, and tells you to check the account.
+After every trade, realized PnL is compared with the modeled floor; a miss beyond `verify_slack_bps` halts the bot. **Not covered:** partial/missed legs, non-atomic cross-exchange fills, actual fee differences, and market unwind losses.
 
 ## 2. Speed optimizers (what is actually applied)
 
@@ -59,7 +58,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt             # ccxt + uvloop
 python run.py selftest                      # must print SELFTEST PASSED (offline, no keys)
 ```
-**Windows (native, no WSL):** Python 3.12 is supported; use PowerShell and the project's `.venv`, install `requirements.txt`, and run `selftest` before the read-only `live-preflight`. Full live cross-venue execution still requires two venues with authoritative live-permission probes; currently only Binance can qualify, so startup remains fail-closed. See [the Windows pilot setup](arb_bot/README.md#windows-powershell-no-wsl-required).
+**Windows (native, no WSL):** Python 3.12 is supported; use PowerShell and the project's `.venv`, install `requirements.txt`, and run `selftest` before the read-only `live-preflight`. Full live cross-venue execution still requires two venues with authoritative live-permission probes; Binance, Bybit, and KuCoin may qualify only when each account's fresh permission, IP, balance, stream, and execution checks pass. Startup remains fail-closed otherwise. See [the Windows pilot setup](arb_bot/README.md#windows-powershell-no-wsl-required).
 
 ### C. Exchange API keys (do this on the exchange website)
 1. Create a **new sub-account** funded with only what you can afford to lose.
@@ -86,7 +85,7 @@ export BOT_BYBIT_KEY="..."   BOT_BYBIT_SECRET="..."
 python run.py --headless 2>&1 | tee paper.log     # or dashboard: python run.py
 ```
 Review `trade_journal.csv`. **Go-live criteria - all must hold:**
-- >= 100 paper trades, PnL > 0 **after** `paper_penalty_bps`, no "ASSURANCE VIOLATED".
+- >= 100 paper trades, PnL > 0 **after** `paper_penalty_bps`, no "MODELED FLOOR BREACHED".
 - Rejections dominated by `net_edge` (healthy). Many `stale_book`/`latency_degraded` -> host too slow.
 - If there are ~0 trades: that is the true answer for those markets; do not loosen the gate to force trades.
 - Check the fee tier you configured equals the exchange's real tier (`BOT_DEFAULT_TAKER_BPS`).
@@ -109,13 +108,13 @@ Restart=no
 WantedBy=multi-user.target
 ```
 (`Restart=no` on purpose: a halt means a human must look.) `sudo systemctl enable --now arbx` -> `journalctl -u arbx -f`.
-3. After the first 20 live trades compare `trade_journal.csv` with exchange trade history. Scale size **only** if realized ~ guaranteed floor.
+3. After the first 20 live trades compare `trade_journal.csv` with exchange trade history. Scale size only after verifying fees, fills, and unwind outcomes; the modeled floor is not guaranteed.
 
 ### G. If it halts
 | Log line | Meaning | Action |
 |---|---|---|
 | `LEG FAILURE ... unwind attempted` | a later leg missed | open the exchange, confirm holdings, flatten manually, review latency |
-| `ASSURANCE VIOLATED` | realized < guaranteed | check fee tier / fee token / tick sizes before restarting |
+| `MODELED FLOOR BREACHED` | realized PnL missed the model floor | check fee tier / fee token / tick sizes before restarting |
 | `max loss reached` | risk limit | stop; review journal; raise limits only with evidence |
 | `disabled: median RTT ...` | host too far | move host region (step A) |
 | `not supported by ccxt.pro` | bad exchange id | use an id from `ccxt.pro.exchanges` |
@@ -125,7 +124,7 @@ WantedBy=multi-user.target
 | Env var | Default | Effect |
 |---|---|---|
 | `BOT_MIN_NET_BPS` | 3 | expected edge after fees |
-| `BOT_MIN_WORST_BPS` | 0.5 | guaranteed floor (raise for safety) |
+| `BOT_MIN_WORST_BPS` | 0.5 | modeled floor in basis points (not a realized-profit guarantee) |
 | `BOT_LIMIT_TOL_BPS` | 1 | IOC price tolerance: bigger = more fills, thinner floor |
 | `BOT_MAX_RTT_MS` | 80 | live refuses above this median RTT |
 | `BOT_MAX_SYMBOLS` | 120 | order-book streams per exchange |
