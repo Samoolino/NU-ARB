@@ -18,6 +18,8 @@
 
 **Deliberate limits:** `Bitunix` is not in ccxt/ccxt.pro (checked, v4.5.84), so it is not supported here; it needs a custom adapter. Supported examples: binance, bybit, okx, kucoin, gate, mexc, bitget, htx. "Every token" = every *spot* market the exchange lists, capped by `BOT_MAX_SYMBOLS` streams per exchange (ranked by volume); subscribing to thousands of books adds latency without adding edge. On-chain transfers are never in the trading loop (minutes, not milliseconds); cross-exchange trading uses **pre-funded balances on both sides**.
 
+Live cross-venue mode requires at least two venues to pass the fresh REST balance, authenticated balance WebSocket, public spot-book WebSocket, latency, execution-capability, and venue permission checks. Every selected venue must pass; a single failure stops the entire live startup. Balances are fetched again after a candidate is found and the opportunity is recomputed from the latest books before any order is considered. Current permission probes can qualify Binance only, so live multi-venue mode remains fail-closed until another venue has an independently verified permission probe. Exchange listings, account connectivity, profitable paper results, and a calculated price floor are not proof of future profit.
+
 ## 1. The no-loss gate, precisely
 
 For every trade, before any order is sent:
@@ -59,7 +61,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt             # ccxt + uvloop
 python run.py selftest                      # must print SELFTEST PASSED (offline, no keys)
 ```
-**Windows (development/paper only):** install Python 3.12 from python.org (tick *Add to PATH*), open PowerShell in the folder, then:
+**Windows (native, no WSL):** install Python 3.12 from python.org (tick *Add to PATH*), open PowerShell in the folder, then:
 `pip install -r requirements.txt` -> `python run.py selftest`. In IDLE: open `run.py`, press **F5**.
 
 ### C. Exchange API keys (do this on the exchange website)
@@ -92,8 +94,45 @@ Review `trade_journal.csv`. **Go-live criteria - all must hold:**
 - If there are ~0 trades: that is the true answer for those markets; do not loosen the gate to force trades.
 - Check the fee tier you configured equals the exchange's real tier (`BOT_DEFAULT_TAKER_BPS`).
 
-### F. Live (small first)
-1. `export BOT_MODE=live BOT_TRADE_SIZE_USD=10 BOT_MAX_LOSS_USD=2` (cross-exchange stays off unless `BOT_CROSS_LIVE=1`).
+### F. Live pilot (cross-venue, guarded)
+The live pilot target defaults to **$200 realized net PnL per ignition**. The hard session-loss ceiling is **$3** (a smaller value is allowed); trade size is capped at **$25**. The operator must choose a positive worst-case edge and minimum profit floor. These bounds do not assure profit or cap the loss from a missed fill, exchange outage, or unwind.
+
+1. Live mode requires at least two venues and explicit `BOT_CROSS_LIVE=1`. Every venue must pass live permission verification; **with the current probes, live cross-venue startup cannot yet pass because only Binance's permission probe qualifies. Do not bypass this check.**
+2. The transfer planner ranks withdrawal/deposit routes and estimated network costs only. No funds are moved automatically. Cross-venue IOC trades require pre-funded quote balance at the buy venue and base-asset inventory at the sell venue; chain bridges are not atomic with exchange orders and are not an execution leg.
+3. `python run.py live-preflight` performs current read-only account, balances, permission, and websocket checks; it places no orders or transfers. `python run.py run --headless` repeats the preflight and starts only if all selected venues pass. An opportunity is reevaluated after balance refresh, but it can still disappear and a partial/missed fill can lose money.
+4. `python run.py opportunities` prints the latest persisted depth/latency/edge/gate evidence. `trade_journal.sqlite3` holds opportunity records; `trade_journal.csv` and its SQLite companion record executions. A halt requires an operator review before a new ignition.
+
+### G. Windows PowerShell (no WSL required)
+The supported runtime here is native Windows with Python 3.12 and the repository's `.venv`; WSL is not used. From `arb_bot`:
+```powershell
+& ..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+& ..\.venv\Scripts\python.exe run.py selftest
+```
+Exchange credentials must be entered into the current PowerShell process (never commit or paste them into chat). Example for two HMAC venues; use the exact key/passphrase fields required by each venue:
+```powershell
+$env:BOT_EXCHANGES = "binance,bybit"
+$env:BOT_MODE = "live"
+$env:BOT_CROSS = "1"
+$env:BOT_CROSS_LIVE = "1"
+$env:BOT_TRADE_SIZE_USD = "5"
+$env:BOT_MAX_LOSS_USD = "3"
+$env:BOT_TARGET_PROFIT_USD = "200"
+$env:BOT_BINANCE_KEY = Read-Host "Binance API key"
+$secret = Read-Host "Binance API secret" -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
+try { $env:BOT_BINANCE_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+$env:BOT_BYBIT_KEY = Read-Host "Bybit API key"
+$secret = Read-Host "Bybit API secret" -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
+try { $env:BOT_BYBIT_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+& ..\.venv\Scripts\python.exe run.py live-preflight
+```
+Only continue to `run.py run --headless` if every selected venue reports `liveEligible=true`; at present a second venue will fail this permission gate. Windows dependency health can be checked with `python -m pip check`. Docker and WSL are not application requirements. Keep the process attached in the terminal; stopping the process cancels new orders but does not reverse existing exchange holdings.
+
+### H. Linux/VPS live deployment
+1. `export BOT_MODE=live BOT_TRADE_SIZE_USD=10 BOT_MAX_LOSS_USD=3 BOT_TARGET_PROFIT_USD=200 BOT_CROSS=1 BOT_CROSS_LIVE=1`.
 2. Run headless in a supervisor so it restarts and logs:
 ```ini
 # /etc/systemd/system/arbx.service
@@ -112,7 +151,7 @@ WantedBy=multi-user.target
 (`Restart=no` on purpose: a halt means a human must look.) `sudo systemctl enable --now arbx` -> `journalctl -u arbx -f`.
 3. After the first 20 live trades compare `trade_journal.csv` with exchange trade history. Scale size **only** if realized ~ guaranteed floor.
 
-### G. If it halts
+### I. If it halts
 | Log line | Meaning | Action |
 |---|---|---|
 | `LEG FAILURE ... unwind attempted` | a later leg missed | open the exchange, confirm holdings, flatten manually, review latency |

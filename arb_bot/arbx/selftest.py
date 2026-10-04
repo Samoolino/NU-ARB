@@ -172,4 +172,3 @@ def run_selftest(seconds: float = 6.0) -> bool:
     ok = s.trades > 0 and not hub.risk.halted and s.pnl > 0 and rows == s.trades + s.failed
     print("SELFTEST PASSED" if ok else "SELFTEST FAILED")
     return ok
-

@@ -45,6 +45,26 @@ class TradeJournal:
             cumulative_realized_pnl REAL NOT NULL
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS trades_session_idx ON trades(session_id, id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS opportunities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            mode TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            exchange_a TEXT NOT NULL,
+            exchange_b TEXT,
+            symbol TEXT NOT NULL,
+            requested_usd REAL NOT NULL,
+            expected_net_usd REAL NOT NULL,
+            worst_case_net_usd REAL NOT NULL,
+            expected_net_bps REAL NOT NULL,
+            worst_case_net_bps REAL NOT NULL,
+            book_age_ms REAL NOT NULL,
+            decision TEXT NOT NULL,
+            rejection_reason TEXT,
+            evidence TEXT NOT NULL DEFAULT '{}'
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS opportunities_session_idx ON opportunities(session_id, id)")
         self.db.commit()
 
     def realized(self, session_id: str) -> float:
@@ -71,6 +91,37 @@ class TradeJournal:
         self.db.commit()
         return int(cursor.lastrowid)
 
+    def append_opportunity(self, record: dict[str, Any]) -> int:
+        columns = (
+            "session_id", "mode", "strategy", "exchange_a", "exchange_b", "symbol", "requested_usd",
+            "expected_net_usd", "worst_case_net_usd", "expected_net_bps", "worst_case_net_bps",
+            "book_age_ms", "decision", "rejection_reason", "evidence",
+        )
+        values = [record.get(key) for key in columns]
+        values[-1] = json.dumps(record.get("evidence", {}), separators=(",", ":"), allow_nan=False)
+        placeholders = ",".join("?" for _ in columns)
+        cursor = self.db.execute(
+            f"INSERT INTO opportunities ({','.join(columns)}) VALUES ({placeholders})", values,
+        )
+        self.db.commit()
+        return int(cursor.lastrowid)
+
+    def recent_opportunities(self, limit: int = 25) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 100:
+            raise ValueError("opportunity history limit must be between 1 and 100")
+        rows = self.db.execute(
+            """SELECT id, session_id, timestamp, mode, strategy, exchange_a, exchange_b, symbol, requested_usd,
+                      expected_net_usd, worst_case_net_usd, expected_net_bps, worst_case_net_bps, book_age_ms,
+                      decision, rejection_reason, evidence
+               FROM opportunities ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            record = dict(row)
+            record["evidence"] = json.loads(record["evidence"])
+            results.append(record)
+        return results
+
     def close(self) -> None:
         self.db.close()
-

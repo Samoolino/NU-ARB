@@ -36,8 +36,35 @@ class PermissionProbeTests(unittest.TestCase):
         self.assertFalse(result["liveEligible"])
 
     def test_unknown_exchange_permissions_never_claim_live_eligibility(self):
-        for exchange_id in ("bybit", "htx", "mexc", "gateio", "kucoin", "bitfinex"):
+        for exchange_id in ("bybit", "htx", "mexc", "gateio", "kucoin"):
             with self.subTest(exchange_id=exchange_id):
                 result = asyncio.run(inspect_permissions(exchange_id, object()))
                 self.assertFalse(result["liveEligible"])
                 self.assertEqual(result["tradePermission"], "unverified")
+
+    def test_bitfinex_reports_read_only_scope_evidence_without_claiming_spot_eligibility(self):
+        exchange = type("Exchange", (), {})()
+        exchange.privatePostAuthRPermissions = AsyncMock(return_value=[
+            ["orders", 1, 1],
+            ["wallets", 1, 0],
+            ["withdraw", 0, 0],
+            ["funding", 0, 0],
+            ["positions", 0, 0],
+        ])
+
+        result = asyncio.run(inspect_permissions("bitfinex", exchange))
+
+        self.assertEqual(result["orderWritePermission"], True)
+        self.assertEqual(result["withdrawWritePermission"], False)
+        self.assertEqual(result["fundingWritePermission"], False)
+        self.assertEqual(result["positionsWritePermission"], False)
+        self.assertEqual(result["spotAndMarginTradePermission"], "unverified")
+        self.assertEqual(result["ipRestricted"], "unverified")
+        self.assertFalse(result["liveEligible"])
+
+    def test_bitfinex_rejects_malformed_permission_scopes(self):
+        exchange = type("Exchange", (), {})()
+        exchange.privatePostAuthRPermissions = AsyncMock(return_value=[["orders", 1, "yes"]])
+
+        with self.assertRaisesRegex(RuntimeError, "invalid scope"):
+            asyncio.run(inspect_permissions("bitfinex", exchange))

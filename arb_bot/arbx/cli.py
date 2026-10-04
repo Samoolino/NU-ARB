@@ -30,7 +30,7 @@ async def _probe(cfg: Config) -> None:
                 await ex.close()
 
 
-async def _account_preflight(cfg: Config, symbol: str | None = None) -> bool:
+async def _account_preflight(cfg: Config, symbol: str | None = None, *, require_live: bool = False) -> bool:
     from arbx.web_api import _make_exchange, _probe_exchange
 
     symbol = symbol or os.getenv("BOT_PREFLIGHT_SYMBOL", "BTC/USDT")
@@ -47,10 +47,11 @@ async def _account_preflight(cfg: Config, symbol: str | None = None) -> bool:
         if x.password:
             credentials["password"] = x.password
         try:
-            exchange = _make_exchange(x.id, x.auth_mode, credentials)
-            evidence, balances, book = await _probe_exchange(x.id, exchange, symbol)
+            venue_id = x.venue_id or x.id
+            exchange = _make_exchange(venue_id, x.auth_mode, credentials)
+            evidence, balances, book = await _probe_exchange(venue_id, exchange, symbol)
             permission = evidence.get("permissions") or {}
-            print(f"[{x.id}] state={evidence['connectionState']} "
+            print(f"[{venue_id}] state={evidence['connectionState']} "
                   f"scannerEligible={str(evidence['scannerEligible']).lower()} "
                 f"executionEligible={str(evidence['executionEligible']).lower()} "
                   f"liveEligible={str(evidence['liveEligible']).lower()} "
@@ -62,7 +63,7 @@ async def _account_preflight(cfg: Config, symbol: str | None = None) -> bool:
                     print(f"  balance {asset}: free={values['free']:.8g} total={values['total']:.8g}")
             if book:
                 print(f"  book {book['symbol']}: bid={book['bestBid']} ask={book['bestAsk']}")
-            if not evidence["scannerEligible"]:
+            if not evidence["scannerEligible"] or (require_live and not evidence["liveEligible"]):
                 ready = False
         except Exception as exc:
             print(f"[{x.id}] ERROR {type(exc).__name__}")
@@ -73,7 +74,11 @@ async def _account_preflight(cfg: Config, symbol: str | None = None) -> bool:
                     await exchange.close()
                 except Exception:
                     pass
-    print("Preflight passed" if ready else "Preflight incomplete; see per-venue evidence above")
+    if ready:
+        print("Live preflight passed; no orders or transfers were submitted" if require_live
+              else "Preflight passed")
+    else:
+        print("Preflight incomplete; see per-venue evidence above")
     return ready
 
 
@@ -106,17 +111,41 @@ def main(argv=None) -> None:
     cfg = Config.from_env()
     if cmd == "preflight":
         cfg.mode = "paper"
+    if cmd == "live-preflight":
+        cfg.mode = "live"
     cfg.validate()
     lf = loop_factory()
     if cmd == "preflight":
         if not asyncio.run(_account_preflight(cfg), loop_factory=lf):
             sys.exit(1)
+    elif cmd == "live-preflight":
+        if not asyncio.run(_account_preflight(cfg, require_live=True), loop_factory=lf):
+            sys.exit(1)
     elif cmd == "probe":
         asyncio.run(_probe(cfg), loop_factory=lf)
     elif cmd == "transfer-plan":
         asyncio.run(_transfer_plan(cfg), loop_factory=lf)
+    elif cmd == "opportunities":
+        from arbx.journal import TradeJournal
+        journal = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
+        try:
+            rows = journal.recent_opportunities()
+            if not rows:
+                print("No qualifying opportunities have been recorded.")
+            for row in rows:
+                route = row["exchange_a"] + (f" -> {row['exchange_b']}" if row["exchange_b"] else "")
+                print(f"{row['timestamp']} {row['decision']:<18} {route:<22} {row['symbol']:<20} "
+                      f"expected=${row['expected_net_usd']:+.4f} "
+                      f"worst-case=${row['worst_case_net_usd']:+.4f} "
+                      f"age={row['book_age_ms']:.1f}ms"
+                      + (f" reason={row['rejection_reason']}" if row["rejection_reason"] else ""))
+        finally:
+            journal.close()
     elif cmd == "run":
         print("speed optimizations:", ", ".join(apply_speed_optimizations()) or "none")
+        if cfg.mode == "live" and not asyncio.run(
+                _account_preflight(cfg, require_live=True), loop_factory=lf):
+            sys.exit(1)
         if "--headless" in argv:
             hub = Hub(cfg)
             try:

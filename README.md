@@ -34,7 +34,7 @@ In Vercel Production, set `ARBX_CONTROL_API_URL` to the Railway HTTPS origin (fo
 
 For Binance live eligibility, configure stable Railway outbound IPs and allowlist each one on the exchange API key. The service verifies spot permission, disabled withdrawals/transfers, IP restrictions, and fresh private/public WebSocket health before enabling live mode. The panel still requires the operator to enable live mode and the user to type `I ACCEPT REAL ORDERS`; order size is capped at $25, the loss stop at $5, and a profit target is required. The engine does not auto-resume a live session after restart. No credentials belong in GitHub.
 
-The control API accepts up to four selected venues for one live session, and live cross-exchange execution has a separate `cross_live` confirmation that requires at least two selected venues. Each venue must independently pass fresh live permission and stream checks. Only Binance currently has a supported permission-scope probe, so additional venues remain ineligible and this request capability does not itself enable multi-venue live trading. Keep the operator flag disabled until each venue's documented permission contract and real account preflight have been validated.
+The control API accepts up to four selected venues for one live session; live execution requires at least two venues and explicit `cross_live` selection. Each venue must independently pass fresh balance, permission, and stream checks. Binance's probe is the only one that can currently qualify for live eligibility, so live multi-venue starts correctly fail closed. Live session loss is capped at $3 and the UI defaults the per-ignition realized profit target to $200. The engine records qualifying opportunity estimates and gate decisions in SQLite. Keep the operator flag disabled until a second venue's documented permission contract and real account preflight have been validated.
 
 Railway volumes, the Railway public domain, Vercel project settings, and environment secrets are account-level resources; the repository config cannot create them.
 
@@ -68,4 +68,3 @@ python run.py --headless
 ```
 
 The bot defaults to paper mode. Live mode can place real exchange orders; it requires exchange credentials, and cross-exchange live orders require the separate `BOT_CROSS_LIVE=1` opt-in. Arbitrage is risky and profits are not guaranteed. Read the full [operations guide](ARBX_README.md) before configuring exchanges. Never commit API keys.
-

@@ -21,6 +21,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from arbx.config import CCXT_ADAPTERS
 from arbx.market import orderbook_limit
 from arbx.permissions import inspect_permissions
 
@@ -54,7 +55,7 @@ AUTH_SCHEMAS["binance"] = {"modes": [
     {"id": "rsa", "label": "RSA key pair", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "privateKey", "label": "RSA private key"}]},
     {"id": "ed25519", "label": "Ed25519 key pair", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "privateKey", "label": "Ed25519 private key"}]},
 ]}
-PYTHON_ADAPTERS = {"gateio": "gate"}
+PYTHON_ADAPTERS = CCXT_ADAPTERS
 PERMISSION_VERIFICATION_VENUES = {"binance"}
 app = FastAPI(title="ARBX Control API", version="1.0.0")
 engine_owner_id: str | None = None
@@ -209,7 +210,7 @@ class EngineStart(BaseModel):
     mode: Literal["paper", "live"]
     exchange_ids: list[str] = Field(min_length=1, max_length=4)
     trade_size_usd: float = Field(gt=0, le=25)
-    max_loss_usd: float = Field(gt=0, le=5)
+    max_loss_usd: float = Field(gt=0, le=3)
     target_profit_usd: float = Field(gt=0, le=1000)
     require_private_stream: bool = True
     cross_live: bool = False
@@ -224,8 +225,10 @@ class EngineStart(BaseModel):
 
     @model_validator(mode="after")
     def validate_cross_live_selection(self):
-        if self.cross_live and (self.mode != "live" or len(self.exchange_ids) < 2):
-            raise ValueError("Live cross-exchange execution requires at least two venues in live mode")
+        if self.mode == "live" and (not self.cross_live or len(self.exchange_ids) < 2):
+            raise ValueError("Live pilot requires at least two venues and live cross-exchange execution")
+        if self.cross_live and self.mode != "live":
+            raise ValueError("Live cross-exchange execution can only be selected in live mode")
         return self
 
 
@@ -279,9 +282,13 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
             raise RuntimeError("verification symbol is not a spot market")
         market_ok = True
         balance = await exchange.fetch_balance()
+        if not isinstance(balance, dict) or any(
+            not isinstance(balance.get(field), dict) for field in ("free", "used", "total")
+        ):
+            raise RuntimeError("exchange returned an incomplete unified balance snapshot")
         evidence["authentication"] = True
         evidence["account"] = True
-        evidence["balances"] = isinstance(balance, dict)
+        evidence["balances"] = True
         balance_summary = {asset: {"free": float((balance.get("free") or {}).get(asset) or 0),
                                    "used": float((balance.get("used") or {}).get(asset) or 0),
                                    "total": float((balance.get("total") or {}).get(asset) or 0)}
@@ -707,7 +714,8 @@ async def engine_start(payload: EngineStart, request: Request):
                 credentials = credentials_by_id[exchange_id]
                 if exchange_id == "binance" and auth_modes[exchange_id] in ("rsa", "ed25519"):
                     credentials = {**credentials, "secret": credentials.get("privateKey", "")}
-                exchange_cfgs.append(ExchangeCfg(id=adapter_id, api_key=credentials.get("apiKey", ""),
+                exchange_cfgs.append(ExchangeCfg(id=adapter_id, venue_id=exchange_id,
+                                                 api_key=credentials.get("apiKey", ""),
                                                  secret=credentials.get("secret", ""),
                                                  password=credentials.get("password", ""),
                                                  require_private_stream=True, auth_mode=auth_modes[exchange_id]))
@@ -748,4 +756,3 @@ def engine_stop(request: Request):
         engine_phase = "STOPPING"
     engine_hub.request_stop()
     return {"status": "STOPPING"}
-

@@ -63,8 +63,8 @@ class ControlApiTests(unittest.TestCase):
 
     def test_live_engine_is_operator_disabled_by_default(self):
         response = self.client.post("/api/v1/engine/start", headers=self.headers, json={
-            "mode": "live", "exchange_ids": ["binance"], "trade_size_usd": 5,
-            "max_loss_usd": 2, "target_profit_usd": 1,
+            "mode": "live", "exchange_ids": ["binance", "bybit"], "trade_size_usd": 5,
+            "max_loss_usd": 2, "target_profit_usd": 1, "cross_live": True,
             "live_confirmation": "I ACCEPT REAL ORDERS",
         })
         self.assertEqual(response.status_code, 503)
@@ -149,4 +149,3 @@ class ControlApiTests(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
-

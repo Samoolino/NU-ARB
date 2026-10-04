@@ -58,6 +58,7 @@ class Hub:
         self.workers: list[ExchangeWorker] = []
         self.cross_syms: set = set()
         self.cross_exec = None
+        self._opportunity_last_written: dict[str, float] = {}
         self._paper = PaperExecutor(cfg)
         self._loop = self._stop = None
         self._t_print = 0.0
@@ -144,6 +145,34 @@ class Hub:
         if tgt and st.equity >= tgt:
             self.risk.halt(f"target equity {tgt} reached (funds remain on the exchange)")
 
+    def record_opportunity(self, *, strategy: str, exchange_a: str, exchange_b: str | None,
+                           symbol: str, requested_usd: float, expected_net_usd: float,
+                           worst_case_net_usd: float, expected_net_bps: float,
+                           worst_case_net_bps: float, book_age_ms: float, approved: bool,
+                           rejection_reason: str | None, evidence: dict) -> None:
+        key = f"{strategy}:{exchange_a}:{exchange_b or ''}:{symbol}"
+        now = time.monotonic()
+        if now - self._opportunity_last_written.get(key, 0.0) < 1.0:
+            return
+        self._opportunity_last_written[key] = now
+        self.journal_store.append_opportunity({
+            "session_id": self.session_id,
+            "mode": self.cfg.mode,
+            "strategy": strategy,
+            "exchange_a": exchange_a,
+            "exchange_b": exchange_b,
+            "symbol": symbol,
+            "requested_usd": requested_usd,
+            "expected_net_usd": expected_net_usd,
+            "worst_case_net_usd": worst_case_net_usd,
+            "expected_net_bps": expected_net_bps,
+            "worst_case_net_bps": worst_case_net_bps,
+            "book_age_ms": book_age_ms,
+            "decision": "APPROVED_BY_GATE" if approved else "REJECTED_BY_GATE",
+            "rejection_reason": rejection_reason,
+            "evidence": evidence,
+        })
+
     # ---- cross-exchange ---------------------------------------------------
     @property
     def cross_active(self) -> bool:
@@ -180,13 +209,46 @@ class Hub:
         if bw.lock.locked() or sw.lock.locked():
             return
         live = self.cfg.mode == "live"
-        d = self.gate.check_cross(x, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
-                                  bw.free_of(x.quote_ccy), sw.free.get(x.base_ccy, 0.0) if live else math.inf)
-        if not d.ok:
-            self.stats.rejects[d.reason] += 1
-            return
         first, second = sorted((bw, sw), key=lambda w: w.id)
         async with first.lock, second.lock:
+            if live:
+                results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
+                errors = [result for result in results if isinstance(result, Exception)]
+                if errors:
+                    self.risk.halt(
+                        f"cross-venue balance refresh failed before order ({type(errors[0]).__name__})"
+                    )
+                    return
+            buy_book = bw.md.books.get(x.symbol)
+            sell_book = sw.md.books.get(x.symbol)
+            if buy_book is None or sell_book is None:
+                self.stats.rejects["missing_order_book"] += 1
+                return
+            refreshed = evaluate_cross(x.symbol, bw, sw, buy_book, sell_book,
+                                       self.trade_size(), self.cfg, time.monotonic())
+            if refreshed is None:
+                self.stats.rejects["opportunity_disappeared"] += 1
+                return
+            x = refreshed
+            d = self.gate.check_cross(x, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
+                                      bw.free_of(x.quote_ccy), sw.free.get(x.base_ccy, 0.0) if live else math.inf)
+            self.record_opportunity(
+                strategy="cross_exchange", exchange_a=x.buy_ex, exchange_b=x.sell_ex, symbol=x.symbol,
+                requested_usd=x.cost, expected_net_usd=x.expected_usd, worst_case_net_usd=x.worst_usd,
+                expected_net_bps=x.net_bps, worst_case_net_bps=x.worst_bps, book_age_ms=x.age_ms,
+                approved=d.ok, rejection_reason=None if d.ok else d.reason,
+                evidence={
+                    "baseQuantity": x.base, "limitBuy": x.limit_buy, "limitSell": x.limit_sell,
+                    "buyRestLatency": bw.lat.stats(), "sellRestLatency": sw.lat.stats(),
+                    "buyBookSequence": buy_book.sequence, "sellBookSequence": sell_book.sequence,
+                    "buyBookExchangeTimestamp": buy_book.timestamp_exchange,
+                    "sellBookExchangeTimestamp": sell_book.timestamp_exchange,
+                    "rebalanceHaircutBps": self.cfg.rebalance_haircut_bps,
+                },
+            )
+            if not d.ok:
+                self.stats.rejects[d.reason] += 1
+                return
             t0, name = time.perf_counter(), f"X {x.symbol} {x.buy_ex}>{x.sell_ex}"
             try:
                 res = await (self.cross_exec.execute(x) if live else self._paper.execute_cross(x))
@@ -196,7 +258,12 @@ class Hub:
                 return
             self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
             if live:
-                await asyncio.gather(bw.refresh_balance(), sw.refresh_balance())
+                results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
+                errors = [result for result in results if isinstance(result, Exception)]
+                if errors:
+                    self.risk.halt(
+                        f"cross-venue balance refresh failed after order ({type(errors[0]).__name__})"
+                    )
             await asyncio.sleep(self.cfg.cooldown_s)
 
     # ---- main -----------------------------------------------------------------
@@ -225,6 +292,8 @@ class Hub:
                     await w.close()
                 else:
                     ok.append(w)
+            if self.cfg.mode == "live" and len(ok) != len(self.workers):
+                raise RuntimeError("live preflight failed for a selected venue; no live venue will be started")
             self.workers = ok
             if not ok:
                 raise RuntimeError("no exchange passed preparation (see errors above)")
@@ -269,4 +338,3 @@ class Hub:
                 self.stats.status = "HALTED" if self.risk.halted else "STOPPED"
             self._push()
             self.journal_store.close()
-

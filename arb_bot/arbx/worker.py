@@ -6,9 +6,11 @@ import asyncio
 import time
 from contextlib import suppress
 
+from arbx.config import CCXT_ADAPTERS
 from arbx.execute import LegFailure, LiveExecutor, PaperExecutor
 from arbx.graph import discover
 from arbx.market import LatencyGuard, MarketData
+from arbx.permissions import inspect_permissions
 from arbx.strategy import evaluate_triangle
 from arbx.util import STABLES
 
@@ -24,10 +26,10 @@ def spot_market_options(exchange_id: str) -> dict:
 
 def build_exchange(x, live: bool):
     import ccxt.pro as ccxtpro
-    cls = getattr(ccxtpro, x.id, None)
+    cls = getattr(ccxtpro, CCXT_ADAPTERS.get(x.id, x.id), None)
     if cls is None:
         raise RuntimeError(f"'{x.id}' is not supported by ccxt.pro (see ccxt.pro.exchanges)")
-    params = {"enableRateLimit": True, "options": spot_market_options(x.id)}
+    params = {"enableRateLimit": True, "options": spot_market_options(x.venue_id or x.id)}
     if x.api_key and x.secret:
         secret = x.secret.encode("utf-8") if x.id == "binance" and x.auth_mode in ("rsa", "ed25519") else x.secret
         params.update(apiKey=x.api_key, secret=secret)
@@ -43,12 +45,14 @@ class ExchangeWorker:
         self.private_stream_ready = False
         self.private_last_message: float | None = None
         self.private_stream_error: str | None = None
+        self.balance_last_refresh: float | None = None
         self.ex = self.md = self.lat = self.executor = None
         self.by_symbol: dict = {}
         self.symbols: set = set()
         self.vol: dict = {}
         self.fees: dict = {}
         self.mlimits: dict = {}
+        self.triangles: list = []
         self.free: dict = {}
         self.lock = asyncio.Lock()
         self.tasks: list = []
@@ -89,6 +93,13 @@ class ExchangeWorker:
             self.hub.log("info", f"[{self.id}] authenticated private balance WebSocket verified")
         elif need_private_stream:
             raise RuntimeError("authenticated private balance WebSocket is required but unavailable")
+        if self.live:
+            permissions = await inspect_permissions(self.x.venue_id or self.id, self.ex)
+            if permissions.get("liveEligible") is not True:
+                raise RuntimeError(
+                    f"live key permissions are not verified for {self.x.venue_id or self.id}: "
+                    f"{permissions.get('source', 'unknown permission probe')}"
+                )
         self.lat = LatencyGuard(self.ex, self.cfg)
         st = await self.lat.preflight()
         self.hub.log("info", f"[{self.id}] REST RTT p50={st['p50']:.0f}ms p95={st['p95']:.0f}ms "
@@ -108,12 +119,22 @@ class ExchangeWorker:
                                                 self.x.max_symbols, self.x.default_taker_bps)
         if not tris:
             raise RuntimeError("no triangular cycles found from the configured start assets")
+        self.triangles = tris
         for t in tris:
             for l in t.legs:
                 self.by_symbol.setdefault(l.symbol, []).append(t)
         self._index(self.symbols)
         self.executor = LiveExecutor(self.ex, self.cfg) if self.live else PaperExecutor(self.cfg)
         if self.live:
+            missing = [name for name in ("createOrder", "createMarketOrder", "fetchOrder")
+                       if self.ex.has.get(name) is not True]
+            if missing:
+                raise RuntimeError(f"live adapter lacks required execution capabilities: {', '.join(missing)}")
+            feature_value = getattr(self.ex, "feature_value", None)
+            symbol = next(iter(self.symbols))
+            tif = feature_value(symbol, "createOrder", "timeInForce") if callable(feature_value) else None
+            if not isinstance(tif, dict) or tif.get("IOC") is not True:
+                raise RuntimeError("live adapter does not declare IOC limit support for the selected spot market")
             await self.refresh_balance()      # also warms the authenticated TLS connection
         self.hub.log("info", f"[{self.id}] {len(tris)} cycles over {len(self.symbols)} order books "
                              f"(cheapest vehicle: {min(t.fee_bps for t in tris):.1f} bps total taker fees)")
@@ -132,7 +153,8 @@ class ExchangeWorker:
         self.md = MarketData(self.ex, allsyms, self.cfg.depth, self.hub.log)
         self.tasks = self.md.start() + [asyncio.create_task(self.lat.loop(self.hub.log))]
         if self.live:
-            self.tasks.append(asyncio.create_task(self._balance_loop()))
+            self.tasks.extend((asyncio.create_task(self._balance_loop()),
+                               asyncio.create_task(self._private_balance_loop())))
         elif self.private_stream_ready:
             self.tasks.append(asyncio.create_task(self._private_balance_loop()))
 
@@ -172,13 +194,22 @@ class ExchangeWorker:
                 await self.ex.close()
 
     async def refresh_balance(self) -> None:
-        with suppress(Exception):
-            self.free = {k: float(v) for k, v in ((await self.ex.fetch_balance()).get("free") or {}).items() if v}
+        balance = await self.ex.fetch_balance()
+        if not isinstance(balance, dict) or not isinstance(balance.get("free"), dict):
+            raise RuntimeError("authenticated REST balance refresh returned no free-balance map")
+        self.free = {k: float(v) for k, v in balance["free"].items() if v}
+        self.balance_last_refresh = time.monotonic()
 
     async def _balance_loop(self) -> None:
         while True:
             await asyncio.sleep(30)
-            await self.refresh_balance()
+            try:
+                await self.refresh_balance()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.hub.risk.halt(f"[{self.id}] authenticated balance refresh failed ({type(exc).__name__})")
+                raise
 
     async def _private_balance_loop(self) -> None:
         while True:
@@ -186,6 +217,7 @@ class ExchangeWorker:
                 balance = await self.ex.watch_balance()
                 self.free = {k: float(v) for k, v in (balance.get("free") or {}).items() if v}
                 self.private_last_message = time.monotonic()
+                self.balance_last_refresh = self.private_last_message
             except Exception as exc:
                 self.private_stream_error = type(exc).__name__
                 self.private_stream_ready = False
@@ -220,11 +252,45 @@ class ExchangeWorker:
         hub.stats.signals += 1
         if self.lock.locked():
             return
-        d = hub.gate.check_tri(o, self.mlimits, self.lat.ok(), self.free_of(o.start_asset))
-        if not d.ok:
-            hub.stats.rejects[d.reason] += 1
-            return
         async with self.lock:
+            if self.live:
+                try:
+                    await self.refresh_balance()
+                except Exception as exc:
+                    hub.risk.halt(f"[{self.id}] could not refresh balance before order ({type(exc).__name__})")
+                    return
+                tri = next((item for item in self.triangles if item.name == o.name), None)
+                if tri is None:
+                    hub.risk.halt(f"[{self.id}] selected cycle disappeared before execution")
+                    return
+                o = evaluate_triangle(tri, self.md.books, hub.trade_size(), self.fee_of,
+                                      self.cfg.min_net_bps, self.cfg.limit_tol_bps,
+                                      self.round_price, time.monotonic())
+                if o is None:
+                    hub.stats.rejects["opportunity_disappeared"] += 1
+                    return
+            d = hub.gate.check_tri(o, self.mlimits, self.lat.ok(), self.free_of(o.start_asset))
+            hub.record_opportunity(
+                strategy="triangular", exchange_a=self.id, exchange_b=None,
+                symbol=",".join(leg.symbol for leg in o.legs), requested_usd=o.start,
+                expected_net_usd=o.expected_final - o.start,
+                worst_case_net_usd=o.worst_final - o.start,
+                expected_net_bps=o.net_bps, worst_case_net_bps=o.worst_bps,
+                book_age_ms=o.age_ms, approved=d.ok, rejection_reason=None if d.ok else d.reason,
+                evidence={
+                    "limits": list(o.limits),
+                    "legs": [{"symbol": leg.symbol, "side": leg.side} for leg in o.legs],
+                    "restLatency": self.lat.stats(),
+                    "bookSequences": {leg.symbol: self.md.books[leg.symbol].sequence for leg in o.legs},
+                    "bookDepthLevels": {leg.symbol: {
+                        "bids": len(self.md.books[leg.symbol].bids),
+                        "asks": len(self.md.books[leg.symbol].asks),
+                    } for leg in o.legs},
+                },
+            )
+            if not d.ok:
+                hub.stats.rejects[d.reason] += 1
+                return
             t0 = time.perf_counter()
             try:
                 res = await self.executor.execute_tri(o)
@@ -237,4 +303,3 @@ class ExchangeWorker:
             if self.live:
                 asyncio.create_task(self.refresh_balance())
             await asyncio.sleep(self.cfg.cooldown_s)
-

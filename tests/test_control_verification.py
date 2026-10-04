@@ -78,6 +78,18 @@ class ControlVerificationTests(unittest.TestCase):
         self.assertFalse(evidence["scannerEligible"])
         self.assertFalse(evidence["liveEligible"])
 
+    def test_incomplete_rest_balance_snapshot_fails_authenticated_scanner(self):
+        exchange = FakeExchange()
+        exchange.fetch_balance = AsyncMock(return_value={"free": {"USDT": 1}})
+        permission = {"source": "fixture", "tradePermission": "enabled", "liveEligible": True}
+        with patch.object(web_api, "inspect_permissions", new=AsyncMock(return_value=permission)):
+            evidence, balances, _ = asyncio.run(
+                web_api._probe_exchange("binance", exchange, "BTC/USDT"))
+        self.assertFalse(evidence["balances"])
+        self.assertFalse(evidence["scannerEligible"])
+        self.assertFalse(evidence["liveEligible"])
+        self.assertIsNone(balances)
+
     def test_live_eligibility_requires_declared_spot_ioc_and_order_fetch(self):
         exchange = FakeExchange()
         exchange.has = {**exchange.has, "createOrder": False}
@@ -188,10 +200,11 @@ class ControlVerificationTests(unittest.TestCase):
                     {"symbol": "BTC/USDT", "bestBid": 100, "bestAsk": 101}))), \
                 redirect_stdout(output):
             ready = asyncio.run(cli._account_preflight(cfg, "BTC/USDT"))
+            live_ready = asyncio.run(cli._account_preflight(cfg, "BTC/USDT", require_live=True))
 
         self.assertTrue(ready)
+        self.assertFalse(live_ready)
         self.assertIn("READ-ONLY PREFLIGHT", output.getvalue())
         self.assertIn("liveEligible=false", output.getvalue())
         self.assertIn("tradePermission=unverified", output.getvalue())
         create_order.assert_not_called()
-

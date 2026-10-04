@@ -83,7 +83,7 @@
     <div class="fineprint"><strong>Read-only estimates.</strong><span>Fees are the values you enter; actual account fee tiers, rebates, balances, transfer costs, execution latency, and slippage may differ. Public REST snapshots are not a streaming feed. A positive estimate is not guaranteed or executable profit. The separate engine panel uses the existing risk-gated Python strategy.</span></div>
     <details class="account" id="accountPanel">
       <summary>Account and exchange verification</summary>
-      <p class="account-note">Create an application account to verify an exchange. Passwords are hashed and exchange credentials are encrypted by the persistent HTTPS control service. Verification uses live authenticated REST and WebSocket requests. Live trading is available only when the key's read-only permission report proves spot trading, withdrawals and transfers disabled, and IP restriction; this permission probe is currently implemented for Binance.</p>
+      <p class="account-note">Create an application account to verify an exchange. Passwords are hashed and exchange credentials are encrypted by the persistent HTTPS control service. Verification uses live authenticated REST and WebSocket requests. Live eligibility requires fresh account and stream checks, spot execution support, and venue-specific key-permission evidence. Binance reports combined spot/margin trading permission; Bitfinex reports key scopes that do not establish spot-only orders or IP restriction. Other venues remain unverified.</p>
       <div class="account-grid">
         <section class="account-box" id="authBox">
           <h3 id="authTitle">Sign in or create an account</h3>
@@ -107,7 +107,7 @@
           <div class="account-status" id="exchangeStatus" role="status"></div>
           <div class="balance-list" id="balanceList"></div>
           <pre class="evidence" id="verificationEvidence"></pre>
-          <p class="disabled-note">The Binance permission check uses its signed key-restrictions endpoint. Other exchanges stay ineligible for live mode until an equivalent permission probe is available. The service never tests permission by submitting an order.</p>
+          <p class="disabled-note">Binance and Bitfinex use signed, read-only permission endpoints. Binance combines spot and margin permission; Bitfinex's orders scope is not spot-specific and does not prove IP restriction. Only Binance can currently pass the permission gate. Other exchanges remain ineligible until an equivalent authoritative probe is available. The service never tests permission by submitting an order.</p>
         </section>
         <section class="account-box" id="engineBox" hidden style="grid-column:1 / -1">
           <h3>Streaming scanner and execution engine</h3>
@@ -116,8 +116,8 @@
             <label class="field"><span>Mode</span><select id="engineMode"><option value="paper">Paper scan</option><option value="live">Live orders</option></select></label>
             <label class="field"><span>Exchange</span><select id="engineVenue"></select></label>
             <label class="field"><span>Trade size · USD (max $25)</span><input id="engineTradeSize" type="number" min="0.01" max="25" step="0.01" value="5" required></label>
-            <label class="field"><span>Session loss stop · USD (max $5)</span><input id="engineMaxLoss" type="number" min="0.01" max="5" step="0.01" value="2" required></label>
-            <label class="field"><span>Realized profit stop · USD</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="1" required></label>
+            <label class="field"><span>Session loss stop · USD (max $3 pilot limit)</span><input id="engineMaxLoss" type="number" min="0.01" max="3" step="0.01" value="3" required></label>
+            <label class="field"><span>Realized profit stop · USD (per ignition)</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="200" required></label>
             <div class="disabled-note">Both paper and live sessions require a recently verified account, live public order book, and authenticated private balance stream. Unverified venues are excluded.</div>
             <label class="field" id="liveConfirmField" hidden><span>To confirm live orders, type I ACCEPT REAL ORDERS</span><input id="liveConfirmation" autocomplete="off" spellcheck="false"></label>
             <div class="account-actions"><button class="button primary" id="engineStart" type="submit">Start paper scanner</button><button class="button secondary" id="engineStop" type="button" disabled>Stop engine</button><button class="button secondary" id="engineRefresh" type="button">Refresh status</button></div>
@@ -537,4 +537,3 @@
   </script>
 </body>
 </html>
-

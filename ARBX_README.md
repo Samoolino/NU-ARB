@@ -59,8 +59,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt             # ccxt + uvloop
 python run.py selftest                      # must print SELFTEST PASSED (offline, no keys)
 ```
-**Windows (development/paper only):** install Python 3.12 from python.org (tick *Add to PATH*), open PowerShell in the folder, then:
-`pip install -r requirements.txt` -> `python run.py selftest`. In IDLE: open `run.py`, press **F5**.
+**Windows (native, no WSL):** Python 3.12 is supported; use PowerShell and the project's `.venv`, install `requirements.txt`, and run `selftest` before the read-only `live-preflight`. Full live cross-venue execution still requires two venues with authoritative live-permission probes; currently only Binance can qualify, so startup remains fail-closed. See [the Windows pilot setup](arb_bot/README.md#windows-powershell-no-wsl-required).
 
 ### C. Exchange API keys (do this on the exchange website)
 1. Create a **new sub-account** funded with only what you can afford to lose.
@@ -154,4 +153,3 @@ The SQLite ledger records session, strategy/path, requested notional, execution 
 
 ## 5. Pre-funded cross-exchange and rebalancing
 Cross trades buy on A and sell on B simultaneously (IOC both sides). Balances drift one way over time. Rebalance **manually** (bot never withdraws) using the cheapest vehicle from `transfer-plan`: stablecoins on the cheapest network (often TRC-20/other low-fee chains) when a flat fee dominates; a coin like TRX/XRP/XLM only if its fee + 2 conversion legs beats that. `rebalance_haircut_bps` (2 bps default in `config.py`) charges that amortized cost against every cross trade.
-
