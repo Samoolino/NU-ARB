@@ -36,6 +36,8 @@ class PermissionProbeTests(unittest.TestCase):
         self.assertFalse(result["liveEligible"])
 
     def test_unknown_exchange_permissions_never_claim_live_eligibility(self):
-        result = asyncio.run(inspect_permissions("bybit", object()))
-        self.assertFalse(result["liveEligible"])
-        self.assertEqual(result["tradePermission"], "unverified")
+        for exchange_id in ("bybit", "htx", "mexc", "gateio", "kucoin", "bitfinex"):
+            with self.subTest(exchange_id=exchange_id):
+                result = asyncio.run(inspect_permissions(exchange_id, object()))
+                self.assertFalse(result["liveEligible"])
+                self.assertEqual(result["tradePermission"], "unverified")

@@ -114,11 +114,12 @@
           <p class="account-note">The engine streams spot markets and runs the existing paper or live strategy. Paper mode uses virtual execution. Live orders remain operator-disabled by default and require fresh account, permission, private-stream, market-data, and latency checks before activation.</p>
           <form class="account-form" id="engineForm">
             <label class="field"><span>Mode</span><select id="engineMode"><option value="paper">Paper scan</option><option value="live">Live orders</option></select></label>
-            <label class="field"><span>Exchange</span><select id="engineVenue"></select></label>
+            <label class="field"><span>Exchanges (choose up to 4)</span><select id="engineVenue" multiple size="4" style="height:auto;min-height:120px"></select></label>
             <label class="field"><span>Trade size · USD (max $25)</span><input id="engineTradeSize" type="number" min="0.01" max="25" step="0.01" value="5" required></label>
             <label class="field"><span>Session loss stop · USD (max $5)</span><input id="engineMaxLoss" type="number" min="0.01" max="5" step="0.01" value="2" required></label>
             <label class="field"><span>Realized profit stop · USD</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="1" required></label>
             <div class="disabled-note">Both paper and live sessions require a recently verified account, live public order book, and authenticated private balance stream. Unverified venues are excluded.</div>
+            <div class="account-note" id="liveCrossField" hidden><label><input id="engineCrossLive" type="checkbox">Enable live cross-exchange execution (requires at least two verified venues)</label></div>
             <label class="field" id="liveConfirmField" hidden><span>To confirm live orders, type I ACCEPT REAL ORDERS</span><input id="liveConfirmation" autocomplete="off" spellcheck="false"></label>
             <div class="account-actions"><button class="button primary" id="engineStart" type="submit">Start paper scanner</button><button class="button secondary" id="engineStop" type="button" disabled>Stop engine</button><button class="button secondary" id="engineRefresh" type="button">Refresh status</button></div>
           </form>
@@ -156,6 +157,7 @@
     let engineTimer = null;
 
     function syncVenueNames() {
+  $("engineVenue").addEventListener("change", updateEngineChoices);
       const a = $("exchangeA").value;
       if ($("exchangeB").value === a) $("exchangeB").value = EXCHANGES.find((exchange) => exchange.id !== a).id;
       const b = $("exchangeB").value;
@@ -377,12 +379,13 @@
       const eligible = venueDefinitions.filter((venue) => venue.adapterAvailable && venue.verificationFresh &&
         venue.scannerEligible && (mode !== "live" || (runtimeSettings.liveTradingEnabled && venue.liveEligible)));
       const select = $("engineVenue");
-      const previous = select.value;
+      const previous = new Set(Array.from(select.selectedOptions, (option) => option.value));
       select.replaceChildren();
       for (const venue of eligible) {
         const option = document.createElement("option");
         option.value = venue.id;
         option.textContent = venue.name + (mode === "live" ? " · live permission verified" : " · verified");
+        option.selected = previous.has(venue.id);
         select.append(option);
       }
       if (!eligible.length) {
@@ -391,7 +394,12 @@
         option.textContent = mode === "live" ? "No fresh live-verified venue available" : "No fresh fully verified venue available";
         select.append(option);
       }
-      select.value = eligible.some((venue) => venue.id === previous) ? previous : eligible[0]?.id || "";
+      if (!select.selectedOptions.length && eligible.length) select.options[0].selected = true;
+      while (select.selectedOptions.length > 4) select.options[select.selectedOptions.length - 1].selected = false;
+      const crossReady = mode === "live" && select.selectedOptions.length >= 2 && runtimeSettings.liveTradingEnabled;
+      $("liveCrossField").hidden = mode !== "live";
+      $("engineCrossLive").disabled = !crossReady;
+      if (!crossReady) $("engineCrossLive").checked = false;
       $("liveConfirmField").hidden = mode !== "live";
       $("engineStart").disabled = !eligible.length;
       $("engineStart").textContent = mode === "live" ? "Start live orders" : "Start paper scanner";
@@ -493,12 +501,14 @@
     $("engineForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const mode = $("engineMode").value;
+      const exchangeIds = Array.from($("engineVenue").selectedOptions, (option) => option.value);
       $("engineStart").disabled = true;
       $("engineStatus").textContent = mode === "live" ? "Rechecking private stream, permissions, and live preflight…" : "Starting paper scanner…";
       try {
         const data = await control("/api/v1/engine/start", {method: "POST", body: {
-          mode, exchange_ids: [$("engineVenue").value], trade_size_usd: Number($("engineTradeSize").value),
+          mode, exchange_ids: exchangeIds, trade_size_usd: Number($("engineTradeSize").value),
           max_loss_usd: Number($("engineMaxLoss").value), target_profit_usd: Number($("engineTarget").value),
+          cross_live: $("engineCrossLive").checked,
           require_private_stream: true,
           live_confirmation: $("liveConfirmation").value
         }});

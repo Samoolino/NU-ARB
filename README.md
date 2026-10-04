@@ -34,6 +34,8 @@ In Vercel Production, set `ARBX_CONTROL_API_URL` to the Railway HTTPS origin (fo
 
 For Binance live eligibility, configure stable Railway outbound IPs and allowlist each one on the exchange API key. The service verifies spot permission, disabled withdrawals/transfers, IP restrictions, and fresh private/public WebSocket health before enabling live mode. The panel still requires the operator to enable live mode and the user to type `I ACCEPT REAL ORDERS`; order size is capped at $25, the loss stop at $5, and a profit target is required. The engine does not auto-resume a live session after restart. No credentials belong in GitHub.
 
+The control API accepts up to four selected venues for one live session, and live cross-exchange execution has a separate `cross_live` confirmation that requires at least two selected venues. Each venue must independently pass fresh live permission and stream checks. Only Binance currently has a supported permission-scope probe, so additional venues remain ineligible and this request capability does not itself enable multi-venue live trading. Keep the operator flag disabled until each venue's documented permission contract and real account preflight have been validated.
+
 Railway volumes, the Railway public domain, Vercel project settings, and environment secrets are account-level resources; the repository config cannot create them.
 
 The standalone CLI continues to support `BOT_TARGET_PROFIT_USD` and `BOT_JOURNAL_PATH`; engine sessions started from the account panel pass an explicit per-session profit target and use persistent per-account journal files under `/data`. See [the target and journal guide](ARBX_README.md#global-realized-profit-target-and-durable-journal).
@@ -55,6 +57,8 @@ python -m pip install -r arb_bot\requirements.txt
 Set-Location arb_bot
 python run.py selftest
 ```
+
+For a read-only authenticated account and market-data preflight, configure `BOT_EXCHANGES` and the venue API credentials in the current PowerShell session, then run `python run.py preflight`. Set `BOT_PREFLIGHT_SYMBOL` to choose the spot market (default: `BTC/USDT`). It reports balances, WebSocket evidence, and permission status without submitting orders. A successful scanner preflight does not mean live trading is eligible; unsupported permission checks remain unverified. Keep credentials local and never commit them.
 
 To run with live market data and virtual funds, stay in `arb_bot` and run:
 

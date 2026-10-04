@@ -19,8 +19,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from arbx.market import orderbook_limit
 from arbx.permissions import inspect_permissions
 
 
@@ -211,6 +212,7 @@ class EngineStart(BaseModel):
     max_loss_usd: float = Field(gt=0, le=5)
     target_profit_usd: float = Field(gt=0, le=1000)
     require_private_stream: bool = True
+    cross_live: bool = False
     live_confirmation: str = ""
 
     @field_validator("exchange_ids")
@@ -220,9 +222,16 @@ class EngineStart(BaseModel):
             raise ValueError("Select unique supported exchange IDs")
         return exchange_ids
 
+    @model_validator(mode="after")
+    def validate_cross_live_selection(self):
+        if self.cross_live and (self.mode != "live" or len(self.exchange_ids) < 2):
+            raise ValueError("Live cross-exchange execution requires at least two venues in live mode")
+        return self
+
 
 def _make_exchange(exchange_id: str, auth_mode: str, credentials: dict[str, str]):
     import ccxt.pro as ccxtpro
+    from arbx.worker import spot_market_options
     adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
     cls = getattr(ccxtpro, adapter_id, None)
     if cls is None:
@@ -232,7 +241,7 @@ def _make_exchange(exchange_id: str, auth_mode: str, credentials: dict[str, str]
         # CCXT's RSA/Ed25519 signing helpers consume PEM material as bytes.
         config["secret"] = config.pop("privateKey").encode("utf-8")
     return cls({**config, "enableRateLimit": True, "timeout": 10000,
-                "options": {"defaultType": "spot"}})
+                "options": spot_market_options(exchange_id)})
 
 
 def _safe_exchange_error(exc: Exception, exchange) -> str:
@@ -253,7 +262,7 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
     evidence = {"rest": False, "authentication": False, "account": False, "balances": False,
                 "publicWebSocket": False, "privateWebSocket": False,
                 "tradePermission": "unverified", "withdrawalsDisabled": "unverified",
-                "scannerEligible": False, "liveEligible": False,
+                "scannerEligible": False, "executionEligible": False, "liveEligible": False,
                 "connectionState": "VERIFYING", "verificationStartedAt": datetime.now(timezone.utc).isoformat()}
     balance_summary = None
     book_summary = None
@@ -306,7 +315,8 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
 
     if market_ok and exchange.has.get("watchOrderBook") is True:
         try:
-            book = await asyncio.wait_for(exchange.watch_order_book(symbol, 10), timeout=12)
+            limit = orderbook_limit(exchange_id, 10)
+            book = await asyncio.wait_for(exchange.watch_order_book(symbol, limit), timeout=12)
             if book.get("bids") and book.get("asks"):
                 evidence["publicWebSocket"] = True
                 book_summary = {"symbol": symbol, "bestBid": book["bids"][0][0],
@@ -317,10 +327,26 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
         except Exception as exc:
             evidence["publicWebSocketError"] = _safe_exchange_error(exc, exchange)
 
+    adapter_has = getattr(exchange, "has", {}) or {}
+    time_in_force = None
+    feature_value = getattr(exchange, "feature_value", None)
+    if market_ok and callable(feature_value):
+        try:
+            time_in_force = feature_value(symbol, "createOrder", "timeInForce")
+        except Exception:
+            pass
+    evidence["executionCapabilities"] = {
+        "spotMarket": market_ok,
+        "createOrder": adapter_has.get("createOrder") is True,
+        "marketOrderUnwind": adapter_has.get("createMarketOrder") is True,
+        "fetchOrder": adapter_has.get("fetchOrder") is True,
+        "iocLimit": isinstance(time_in_force, dict) and time_in_force.get("IOC") is True,
+    }
+    evidence["executionEligible"] = all(evidence["executionCapabilities"].values())
     evidence["scannerEligible"] = bool(evidence["rest"] and evidence["authentication"] and evidence["account"]
                                         and evidence["balances"]
                                         and evidence["privateWebSocket"] and evidence["publicWebSocket"])
-    evidence["liveEligible"] = bool(evidence["scannerEligible"]
+    evidence["liveEligible"] = bool(evidence["scannerEligible"] and evidence["executionEligible"]
                                      and (evidence.get("permissions") or {}).get("liveEligible") is True)
     if evidence["scannerEligible"]:
         evidence["connectionState"] = "FULLY_VERIFIED"
@@ -651,8 +677,6 @@ async def engine_start(payload: EngineStart, request: Request):
             raise HTTPException(503, "Live execution is disabled by the control-service operator")
         if payload.live_confirmation != "I ACCEPT REAL ORDERS":
             raise HTTPException(422, 'For live mode, type exactly: "I ACCEPT REAL ORDERS"')
-        if len(payload.exchange_ids) != 1:
-            raise HTTPException(422, "Live mode currently supports one exchange per engine session")
 
     global engine_owner_id, engine_hub, engine_task, engine_phase, engine_error, engine_stop_requested
     async with engine_lock:
@@ -674,8 +698,6 @@ async def engine_start(payload: EngineStart, request: Request):
                 except Exception as exc:
                     raise HTTPException(503, "Could not unlock saved exchange credentials") from exc
                 auth_modes[exchange_id] = row["auth_mode"]
-                if payload.mode == "live" and exchange_id != "binance":
-                    raise HTTPException(409, "Live key-scope verification is currently supported only for Binance")
 
             from arbx.config import Config, ExchangeCfg
             from arbx.hub import Hub
@@ -691,7 +713,8 @@ async def engine_start(payload: EngineStart, request: Request):
                                                  require_private_stream=True, auth_mode=auth_modes[exchange_id]))
             cfg = Config(mode=payload.mode, exchanges=exchange_cfgs, trade_size_usd=payload.trade_size_usd,
                          max_loss_usd=payload.max_loss_usd, target_profit_usd=payload.target_profit_usd,
-                         cross_enabled=payload.mode == "paper", cross_live=False,
+                         cross_enabled=payload.mode == "paper" or payload.cross_live,
+                         cross_live=payload.mode == "live" and payload.cross_live,
                          journal_path=APP_DB.parent / f"engine_{uid}.csv")
             try:
                 cfg.validate()

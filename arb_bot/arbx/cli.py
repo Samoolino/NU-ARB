@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 
 from arbx.config import Config
@@ -27,6 +28,53 @@ async def _probe(cfg: Config) -> None:
         finally:
             if ex is not None:
                 await ex.close()
+
+
+async def _account_preflight(cfg: Config, symbol: str | None = None) -> bool:
+    from arbx.web_api import _make_exchange, _probe_exchange
+
+    symbol = symbol or os.getenv("BOT_PREFLIGHT_SYMBOL", "BTC/USDT")
+    ready = True
+    print("READ-ONLY PREFLIGHT: no orders or transfers will be submitted")
+    for x in cfg.exchanges:
+        exchange = None
+        credentials = {"apiKey": x.api_key} if x.api_key else {}
+        if x.auth_mode in ("rsa", "ed25519"):
+            if x.secret:
+                credentials["privateKey"] = x.secret
+        elif x.secret:
+            credentials["secret"] = x.secret
+        if x.password:
+            credentials["password"] = x.password
+        try:
+            exchange = _make_exchange(x.id, x.auth_mode, credentials)
+            evidence, balances, book = await _probe_exchange(x.id, exchange, symbol)
+            permission = evidence.get("permissions") or {}
+            print(f"[{x.id}] state={evidence['connectionState']} "
+                  f"scannerEligible={str(evidence['scannerEligible']).lower()} "
+                f"executionEligible={str(evidence['executionEligible']).lower()} "
+                  f"liveEligible={str(evidence['liveEligible']).lower()} "
+                  f"tradePermission={evidence['tradePermission']} "
+                  f"withdrawalsDisabled={evidence['withdrawalsDisabled']} "
+                  f"permissionSource={permission.get('source', 'unavailable')}")
+            if balances:
+                for asset, values in sorted(balances.items()):
+                    print(f"  balance {asset}: free={values['free']:.8g} total={values['total']:.8g}")
+            if book:
+                print(f"  book {book['symbol']}: bid={book['bestBid']} ask={book['bestAsk']}")
+            if not evidence["scannerEligible"]:
+                ready = False
+        except Exception as exc:
+            print(f"[{x.id}] ERROR {type(exc).__name__}")
+            ready = False
+        finally:
+            if exchange is not None:
+                try:
+                    await exchange.close()
+                except Exception:
+                    pass
+    print("Preflight passed" if ready else "Preflight incomplete; see per-venue evidence above")
+    return ready
 
 
 async def _transfer_plan(cfg: Config) -> None:
@@ -56,9 +104,14 @@ def main(argv=None) -> None:
         from arbx.selftest import run_selftest
         sys.exit(0 if run_selftest() else 1)
     cfg = Config.from_env()
+    if cmd == "preflight":
+        cfg.mode = "paper"
     cfg.validate()
     lf = loop_factory()
-    if cmd == "probe":
+    if cmd == "preflight":
+        if not asyncio.run(_account_preflight(cfg), loop_factory=lf):
+            sys.exit(1)
+    elif cmd == "probe":
         asyncio.run(_probe(cfg), loop_factory=lf)
     elif cmd == "transfer-plan":
         asyncio.run(_transfer_plan(cfg), loop_factory=lf)
@@ -74,7 +127,7 @@ def main(argv=None) -> None:
             from arbx.ui import run_dashboard
             run_dashboard(cfg)
     else:
-        print(__doc__ or "usage: run.py [run|probe|selftest|transfer-plan] [--headless]")
+        print(__doc__ or "usage: run.py [run|preflight|probe|selftest|transfer-plan] [--headless]")
 
 
 if __name__ == "__main__":

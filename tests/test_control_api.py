@@ -11,6 +11,15 @@ from arbx import web_api
 
 
 class ControlApiTests(unittest.TestCase):
+    def test_live_cross_selection_requires_multiple_venues(self):
+        with self.assertRaises(ValueError):
+            web_api.EngineStart(mode="live", exchange_ids=["binance"], trade_size_usd=5,
+                                max_loss_usd=2, target_profit_usd=1, cross_live=True)
+
+        payload = web_api.EngineStart(mode="live", exchange_ids=["binance", "bybit"], trade_size_usd=5,
+                                      max_loss_usd=2, target_profit_usd=1, cross_live=True)
+        self.assertTrue(payload.cross_live)
+
     def setUp(self):
         self.db_path = pathlib.Path(__file__).resolve().parent / ".control-test.sqlite3"
         for suffix in ("", "-wal", "-shm"):

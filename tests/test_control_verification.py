@@ -1,16 +1,26 @@
 import asyncio
+import io
 import pathlib
 import sys
 import time
 import unittest
+from contextlib import redirect_stdout
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "arb_bot"))
-from arbx import web_api
+from arbx import cli, web_api
+from arbx.config import Config, ExchangeCfg
+from arbx.market import orderbook_limit
+from arbx.worker import spot_market_options
 
 
 class FakeExchange:
-    has = {"fetchTime": True, "watchBalance": True, "watchOrderBook": True}
+    has = {"fetchTime": True, "watchBalance": True, "watchOrderBook": True,
+            "createOrder": True, "createMarketOrder": True, "fetchOrder": True}
+
+    def feature_value(self, symbol, method, param):
+        return {"IOC": True}
 
     async def load_markets(self):
         return {}
@@ -30,8 +40,22 @@ class FakeExchange:
     async def watch_order_book(self, symbol, limit):
         return {"bids": [[100, 1]], "asks": [[101, 1]], "nonce": 1}
 
+    async def create_order(self, *args, **kwargs):
+        raise AssertionError("read-only preflight attempted to place an order")
+
 
 class ControlVerificationTests(unittest.TestCase):
+    def test_orderbook_limits_match_bybit_and_bitfinex_constraints(self):
+        self.assertEqual(orderbook_limit("bybit", 10), 50)
+        self.assertEqual(orderbook_limit("htx", 10), 20)
+        self.assertEqual(orderbook_limit("bitfinex", 10), 25)
+        self.assertEqual(orderbook_limit("binance", 10), 10)
+
+    def test_exchange_market_loading_is_spot_only(self):
+        self.assertEqual(spot_market_options("htx")["fetchMarkets"]["types"],
+                         {"spot": True, "linear": False, "inverse": False})
+        self.assertEqual(spot_market_options("kucoin")["fetchMarkets"]["types"], ["spot"])
+
     def test_scanner_and_live_flags_require_real_private_and_public_streams(self):
         permission = {"source": "fixture", "tradePermission": "enabled", "liveEligible": True}
         with patch.object(web_api, "inspect_permissions", new=AsyncMock(return_value=permission)):
@@ -39,6 +63,7 @@ class ControlVerificationTests(unittest.TestCase):
         self.assertTrue(evidence["privateWebSocket"])
         self.assertTrue(evidence["publicWebSocket"])
         self.assertTrue(evidence["scannerEligible"])
+        self.assertTrue(evidence["executionEligible"])
         self.assertTrue(evidence["liveEligible"])
         self.assertEqual(balances["USDT"]["free"], 10)
         self.assertEqual(book["bestBid"], 100)
@@ -52,6 +77,69 @@ class ControlVerificationTests(unittest.TestCase):
         self.assertFalse(evidence["privateWebSocket"])
         self.assertFalse(evidence["scannerEligible"])
         self.assertFalse(evidence["liveEligible"])
+
+    def test_live_eligibility_requires_declared_spot_ioc_and_order_fetch(self):
+        exchange = FakeExchange()
+        exchange.has = {**exchange.has, "createOrder": False}
+        permission = {"source": "fixture", "tradePermission": "enabled", "liveEligible": True}
+        with patch.object(web_api, "inspect_permissions", new=AsyncMock(return_value=permission)):
+            evidence, _, _ = asyncio.run(web_api._probe_exchange("binance", exchange, "BTC/USDT"))
+        self.assertTrue(evidence["scannerEligible"])
+        self.assertFalse(evidence["executionEligible"])
+        self.assertFalse(evidence["liveEligible"])
+
+    def test_live_eligibility_requires_market_order_unwind_capability(self):
+        exchange = FakeExchange()
+        exchange.has = {**exchange.has, "createMarketOrder": False}
+        permission = {"source": "fixture", "tradePermission": "enabled", "liveEligible": True}
+        with patch.object(web_api, "inspect_permissions", new=AsyncMock(return_value=permission)):
+            evidence, _, _ = asyncio.run(web_api._probe_exchange("binance", exchange, "BTC/USDT"))
+        self.assertTrue(evidence["scannerEligible"])
+        self.assertFalse(evidence["executionEligible"])
+        self.assertFalse(evidence["liveEligible"])
+
+    def test_multi_venue_live_preflight_checks_every_exchange_before_engine_start(self):
+        payload = web_api.EngineStart(mode="live", exchange_ids=["binance", "bybit"], trade_size_usd=5,
+                                      max_loss_usd=2, target_profit_usd=1, cross_live=True,
+                                      live_confirmation="I ACCEPT REAL ORDERS")
+        hub = SimpleNamespace(run=AsyncMock(), stats=SimpleNamespace(status="RUNNING (LIVE)"))
+        probe = AsyncMock(side_effect=[
+            ({"liveEligible": True, "scannerEligible": True}, {}, {}),
+            ({"liveEligible": False, "scannerEligible": True}, {}, {}),
+        ])
+        with patch.object(web_api, "engine_hub", hub), \
+                patch.object(web_api, "engine_stop_requested", False), \
+                patch.object(web_api, "engine_phase", "STARTING"), \
+                patch.object(web_api, "engine_error", None), \
+                patch.object(web_api, "_make_exchange", side_effect=[FakeExchange(), FakeExchange()]), \
+                patch.object(web_api, "_probe_exchange", new=probe):
+            asyncio.run(web_api._run_engine_job(
+                payload, {"binance": {"apiKey": "test"}, "bybit": {"apiKey": "test"}},
+                {"binance": "hmac", "bybit": "ccxt"},
+            ))
+
+        self.assertEqual([call.args[0] for call in probe.await_args_list], ["binance", "bybit"])
+        hub.run.assert_not_awaited()
+
+    def test_multi_venue_live_preflight_starts_only_after_all_venues_pass(self):
+        payload = web_api.EngineStart(mode="live", exchange_ids=["binance", "bybit"], trade_size_usd=5,
+                                      max_loss_usd=2, target_profit_usd=1, cross_live=True,
+                                      live_confirmation="I ACCEPT REAL ORDERS")
+        hub = SimpleNamespace(run=AsyncMock(), stats=SimpleNamespace(status="RUNNING (LIVE)"))
+        probe = AsyncMock(return_value=({"liveEligible": True, "scannerEligible": True}, {}, {}))
+        with patch.object(web_api, "engine_hub", hub), \
+                patch.object(web_api, "engine_stop_requested", False), \
+                patch.object(web_api, "engine_phase", "STARTING"), \
+                patch.object(web_api, "engine_error", None), \
+                patch.object(web_api, "_make_exchange", side_effect=[FakeExchange(), FakeExchange()]), \
+                patch.object(web_api, "_probe_exchange", new=probe):
+            asyncio.run(web_api._run_engine_job(
+                payload, {"binance": {"apiKey": "test"}, "bybit": {"apiKey": "test"}},
+                {"binance": "hmac", "bybit": "ccxt"},
+            ))
+
+        self.assertEqual([call.args[0] for call in probe.await_args_list], ["binance", "bybit"])
+        hub.run.assert_awaited_once()
 
     def test_complete_connectivity_gets_evidence_state_separate_from_live_permission(self):
         permission = {"source": "fixture", "tradePermission": "unverified", "liveEligible": False}
@@ -84,4 +172,26 @@ class ControlVerificationTests(unittest.TestCase):
         self.assertNotIn("visible-private-secret", message)
         self.assertNotIn("visible-passphrase", message)
         self.assertNotIn("abc123", message)
+
+    def test_terminal_preflight_is_read_only_and_keeps_unverified_permissions_ineligible(self):
+        cfg = Config(exchanges=[ExchangeCfg(id="bybit", api_key="test-key", secret="test-secret")])
+        exchange = FakeExchange()
+        evidence = {"connectionState": "FULLY_VERIFIED", "scannerEligible": True,
+                    "executionEligible": True, "liveEligible": False, "tradePermission": "unverified",
+                    "withdrawalsDisabled": "unverified",
+                    "permissions": {"source": "no supported authenticated key-scope endpoint"}}
+        output = io.StringIO()
+        with patch.object(exchange, "create_order", new_callable=AsyncMock) as create_order, \
+            patch.object(web_api, "_make_exchange", return_value=exchange), \
+                patch.object(web_api, "_probe_exchange", new=AsyncMock(return_value=(
+                    evidence, {"USDT": {"free": 10.0, "total": 10.0}},
+                    {"symbol": "BTC/USDT", "bestBid": 100, "bestAsk": 101}))), \
+                redirect_stdout(output):
+            ready = asyncio.run(cli._account_preflight(cfg, "BTC/USDT"))
+
+        self.assertTrue(ready)
+        self.assertIn("READ-ONLY PREFLIGHT", output.getvalue())
+        self.assertIn("liveEligible=false", output.getvalue())
+        self.assertIn("tradePermission=unverified", output.getvalue())
+        create_order.assert_not_called()
 

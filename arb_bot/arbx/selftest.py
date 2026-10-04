@@ -14,7 +14,7 @@ from arbx.gate import Decision, ProfitGate, RiskManager
 from arbx.hub import Hub
 from arbx.journal import TradeJournal
 from arbx.execute import TradeResult
-from arbx.strategy import Opp
+from arbx.strategy import CrossOpp, Opp
 from arbx.util import buy_with_quote, loop_factory, walk_base
 
 
@@ -24,6 +24,7 @@ def _mk(sym, base, quote):
 
 
 class FakeExchange:
+    id = "fake"
     MID = {"BTC/USDT": 60000.0, "TRX/USDT": 0.12, "TRX/BTC": 2e-6}
 
     def __init__(self, bias=1.0, seed=1):
@@ -83,6 +84,16 @@ def _unit_checks() -> None:
     assert gate.check_tri(opp(), {}, False, 100.0).reason == "latency_degraded"
     assert gate.check_tri(opp(), {}, True, 1.0).reason == "insufficient_balance"
     assert gate.check_tri(opp(), {"X/USDT": (None, 50.0)}, True, 100.0).reason == "below_exchange_minimum"
+    def cross_opp(**kw):
+        d = dict(symbol="BTC/USDT", buy_ex="a", sell_ex="b", base=0.001, limit_buy=25_000.0,
+                 limit_sell=25_100.0, cost=25.0, expected_usd=0.10, worst_usd=0.02,
+                 net_bps=20.0, worst_bps=12.0, age_ms=10.0, base_ccy="BTC", quote_ccy="USDT")
+        d.update(kw)
+        return CrossOpp(**d)
+    assert gate.check_cross(cross_opp(), {}, {}, True, 100.0, 1.0).ok
+    assert gate.check_cross(cross_opp(worst_bps=0.1), {}, {}, True, 100.0, 1.0).reason == "worst_case_below_floor"
+    assert gate.check_cross(cross_opp(worst_usd=0.001), {}, {}, True, 100.0, 1.0).reason == "profit_below_min_usd"
+    assert gate.check_cross(cross_opp(), {}, {}, True, 1.0, 1.0).reason == "insufficient_inventory"
     risk.halt("x")
     assert gate.check_tri(opp(), {}, True, 100.0).reason == "halted"
     journal_path = Path("selftest_durable_journal.sqlite3")

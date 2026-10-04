@@ -17,6 +17,14 @@ class Book:
     sequence: int | str | None = None
 
 
+def orderbook_limit(exchange_id: str, requested: int) -> int:
+    limits = {"bybit": (1, 50, 200, 1000), "htx": (5, 20, 150, 400), "bitfinex": (25, 100)}
+    allowed = limits.get(exchange_id)
+    if allowed is None:
+        return requested
+    return next((limit for limit in allowed if limit >= requested), allowed[-1])
+
+
 class MarketData:
     def __init__(self, ex, symbols, depth: int, log):
         self.ex, self.symbols, self.depth, self.log = ex, list(symbols), depth, log
@@ -31,7 +39,8 @@ class MarketData:
         backoff = 1.0
         while True:
             try:
-                ob = await self.ex.watch_order_book(sym, self.depth)
+                limit = orderbook_limit(self.ex.id, self.depth)
+                ob = await self.ex.watch_order_book(sym, limit)
                 self.books[sym] = Book(ob["bids"][: self.depth], ob["asks"][: self.depth], time.monotonic(),
                                         ob.get("timestamp"), ob.get("nonce"))
                 self.dirty.add(sym)

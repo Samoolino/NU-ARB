@@ -13,12 +13,21 @@ from arbx.strategy import evaluate_triangle
 from arbx.util import STABLES
 
 
+def spot_market_options(exchange_id: str) -> dict:
+    options = {"defaultType": "spot"}
+    if exchange_id == "htx":
+        options["fetchMarkets"] = {"types": {"spot": True, "linear": False, "inverse": False}}
+    elif exchange_id == "kucoin":
+        options["fetchMarkets"] = {"types": ["spot"]}
+    return options
+
+
 def build_exchange(x, live: bool):
     import ccxt.pro as ccxtpro
     cls = getattr(ccxtpro, x.id, None)
     if cls is None:
         raise RuntimeError(f"'{x.id}' is not supported by ccxt.pro (see ccxt.pro.exchanges)")
-    params = {"enableRateLimit": True, "options": {"defaultType": "spot"}}
+    params = {"enableRateLimit": True, "options": spot_market_options(x.id)}
     if x.api_key and x.secret:
         secret = x.secret.encode("utf-8") if x.id == "binance" and x.auth_mode in ("rsa", "ed25519") else x.secret
         params.update(apiKey=x.api_key, secret=secret)
