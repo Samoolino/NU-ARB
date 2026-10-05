@@ -177,8 +177,7 @@ def _encrypt(raw: bytes) -> bytes:
 def _decrypt(blob: bytes) -> bytes:
     key = bytes.fromhex(os.getenv("CREDENTIAL_ENCRYPTION_KEY", ""))
     if len(key) != 32:
-        raise RuntimeError("credential encryption key is not configured")
-    return AESGCM(key).decrypt(blob[:12], blob[12:], b"arbx-exchange-credentials-v1")
+        raise RuntimeError("credential encryption key is not configured")    return AESGCM(key).decrypt(blob[:12], blob[12:], b"arbx-exchange-credentials-v1")
 
 
 class Signup(BaseModel):
@@ -357,8 +356,7 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
                                         and evidence["balances"]
                                         and evidence["privateWebSocket"] and evidence["publicWebSocket"])
     evidence["liveEligible"] = bool(evidence["scannerEligible"] and evidence["executionEligible"]
-                                     and (evidence.get("permissions") or {}).get("liveEligible") is True)
-    if evidence["scannerEligible"]:
+                                     and (evidence.get("permissions") or {}).get("liveEligible") is True)    if evidence["scannerEligible"]:
         evidence["connectionState"] = "FULLY_VERIFIED"
     elif evidence["authentication"] and evidence["account"] and evidence["balances"]:
         evidence["connectionState"] = "ACCOUNT_DATA_CONNECTED"
@@ -511,18 +509,38 @@ async def exchanges(request: Request):
             saved_state = row["state"] if row else "NOT_CONFIGURED"
             if row and not fresh and saved_state not in ("NOT_CONFIGURED", "FAILED", "DISABLED"):
                 saved_state = "STALE"
+            scanner_eligible = fresh and bool(saved_evidence.get("scannerEligible"))
+            execution_eligible = fresh and bool(saved_evidence.get("executionEligible"))
+            live_eligible = fresh and bool(saved_evidence.get("liveEligible"))
+            if not bool(cls):
+                engagement_state, engagement_label = "ADAPTER_UNAVAILABLE", "Adapter unavailable"
+            elif saved_state == "FAILED":
+                engagement_state, engagement_label = "VERIFICATION_FAILED", "Verification failed"
+            elif saved_state == "STALE":
+                engagement_state, engagement_label = "STALE", "Verification expired"
+            elif live_eligible:
+                engagement_state, engagement_label = "VERIFIED_LIVE_CAPABLE", "Verified live-capable"
+            elif execution_eligible:
+                engagement_state, engagement_label = "EXECUTION_CAPABLE", "Potential · execution capable"
+            elif scanner_eligible:
+                engagement_state, engagement_label = "ACCOUNT_VERIFIED", "Potential · account verified"
+            elif row:
+                engagement_state, engagement_label = "CONNECTED_UNVERIFIED", "Potential · connectivity unverified"
+            else:
+                engagement_state, engagement_label = "POTENTIAL", "Potential"
             result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
                            "authenticationModes": schema, "state": saved_state,
+                           "engagementState": engagement_state, "engagementLabel": engagement_label,
                            "permissionVerificationAvailable": exchange_id in PERMISSION_PROBE_VENUES,
                            "liveTradingAvailable": exchange_id in LIVE_PERMISSION_VERIFICATION_VENUES,
                            "lastVerified": row["last_verified"] if row else None,
                            "verificationFresh": fresh,
                            "evidence": saved_evidence, "balances": saved.get("balances"),
                            "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
-                           "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
-                           "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
-                           "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
-                               and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
+                           "scannerEligible": scanner_eligible,
+                           "executionEligible": execution_eligible,
+                           "liveEligible": live_eligible,
+                           "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
         return {"exchanges": result}
     finally:
         db.close()
@@ -537,8 +555,7 @@ def capital_sources(request: Request):
         rows = db.execute(
             "SELECT exchange_id,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
             (uid,),
-        ).fetchall()
-        sources = []
+        ).fetchall()        sources = []
         for row in rows:
             if not _verification_is_fresh(row["last_verified"]):
                 continue
@@ -717,8 +734,7 @@ async def engine_start(payload: EngineStart, request: Request):
             uid = _current_user(request, db)
             rows = {r["exchange_id"]: r for r in db.execute(
                 "SELECT exchange_id,encrypted_credentials,auth_mode FROM exchange_credentials WHERE user_id=?", (uid,))}
-            credentials_by_id: dict[str, dict[str, str]] = {}
-            auth_modes: dict[str, str] = {}
+            credentials_by_id: dict[str, dict[str, str]] = {}            auth_modes: dict[str, str] = {}
             for exchange_id in payload.exchange_ids:
                 row = rows.get(exchange_id)
                 if row is None:
