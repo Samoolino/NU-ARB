@@ -1,11 +1,7 @@
-"""The modeled-profit gate. EVERY order path (triangular and cross-exchange) must pass through here.
+"""Modeled-profit and execution-safety gates.
 
-What the modeled floor covers (and what it does not):
-  * Each leg is sent as an IOC limit order at a price computed BEFORE sending. If every leg fills, each fill is at
-    or better than its limit, so the modeled cycle result is >= `worst_final` (estimated fees included). The gate refuses
-    candidates whose modeled floor is below `min_worst_bps` / `min_profit_usd`.
-  * It cannot guarantee realized profit: a leg can be missed after an earlier leg fills, cross-venue orders are not
-    atomic, actual fees may differ, and unwind prices can move. Those cases halt for recovery and can lose money.
+The live pilot is capital-constrained by the configured starter allocation and
+actual exchange inventory. It no longer uses a separate session-loss ceiling.
 """
 from __future__ import annotations
 
@@ -46,9 +42,10 @@ class RiskManager:
         self._stamps.append(time.monotonic())
         self.pnl += pnl
         self.failures = 0 if ok else self.failures + 1
-        if self.pnl <= -self.cfg.max_loss_usd:
-            self.halt(f"max loss reached ({self.pnl:.4f} USD)")
-        elif self.failures >= self.cfg.max_consecutive_failures:
+        # No session-loss ceiling. Live exposure remains constrained by the
+        # starter allocation, actual exchange inventory, profitability gates,
+        # order limits, and the consecutive-failure circuit breaker.
+        if self.failures >= self.cfg.max_consecutive_failures:
             self.halt("too many consecutive failed/unfilled cycles")
 
 
