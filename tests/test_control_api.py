@@ -264,6 +264,61 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(promoted.json()["balances"]["USDT"]["total"], 10.0)
         self.assertGreaterEqual(make_exchange.call_count, 2)
         self.assertGreaterEqual(probe.call_count, 2)
+    def test_live_activation_readiness_requires_two_fresh_live_ready_venues(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "activation-ready@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        uid = signup.json()["user"]["id"]
+        evidence = {
+            "scannerEligible": True, "executionEligible": True, "liveEligible": True,
+            "livePermissionMode": "verified",
+        }
+        db = web_api._connect()
+        try:
+            for exchange_id in ("binance", "bybit"):
+                encrypted = web_api._encrypt(json.dumps({"apiKey": "k", "secret": "s"}).encode())
+                db.execute(
+                    "INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json) VALUES(?,?,?,?,?,?,?)",
+                    (uid, exchange_id, encrypted, "ccxt", "LIVE_READY",
+                     str(__import__("time").time()),
+                     json.dumps({"evidence": evidence, "balances": {"USDT": {"free": 10, "used": 0, "total": 10}}})),
+                )
+            db.commit()
+        finally:
+            db.close()
+        response = self.client.get("/api/v1/live/activation-readiness", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["activationReady"])
+        self.assertTrue(payload["crossLiveReady"])
+        self.assertEqual(payload["readyCount"], 2)
+        self.assertEqual(set(payload["readyExchangeIds"]), {"binance", "bybit"})
+        self.assertFalse(payload["liveTradingEnabled"])
+
+    def test_live_engine_requires_live_ready_accounts_before_operator_flag(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "1",
+        }, clear=False)
+        self.env.start()
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "activation-gate@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        response = self.client.post("/api/v1/engine/start", headers=self.headers, json={
+            "mode": "live", "exchange_ids": ["binance", "bybit"], "trade_size_usd": 5,
+            "max_loss_usd": 2, "target_profit_usd": 1, "cross_live": True,
+            "live_confirmation": "I ACCEPT REAL ORDERS",
+        })
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("LIVE_READY", response.json()["detail"])
+
     def test_live_activation_readiness_is_fail_closed(self):
         signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
             "email": "activation@example.com", "password": "another-long-password",
