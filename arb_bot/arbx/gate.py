@@ -71,6 +71,8 @@ class ProfitGate:
             return Decision(False, "stale_book")
         if net_bps < c.min_net_bps:
             return Decision(False, "net_edge")
+        if worst_bps < c.min_worst_bps:
+            return Decision(False, "worst_case_below_floor")
         if worst_bps - max(0.0, speed_margin_bps) < c.min_worst_bps:
             return Decision(False, "volatility_speed_margin_below_floor")
         if worst_usd < c.min_profit_usd:
