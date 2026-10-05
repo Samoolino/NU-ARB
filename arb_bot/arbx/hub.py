@@ -235,7 +235,7 @@ class Hub:
                 continue
             predicted_ms = max(self._latency_p95(bw.lat), self._latency_p95(sw.lat)) * 2.0 + 20.0
             speed_margin_bps = (
-                opportunity.volatility_bps_s * predicted_ms / 1000.0
+                float(getattr(opportunity, "volatility_bps_s", 0.0)) * predicted_ms / 1000.0
                 + self.cfg.speed_safety_buffer_bps
             )
             decision = self.gate.check_cross(
@@ -284,8 +284,8 @@ class Hub:
                                     max_book_age_ms=self.cfg.max_book_age_ms,
                                     capital_utilization=utilization,
                                     target_remaining_usd=target_remaining,
-                                    volatility_bps_s=opportunity.volatility_bps_s,
-                                    predicted_completion_ms=max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0,
+                                    volatility_bps_s=float(getattr(opportunity, "volatility_bps_s", 0.0)),
+                                    predicted_completion_ms=max(self._latency_p95(bw.lat), self._latency_p95(sw.lat)) * 2.0 + 20.0,
                                     speed_safety_buffer_bps=self.cfg.speed_safety_buffer_bps,
                                 )
                                 ranked.append((decision.ok, target_rank.score, opportunity.worst_usd,
