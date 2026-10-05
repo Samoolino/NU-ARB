@@ -200,6 +200,38 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(venue["balances"]["USDT"]["free"], 123.45)
 
 
+    def test_non_scope_venue_can_be_promoted_with_explicit_trade_only_attestation(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "attested@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+
+        class FakeAdapter:
+            async def close(self):
+                return None
+
+        evidence = {"authentication": True, "rest": True, "account": True, "balances": True,
+                    "privateWebSocket": True, "publicWebSocket": True, "scannerEligible": True,
+                    "executionEligible": True, "liveEligible": False,
+                    "connectionState": "FULLY_VERIFIED",
+                    "permissions": {"liveEligible": False},
+                    "verifiedAt": "2026-10-05T00:00:00+00:00"}
+        balances = {"USDT": {"free": 9.0, "used": 1.0, "total": 10.0}}
+        with patch.object(web_api, "_make_exchange", return_value=FakeAdapter()),              patch.object(web_api, "_probe_exchange", return_value=(evidence, balances, None)):
+            verified = self.client.post("/api/v1/exchanges/htx/verify", headers=self.headers, json={
+                "auth_mode": "ccxt", "symbol": "BTC/USDT",
+                "credentials": {"apiKey": "attested-key", "secret": "attested-secret"},
+            })
+            self.assertEqual(verified.status_code, 200)
+            promoted = self.client.post("/api/v1/exchanges/htx/promote-live-ready",
+                                        headers=self.headers,
+                                        json={"confirmation": "PROMOTE LIVE READY",
+                                              "permission_attestation": "I CONFIRM TRADE-ONLY API KEY"})
+        self.assertEqual(promoted.status_code, 200)
+        self.assertEqual(promoted.json()["state"], "LIVE_READY")
+        self.assertEqual(promoted.json()["liveReady"], True)
+
     def test_live_ready_promotion_reconnects_key_before_state_change(self):
         signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
             "email": "promote@example.com", "password": "another-long-password",
