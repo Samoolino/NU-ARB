@@ -494,9 +494,10 @@ def live_activation_readiness(request: Request):
     """Return a fail-closed activation plan; never enables trading."""
     db = _connect()
     try:
+        uid = _current_user(request, db)
         rows = db.execute(
             "SELECT exchange_id,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
-            (_current_user(request, db)["id"],),
+            (uid,),
         ).fetchall()
     finally:
         db.close()
@@ -504,14 +505,18 @@ def live_activation_readiness(request: Request):
     for row in rows:
         evidence = json.loads(row["verification_json"] or "{}").get("evidence") or {}
         fresh = bool(row["last_verified"]) and (time.time() - float(row["last_verified"]) <= VERIFICATION_TTL_SECONDS)
+        scanner_ready = bool(evidence.get("scannerEligible"))
+        execution_ready = bool(evidence.get("executionEligible"))
+        live_ready = bool(evidence.get("liveEligible"))
+        activation_ready = row["state"] == "LIVE_READY" and fresh and scanner_ready and execution_ready and live_ready
         by_exchange[row["exchange_id"]] = {
             "state": row["state"],
             "fresh": fresh,
-            "scannerEligible": bool(evidence.get("scannerEligible")),
-            "executionEligible": bool(evidence.get("executionEligible")),
-            "liveEligible": bool(evidence.get("liveEligible")),
+            "scannerEligible": scanner_ready,
+            "executionEligible": execution_ready,
+            "liveEligible": live_ready,
             "permissionMode": evidence.get("livePermissionMode", "unverified"),
-            "activationReady": row["state"] == "LIVE_READY" and fresh and bool(evidence.get("liveEligible")),
+            "activationReady": activation_ready,
         }
     venues = []
     for exchange_id, name in VENUES.items():
@@ -519,13 +524,17 @@ def live_activation_readiness(request: Request):
             "executionEligible":False,"liveEligible":False,"permissionMode":"unverified","activationReady":False})
         venues.append({"id": exchange_id, "name": name, **item})
     ready = [v for v in venues if v["activationReady"]]
+    cross_live_ready = len(ready) >= 2
     return {
         "liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
-        "activationReady": bool(ready),
+        "activationReady": cross_live_ready,
+        "crossLiveReady": cross_live_ready,
+        "minimumReadyVenues": 2,
         "readyExchangeIds": [v["id"] for v in ready],
         "readyCount": len(ready),
         "registeredCount": len(VENUES),
-        "action": "ENABLE_OPERATOR_LIVE_FLAG_AFTER_PREFLIGHT" if ready else "VERIFY_AND_PROMOTE_SELECTED_ACCOUNTS",
+        "venues": venues,
+        "action": "ENABLE_OPERATOR_LIVE_FLAG_AFTER_PREFLIGHT" if cross_live_ready else "VERIFY_AND_PROMOTE_SELECTED_ACCOUNTS",
         "note": "This endpoint is read-only and never enables live trading."
     }
 
@@ -956,7 +965,20 @@ async def engine_start(payload: EngineStart, request: Request):
         try:
             uid = _current_user(request, db)
             rows = {r["exchange_id"]: r for r in db.execute(
-                "SELECT exchange_id,encrypted_credentials,auth_mode FROM exchange_credentials WHERE user_id=?", (uid,))}
+                "SELECT exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?", (uid,))}
+            if payload.mode == "live":
+                missing = []
+                now = time.time()
+                for exchange_id in payload.exchange_ids:
+                    row = rows.get(exchange_id)
+                    evidence = json.loads(row["verification_json"] or "{}").get("evidence") if row else {}
+                    fresh = bool(row and row["last_verified"]) and (now - float(row["last_verified"]) <= VERIFICATION_TTL_SECONDS)
+                    if not row or row["state"] != "LIVE_READY" or not fresh or not (
+                        evidence.get("scannerEligible") and evidence.get("executionEligible") and evidence.get("liveEligible")
+                    ):
+                        missing.append(exchange_id)
+                if missing:
+                    raise HTTPException(409, "Live activation requires every selected venue to be LIVE_READY with fresh scanner, execution, balance, and permission evidence: " + ", ".join(missing))
             credentials_by_id: dict[str, dict[str, str]] = {}
             auth_modes: dict[str, str] = {}
             for exchange_id in payload.exchange_ids:
