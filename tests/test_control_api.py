@@ -299,6 +299,48 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(set(payload["readyExchangeIds"]), {"binance", "bybit"})
         self.assertFalse(payload["liveTradingEnabled"])
 
+    def test_live_engine_accepts_fresh_iso_verification_timestamp(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "1",
+        }, clear=False)
+        self.env.start()
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "iso-live@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        uid = signup.json()["user"]["id"]
+        evidence = {
+            "scannerEligible": True, "executionEligible": True, "liveEligible": True,
+            "livePermissionMode": "verified", "authentication": True, "account": True,
+            "balances": True,
+        }
+        db = web_api._connect()
+        try:
+            for exchange_id in ("binance", "bybit"):
+                encrypted = web_api._encrypt(json.dumps({"apiKey": "k", "secret": "s"}).encode())
+                db.execute(
+                    "INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json) VALUES(?,?,?,?,?,?,?)",
+                    (uid, exchange_id, encrypted, "ccxt", "LIVE_READY",
+                     datetime.now(timezone.utc).isoformat(), json.dumps({"evidence": evidence})),
+                )
+            db.commit()
+        finally:
+            db.close()
+        async def fake_engine_job(*args, **kwargs):
+            return None
+        with patch.object(web_api, "_run_engine_job", side_effect=fake_engine_job):
+            response = self.client.post("/api/v1/engine/start", headers=self.headers, json={
+                "mode": "live", "exchange_ids": ["binance", "bybit"], "trade_size_usd": 5,
+                "max_loss_usd": 2, "target_profit_usd": 1, "cross_live": True,
+                "live_confirmation": "I ACCEPT REAL ORDERS",
+            })
+        self.assertEqual(response.status_code, 200)
+
     def test_live_engine_requires_live_ready_accounts_before_operator_flag(self):
         self.env.stop()
         self.env = patch.dict(os.environ, {
