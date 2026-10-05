@@ -272,6 +272,7 @@ class Hub:
                                 target_rank = rank_target_progress(
                                     expected_net_usd=opportunity.expected_usd,
                                     worst_case_net_usd=opportunity.worst_usd,
+                                    worst_case_net_bps=opportunity.worst_bps,
                                     age_ms=opportunity.age_ms,
                                     max_book_age_ms=self.cfg.max_book_age_ms,
                                     capital_utilization=utilization,
