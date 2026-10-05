@@ -21,6 +21,10 @@ class ExchangeCfg:
     default_taker_bps: float = 10.0
     require_private_stream: bool = False
     auth_mode: str = "hmac"
+    # "verified" means machine-readable permission evidence; "operator_attested" means
+    # the venue cannot expose scope proof and the operator explicitly attested to trade-only,
+    # withdrawals-disabled credentials during LIVE_READY promotion.
+    live_permission_mode: str = "verified"
 
 
 @dataclass
