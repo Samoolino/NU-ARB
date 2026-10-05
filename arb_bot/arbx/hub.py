@@ -14,6 +14,7 @@ from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
 from arbx.gate import ProfitGate, RiskManager
 from arbx.journal import TradeJournal
+from arbx.ranking import rank_target_progress
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
 
@@ -240,6 +241,9 @@ class Hub:
         self._cross_scan_last = now
         async with self._cross_scan_lock:
             ranked = []
+            target_remaining = None
+            if self.cfg.target_profit_usd is not None:
+                target_remaining = max(0.0, self.cfg.target_profit_usd - self.risk.pnl)
             workers = self.workers
             for symbol in self.cross_syms:
                 available = [(worker, worker.md.books.get(symbol)) for worker in workers]
@@ -255,16 +259,25 @@ class Hub:
                             candidate = self._best_cross_for_direction(symbol, bw, sw, bb, sb, now)
                             if candidate:
                                 _, opportunity, decision, free_quote, free_base, utilization = candidate
-                                ranked.append((decision.ok, opportunity.worst_usd, opportunity.expected_usd,
-                                               utilization, opportunity.worst_bps, opportunity.cost,
-                                               opportunity, bw, sw, decision, free_quote, free_base, utilization))
-            ranked.sort(key=lambda item: item[:6], reverse=True)
+                                target_rank = rank_target_progress(
+                                    expected_net_usd=opportunity.expected_usd,
+                                    worst_case_net_usd=opportunity.worst_usd,
+                                    age_ms=opportunity.age_ms,
+                                    max_book_age_ms=self.cfg.max_book_age_ms,
+                                    capital_utilization=utilization,
+                                    target_remaining_usd=target_remaining,
+                                )
+                                ranked.append((decision.ok, target_rank.score, opportunity.worst_usd,
+                                               opportunity.expected_usd, utilization, opportunity.worst_bps,
+                                               opportunity.cost, target_rank, opportunity, bw, sw, decision,
+                                               free_quote, free_base, utilization))
+            ranked.sort(key=lambda item: item[:7], reverse=True)
             if not ranked:
                 return
 
             selected = ranked[0]
             for rank, candidate in enumerate(ranked[1:21], start=2):
-                _, _, _, _, _, _, opportunity, bw, sw, decision, free_quote, free_base, utilization = candidate
+                _, target_score, _, _, _, _, _, target_rank, opportunity, bw, sw, decision, free_quote, free_base, utilization = candidate
                 reason = decision.reason if not decision.ok else "lower_priority_than_selected"
                 self.record_opportunity(
                     strategy="cross_exchange", exchange_a=opportunity.buy_ex, exchange_b=opportunity.sell_ex,
@@ -273,12 +286,30 @@ class Hub:
                     expected_net_bps=opportunity.net_bps, worst_case_net_bps=opportunity.worst_bps,
                     book_age_ms=opportunity.age_ms, approved=False, rejection_reason=reason,
                     decision="REJECTED_BY_GATE" if not decision.ok else "RANKED_NOT_SELECTED",
-                    evidence={"priorityRank": rank, "selectedFloorUsd": selected[1],
+                    evidence={"priorityRank": rank, "targetProgressScore": target_score,
+                              "executionConfidence": target_rank.execution_confidence,
+                              "expectedTargetProgress": target_rank.expected_target_progress,
+                              "selectedTargetProgressScore": selected[1],
+                              "selectedFloorUsd": selected[2],
                               "availableQuoteUsd": free_quote if math.isfinite(free_quote) else None,
                               "availableBase": free_base if math.isfinite(free_base) else None,
                               "capitalUtilization": utilization},
                 )
-            _, _, _, _, _, _, opportunity, bw, sw, _, free_quote, free_base, utilization = selected
+            _, target_score, _, _, _, _, _, target_rank, opportunity, bw, sw, _, free_quote, free_base, utilization = selected
+            self.record_opportunity(
+                strategy="cross_exchange", exchange_a=opportunity.buy_ex, exchange_b=opportunity.sell_ex,
+                symbol=opportunity.symbol, requested_usd=opportunity.cost,
+                expected_net_usd=opportunity.expected_usd, worst_case_net_usd=opportunity.worst_usd,
+                expected_net_bps=opportunity.net_bps, worst_case_net_bps=opportunity.worst_bps,
+                book_age_ms=opportunity.age_ms, approved=True, rejection_reason=None,
+                decision="SELECTED_TARGET_PROGRESS",
+                evidence={"priorityRank": 1, "targetProgressScore": target_score,
+                          "executionConfidence": target_rank.execution_confidence,
+                          "expectedTargetProgress": target_rank.expected_target_progress,
+                          "targetRemainingUsd": target_remaining,
+                          "capitalUtilization": utilization},
+                force=True,
+            )
             await self._fire_cross(opportunity, bw, sw, priority_rank=1,
                                    compared_count=len(ranked), free_quote=free_quote,
                                    free_base=free_base, utilization=utilization)
