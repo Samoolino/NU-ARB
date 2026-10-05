@@ -746,39 +746,50 @@ async def refresh_exchange_account(exchange_id: str, request: Request):
 
 @app.post("/api/v1/exchanges/{exchange_id}/promote-live-ready", dependencies=[Depends(_proxy_auth)])
 async def promote_live_ready(exchange_id: str, payload: LiveReadyPromotion, request: Request):
-    """Promote fresh, account-specific live-capable evidence to operational live-ready.
-
-    This records explicit human promotion only. It never enables live trading or submits an order.
-    """
+    """Require a fresh adapter reconnect before marking an account LIVE_READY."""
     if exchange_id not in VENUES:
         raise HTTPException(404, "Exchange is not in the supported venue registry")
     db = _connect()
     try:
         uid = _current_user(request, db)
-        row = db.execute(
-            "SELECT state,last_verified,verification_json FROM exchange_credentials WHERE user_id=? AND exchange_id=?",
-            (uid, exchange_id),
-        ).fetchone()
-        if not row:
-            raise HTTPException(409, "Verify the exchange account before promotion")
-        if not _verification_is_fresh(row["last_verified"]):
-            raise HTTPException(409, "Verification is expired; re-verify the exchange account before promotion")
-        saved = json.loads(row["verification_json"])
-        evidence = saved.get("evidence", {})
-        if not bool(evidence.get("liveEligible")):
-            raise HTTPException(409, "Exchange is not verified live-capable; permission and execution gates must pass")
-        if (evidence.get("permissions") or {}).get("liveEligible") is not True:
-            raise HTTPException(409, "Fresh account permission evidence does not authorize live-ready promotion")
-        db.execute("UPDATE exchange_credentials SET state=? WHERE user_id=? AND exchange_id=?",
-                   ("LIVE_READY", uid, exchange_id))
+        row = db.execute("SELECT auth_mode,encrypted_credentials,state,verification_json FROM exchange_credentials WHERE user_id=? AND exchange_id=?", (uid, exchange_id)).fetchone()
+    finally:
+        db.close()
+    if not row:
+        raise HTTPException(409, "Verify the exchange account before promotion")
+    exchange = None
+    try:
+        credentials = json.loads(_decrypt(row["encrypted_credentials"]).decode())
+        exchange = _make_exchange(exchange_id, row["auth_mode"], credentials)
+        evidence, balances, book = await _probe_exchange(exchange_id, exchange, "BTC/USDT")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Live-ready adapter reconnect failed: {type(exc).__name__}") from exc
+    finally:
+        if exchange is not None:
+            try: await exchange.close()
+            except Exception: pass
+    if not (evidence.get("authentication") and evidence.get("account") and evidence.get("balances")):
+        raise HTTPException(409, evidence.get("accountError") or "Stored API key could not authenticate and return balances")
+    if not evidence.get("liveEligible") or (evidence.get("permissions") or {}).get("liveEligible") is not True:
+        raise HTTPException(409, "Fresh adapter, permission, stream, execution, and live-safety evidence is required")
+    saved = json.loads(row["verification_json"] or "{}")
+    saved["evidence"] = evidence
+    saved["balances"] = balances or {}
+    if book: saved["orderBook"] = book
+    saved["balanceRefreshedAt"] = datetime.now(timezone.utc).isoformat()
+    db = _connect()
+    try:
+        db.execute("UPDATE exchange_credentials SET state=?,last_verified=?,verification_json=? WHERE user_id=? AND exchange_id=?", ("LIVE_READY", evidence["verifiedAt"], json.dumps(saved, separators=(",", ":")), uid, exchange_id))
         db.commit()
         return {"id": exchange_id, "name": VENUES[exchange_id], "state": "LIVE_READY",
                 "liveReady": True, "liveEligible": True, "executionEnabled": False,
                 "liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
-                "orderSubmitted": False, "verifiedAt": row["last_verified"]}
+                "orderSubmitted": False, "verifiedAt": evidence["verifiedAt"],
+                "balanceRefreshedAt": saved["balanceRefreshedAt"], "balances": saved["balances"]}
     finally:
         db.close()
-
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
 def remove_exchange(exchange_id: str, request: Request):
