@@ -52,3 +52,25 @@ def test_verified_execution_is_not_recovered(tmp_path):
     journal.transition_execution("e2", "VERIFIED", now=204.0)
     assert journal.open_executions(mode="live") == []
     journal.close()
+
+
+def test_exchange_authoritative_order_snapshot_is_persisted(tmp_path):
+    journal = TradeJournal(tmp_path / "journal.sqlite3")
+    journal.create_execution(
+        execution_id="e3", session_id="s3", mode="live",
+        strategy="cross_exchange", opportunity_id="o3",
+        legs=[
+            {"leg_index": 0, "exchange_id": "binance", "symbol": "BTC/USDT", "side": "buy", "requested_amount": 0.001},
+            {"leg_index": 1, "exchange_id": "bybit", "symbol": "BTC/USDT", "side": "sell", "requested_amount": 0.001},
+        ],
+    )
+    journal.transition_execution("e3", "SUBMITTING")
+    journal.transition_leg("e3", 0, "SUBMITTED", order={"id": "b3", "filled": 0.001, "cost": 50.0})
+    journal.reconcile_leg("e3", 0, {"id": "b3", "filled": 0.0008, "cost": 40.0})
+    row = journal.db.execute(
+        "SELECT order_id, filled, cost FROM execution_legs WHERE execution_id='e3' AND leg_index=0"
+    ).fetchone()
+    assert row["order_id"] == "b3"
+    assert row["filled"] == 0.0008
+    assert row["cost"] == 40.0
+    journal.close()
