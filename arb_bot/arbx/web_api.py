@@ -737,7 +737,8 @@ async def engine_start(payload: EngineStart, request: Request):
             uid = _current_user(request, db)
             rows = {r["exchange_id"]: r for r in db.execute(
                 "SELECT exchange_id,encrypted_credentials,auth_mode FROM exchange_credentials WHERE user_id=?", (uid,))}
-            credentials_by_id: dict[str, dict[str, str]] = {}            auth_modes: dict[str, str] = {}
+            credentials_by_id: dict[str, dict[str, str]] = {}
+            auth_modes: dict[str, str] = {}
             for exchange_id in payload.exchange_ids:
                 row = rows.get(exchange_id)
                 if row is None:
