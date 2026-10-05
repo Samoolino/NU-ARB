@@ -407,6 +407,30 @@ class TradeJournal:
         self.db.execute("INSERT OR REPLACE INTO capital_events(event_id,session_id,exchange_id,asset,event_type,amount,reference,status,observed_at,reconciled_at,note) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (event_id, session_id, exchange_id, asset, event_type, amount, reference, status, now, None, note))
         self.db.commit()
 
+    def execution_expected_deltas(self, execution_id: str, exchange_id: str) -> dict[str, float]:
+        """Return conservative balance movement attributable to authoritative fills.
+
+        The result includes principal movement only. Fees may add further debits, so
+        reconciliation treats negative residuals as non-PnL capital events rather than
+        falsely declaring them external withdrawals.
+        """
+        rows = self.db.execute(
+            "SELECT symbol, side, filled, cost FROM execution_legs WHERE execution_id=? AND exchange_id=?",
+            (execution_id, exchange_id),
+        ).fetchall()
+        expected: dict[str, float] = {}
+        for row in rows:
+            symbol = str(row["symbol"])
+            if "/" not in symbol:
+                continue
+            base, quote = symbol.split("/", 1)
+            filled = float(row["filled"] or 0.0)
+            cost = float(row["cost"] or 0.0)
+            sign = 1.0 if row["side"] == "buy" else -1.0
+            expected[base] = expected.get(base, 0.0) + sign * filled
+            expected[quote] = expected.get(quote, 0.0) - sign * cost
+        return expected
+
     def capital_baseline(self, session_id: str, exchange_id: str) -> dict | None:
         row = self.db.execute(
             "SELECT balance_json FROM capital_baselines WHERE session_id=? AND exchange_id=?",
