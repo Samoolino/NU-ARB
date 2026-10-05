@@ -1,7 +1,8 @@
 """Modeled-profit and execution-safety gates.
 
-The live pilot is capital-constrained by the configured starter allocation and
-actual exchange inventory. It no longer uses a separate session-loss ceiling.
+Live policy: start at $3, compound only realized profits into the next trade,
+and stop immediately after any realized loss. There is no fixed session-loss
+ceiling; the engine is fail-closed on realized loss instead.
 """
 from __future__ import annotations
 
@@ -38,14 +39,19 @@ class RiskManager:
             self._stamps.popleft()
         return len(self._stamps) < self.cfg.max_trades_per_min
 
+    @property
+    def compounded_capital(self) -> float:
+        return self.cfg.starter_capital_usd + max(0.0, self.pnl)
+
     def record(self, pnl: float, ok: bool) -> None:
         self._stamps.append(time.monotonic())
         self.pnl += pnl
         self.failures = 0 if ok else self.failures + 1
-        # No session-loss ceiling. Live exposure remains constrained by the
-        # starter allocation, actual exchange inventory, profitability gates,
-        # order limits, and the consecutive-failure circuit breaker.
-        if self.failures >= self.cfg.max_consecutive_failures:
+        if self.cfg.mode == "live" and self.cfg.compound_profits:
+            self.cfg.trade_size_usd = self.compounded_capital
+        if self.cfg.mode == "live" and self.cfg.halt_on_realized_loss and pnl < 0:
+            self.halt(f"realized loss protection triggered ({pnl:.6f} USD)")
+        elif self.failures >= self.cfg.max_consecutive_failures:
             self.halt("too many consecutive failed/unfilled cycles")
 
 
@@ -69,6 +75,8 @@ class ProfitGate:
             return Decision(False, "worst_case_below_floor")
         if worst_usd < c.min_profit_usd:
             return Decision(False, "profit_below_min_usd")
+        if c.mode == "live" and worst_usd <= 0:
+            return Decision(False, "non_positive_worst_case")
         return OK
 
     @staticmethod
