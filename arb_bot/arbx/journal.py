@@ -124,6 +124,11 @@ class TradeJournal:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS session_halts (
+            session_id TEXT PRIMARY KEY,
+            reason TEXT NOT NULL,
+            halted_at REAL NOT NULL
+        )""")
         self.db.execute("""CREATE TABLE IF NOT EXISTS trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -559,6 +564,20 @@ class TradeJournal:
         query += " ORDER BY updated_at"
         return [dict(row) for row in self.db.execute(query, args).fetchall()]
 
+
+    def record_session_halt(self, session_id: str, reason: str, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute(
+            "INSERT INTO session_halts(session_id, reason, halted_at) VALUES(?,?,?) "
+            "ON CONFLICT(session_id) DO UPDATE SET reason=excluded.reason, halted_at=excluded.halted_at",
+            (session_id, reason, now),
+        )
+        self.db.commit()
+
+    def session_halt(self, session_id: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM session_halts WHERE session_id=?", (session_id,)).fetchone()
+        return dict(row) if row else None
 
     def close(self) -> None:
         self.db.close()
