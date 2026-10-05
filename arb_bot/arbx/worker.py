@@ -13,6 +13,7 @@ from arbx.market import LatencyGuard, MarketData
 from arbx.permissions import inspect_permissions
 from arbx.strategy import evaluate_triangle
 from arbx.util import STABLES
+from arbx.universe import build_market_universe, select_hot_markets, universe_stats
 
 
 def spot_market_options(exchange_id: str) -> dict:
