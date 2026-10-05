@@ -25,6 +25,7 @@ def rank_target_progress(
     *,
     expected_net_usd: float,
     worst_case_net_usd: float,
+    worst_case_net_bps: float | None = None,
     age_ms: float,
     max_book_age_ms: float,
     capital_utilization: float,
@@ -46,7 +47,8 @@ def rank_target_progress(
     utilization = _clamp(float(capital_utilization))
 
     speed_margin_bps = max(0.0, float(volatility_bps_s)) * max(0.0, float(predicted_completion_ms)) / 1000.0 + max(0.0, float(speed_safety_buffer_bps))
-    speed_confidence = _clamp(1.0 - speed_margin_bps / max(1.0, abs(worst)))
+    speed_floor = abs(float(worst_case_net_bps)) if worst_case_net_bps is not None else 1.0
+    speed_confidence = _clamp(1.0 - speed_margin_bps / max(1.0, speed_floor))
     floor_confidence = _clamp(worst / expected) if expected > 0.0 else 0.0
     freshness_confidence = _clamp(1.0 - age / max_age)
     utilization_confidence = 1.0 - 0.5 * utilization
