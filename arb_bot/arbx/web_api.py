@@ -972,7 +972,7 @@ async def engine_start(payload: EngineStart, request: Request):
                 for exchange_id in payload.exchange_ids:
                     row = rows.get(exchange_id)
                     evidence = json.loads(row["verification_json"] or "{}").get("evidence") if row else {}
-                    fresh = bool(row and row["last_verified"]) and (now - float(row["last_verified"]) <= VERIFICATION_TTL_SECONDS)
+                    fresh = bool(row and row["last_verified"]) and _verification_is_fresh(row["last_verified"], now=now)
                     if not row or row["state"] != "LIVE_READY" or not fresh or not (
                         evidence.get("scannerEligible") and evidence.get("executionEligible") and evidence.get("liveEligible")
                     ):
