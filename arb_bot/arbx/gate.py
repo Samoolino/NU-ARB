@@ -59,7 +59,7 @@ class ProfitGate:
     def __init__(self, cfg, risk: RiskManager):
         self.cfg, self.risk = cfg, risk
 
-    def _common(self, age_ms, net_bps, worst_bps, worst_usd, lat_ok) -> Decision:
+    def _common(self, age_ms, net_bps, worst_bps, worst_usd, lat_ok, speed_margin_bps=0.0) -> Decision:
         c = self.cfg
         if self.risk.halted:
             return Decision(False, "halted")
@@ -71,8 +71,8 @@ class ProfitGate:
             return Decision(False, "stale_book")
         if net_bps < c.min_net_bps:
             return Decision(False, "net_edge")
-        if worst_bps < c.min_worst_bps:
-            return Decision(False, "worst_case_below_floor")
+        if worst_bps - max(0.0, speed_margin_bps) < c.min_worst_bps:
+            return Decision(False, "volatility_speed_margin_below_floor")
         if worst_usd < c.min_profit_usd:
             return Decision(False, "profit_below_min_usd")
         return OK
@@ -94,8 +94,8 @@ class ProfitGate:
             return Decision(False, "insufficient_balance")
         return OK
 
-    def check_cross(self, o, mlim_buy, mlim_sell, lat_ok: bool, free_quote: float, free_base: float) -> Decision:
-        d = self._common(o.age_ms, o.net_bps, o.worst_bps, o.worst_usd, lat_ok)
+    def check_cross(self, o, mlim_buy, mlim_sell, lat_ok: bool, free_quote: float, free_base: float, speed_margin_bps: float = 0.0) -> Decision:
+        d = self._common(o.age_ms, o.net_bps, o.worst_bps, o.worst_usd, lat_ok, speed_margin_bps)
         if not d.ok:
             return d
         if not (self._min_ok(mlim_buy, o.symbol, o.base, o.cost) and self._min_ok(mlim_sell, o.symbol, o.base, o.cost)):
