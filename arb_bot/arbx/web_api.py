@@ -450,6 +450,16 @@ def _verification_is_fresh(verified_at: str | None, *, now: float | None = None)
     return 0 <= age <= VERIFICATION_TTL_SECONDS
 
 
+
+def _unresolved_live_executions(user_id: str) -> list[dict]:
+    from arbx.journal import TradeJournal
+    journal = TradeJournal(APP_DB.parent / f"engine_{user_id}.sqlite3")
+    try:
+        return journal.open_executions(mode="live")
+    finally:
+        journal.close()
+
+
 def _new_session(db, user_id: str, response: Response):
     token = secrets.token_urlsafe(32)
     db.execute("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)",
@@ -518,13 +528,14 @@ def live_activation_readiness(request: Request):
             "permissionMode": evidence.get("livePermissionMode", "unverified"),
             "activationReady": activation_ready,
         }
+    unresolved = _unresolved_live_executions(uid)
     venues = []
     for exchange_id, name in VENUES.items():
         item = by_exchange.get(exchange_id, {"state":"NOT_CONFIGURED","fresh":False,"scannerEligible":False,
             "executionEligible":False,"liveEligible":False,"permissionMode":"unverified","activationReady":False})
         venues.append({"id": exchange_id, "name": name, **item})
     ready = [v for v in venues if v["activationReady"]]
-    cross_live_ready = len(ready) >= 2
+    cross_live_ready = len(ready) >= 2 and not unresolved
     return {
         "liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
         "activationReady": cross_live_ready,
@@ -532,6 +543,7 @@ def live_activation_readiness(request: Request):
         "minimumReadyVenues": 2,
         "readyExchangeIds": [v["id"] for v in ready],
         "readyCount": len(ready),
+        "unresolvedLiveExecutions": unresolved,
         "registeredCount": len(VENUES),
         "venues": venues,
         "action": "ENABLE_OPERATOR_LIVE_FLAG_AFTER_PREFLIGHT" if cross_live_ready else "VERIFY_AND_PROMOTE_SELECTED_ACCOUNTS",
@@ -967,6 +979,9 @@ async def engine_start(payload: EngineStart, request: Request):
             rows = {r["exchange_id"]: r for r in db.execute(
                 "SELECT exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?", (uid,))}
             if payload.mode == "live":
+                unresolved = _unresolved_live_executions(uid)
+                if unresolved:
+                    raise HTTPException(409, "Live activation is blocked by unresolved prior live execution state; reconcile the exchange account before restarting")
                 missing = []
                 now = time.time()
                 for exchange_id in payload.exchange_ids:
