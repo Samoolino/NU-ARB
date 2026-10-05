@@ -678,6 +678,26 @@ def engine_journal(request: Request):
         journal_db.close()
 
 
+@app.get("/api/v1/engine/events", dependencies=[Depends(_proxy_auth)])
+def engine_events(request: Request):
+    db = _connect()
+    try:
+        _current_user(request, db)
+    finally:
+        db.close()
+    events = []
+    while True:
+        try:
+            event = engine_logs.get_nowait()
+        except queue.Empty:
+            break
+        if isinstance(event, (tuple, list)) and len(event) >= 3:
+            events.append({"kind": str(event[1]), "message": str(event[2])[:2000]})
+        else:
+            events.append({"kind": "event", "message": str(event)[:2000]})
+    return {"events": events}
+
+
 @app.post("/api/v1/engine/start", dependencies=[Depends(_proxy_auth)])
 async def engine_start(payload: EngineStart, request: Request):
     if not payload.require_private_stream:
