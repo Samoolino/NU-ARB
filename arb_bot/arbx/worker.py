@@ -96,11 +96,14 @@ class ExchangeWorker:
             raise RuntimeError("authenticated private balance WebSocket is required but unavailable")
         if self.live:
             permissions = await inspect_permissions(self.x.venue_id or self.id, self.ex)
-            if permissions.get("liveEligible") is not True:
+            machine_verified = permissions.get("liveEligible") is True
+            if not machine_verified and self.x.live_permission_mode != "operator_attested":
                 raise RuntimeError(
                     f"live key permissions are not verified for {self.x.venue_id or self.id}: "
                     f"{permissions.get('source', 'unknown permission probe')}"
                 )
+            if not machine_verified:
+                self.hub.log("warn", f"[{self.id}] using operator-attested trade-only permission mode; no machine scope proof is available")
         self.lat = LatencyGuard(self.ex, self.cfg)
         st = await self.lat.preflight()
         self.hub.log("info", f"[{self.id}] REST RTT p50={st['p50']:.0f}ms p95={st['p95']:.0f}ms "
