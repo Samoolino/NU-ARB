@@ -172,6 +172,35 @@ class TradeJournal:
             evidence TEXT NOT NULL DEFAULT '{}'
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS opportunities_session_idx ON opportunities(session_id, id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_runs (
+            execution_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            opportunity_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            error TEXT
+        )""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_legs (
+            execution_id TEXT NOT NULL,
+            leg_index INTEGER NOT NULL,
+            exchange_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            requested_amount REAL NOT NULL,
+            state TEXT NOT NULL,
+            order_id TEXT,
+            filled REAL,
+            cost REAL,
+            fee REAL,
+            updated_at REAL NOT NULL,
+            error TEXT,
+            PRIMARY KEY(execution_id, leg_index)
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_runs_state_idx ON execution_runs(state, mode, updated_at)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_legs_order_idx ON execution_legs(order_id)")
         self.db.commit()
         self.reservations = ReservationManager(self.db)
 
@@ -230,6 +259,106 @@ class TradeJournal:
             record["evidence"] = json.loads(record["evidence"])
             results.append(record)
         return results
+
+    def create_execution(self, *, execution_id: str, session_id: str, mode: str,
+                         strategy: str, opportunity_id: str, legs: list[dict],
+                         now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute(
+                "INSERT INTO execution_runs(execution_id,session_id,mode,strategy,opportunity_id,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (execution_id, session_id, mode, strategy, opportunity_id, "RESERVED", now, now),
+            )
+            for leg in legs:
+                self.db.execute(
+                    "INSERT INTO execution_legs(execution_id,leg_index,exchange_id,symbol,side,requested_amount,state,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?)",
+                    (execution_id, leg["leg_index"], leg["exchange_id"], leg["symbol"], leg["side"],
+                     leg["requested_amount"], "RESERVED", now),
+                )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def transition_execution(self, execution_id: str, state: str, *,
+                             error: str | None = None, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        allowed = {
+            "RESERVED": {"SUBMITTING", "HALTED", "RELEASED"},
+            "SUBMITTING": {"SUBMITTED", "LEG_FAILED", "HALTED"},
+            "SUBMITTED": {"FILLED", "PARTIAL", "LEG_FAILED", "HALTED", "SETTLEMENT_PENDING"},
+            "PARTIAL": {"SUBMITTING", "HALTED", "SETTLEMENT_PENDING"},
+            "FILLED": {"SETTLEMENT_PENDING", "VERIFIED"},
+            "LEG_FAILED": {"HALTED", "SETTLEMENT_PENDING"},
+            "SETTLEMENT_PENDING": {"VERIFIED", "HALTED"},
+            "VERIFIED": set(),
+            "HALTED": set(),
+            "RELEASED": set(),
+        }
+        row = self.db.execute("SELECT state FROM execution_runs WHERE execution_id=?", (execution_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"unknown execution {execution_id}")
+        if state not in allowed.get(row["state"], set()):
+            raise ValueError(f"invalid execution transition {row['state']} -> {state}")
+        self.db.execute(
+            "UPDATE execution_runs SET state=?, updated_at=?, error=? WHERE execution_id=?",
+            (state, now, error, execution_id),
+        )
+        self.db.commit()
+
+    def transition_leg(self, execution_id: str, leg_index: int, state: str, *,
+                       order: dict | None = None, error: str | None = None,
+                       now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        row = self.db.execute(
+            "SELECT state FROM execution_legs WHERE execution_id=? AND leg_index=?",
+            (execution_id, leg_index),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown execution leg {execution_id}/{leg_index}")
+        allowed = {
+            "RESERVED": {"SUBMITTING", "SUBMITTED", "LEG_FAILED", "HALTED"},
+            "SUBMITTING": {"SUBMITTED", "LEG_FAILED", "HALTED"},
+            "SUBMITTED": {"FILLED", "PARTIAL", "LEG_FAILED", "HALTED"},
+            "PARTIAL": {"FILLED", "LEG_FAILED", "HALTED"},
+            "FILLED": {"SETTLEMENT_PENDING", "VERIFIED"},
+            "LEG_FAILED": {"HALTED", "SETTLEMENT_PENDING"},
+            "SETTLEMENT_PENDING": {"VERIFIED", "HALTED"},
+            "VERIFIED": set(),
+            "HALTED": set(),
+        }
+        if state not in allowed.get(row["state"], set()):
+            raise ValueError(f"invalid leg transition {row['state']} -> {state}")
+        fields = ["state=?", "updated_at=?", "error=?"]
+        values: list = [state, now, error]
+        if order is not None:
+            fields += ["order_id=?", "filled=?", "cost=?", "fee=?"]
+            fees = order.get("fees") or ([order["fee"]] if order.get("fee") else [])
+            fee = sum(float(f.get("cost") or 0.0) for f in fees if f)
+            values += [order.get("id"), float(order.get("filled") or 0.0),
+                       float(order.get("cost") or 0.0), fee]
+        values += [execution_id, leg_index]
+        self.db.execute(
+            f"UPDATE execution_legs SET {','.join(fields)} WHERE execution_id=? AND leg_index=?",
+            values,
+        )
+        self.db.commit()
+
+    def open_executions(self, *, mode: str | None = None) -> list[dict]:
+        query = "SELECT * FROM execution_runs WHERE state NOT IN ('VERIFIED','RELEASED')"
+        args: tuple = ()
+        if mode is not None:
+            query += " AND mode=?"
+            args = (mode,)
+        query += " ORDER BY updated_at"
+        return [dict(row) for row in self.db.execute(query, args).fetchall()]
+
 
     def close(self) -> None:
         self.db.close()
