@@ -163,3 +163,38 @@ class ControlApiTests(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
+
+
+    def test_refresh_reconnects_saved_key_and_persists_balances(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "refresh@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+
+        class FakeAdapter:
+            async def close(self):
+                return None
+
+        evidence = {"authentication": True, "rest": True, "account": True, "balances": True,
+                    "privateWebSocket": True, "publicWebSocket": True, "scannerEligible": True,
+                    "executionEligible": True, "liveEligible": True,
+                    "connectionState": "FULLY_VERIFIED",
+                    "permissions": {"liveEligible": True},
+                    "verifiedAt": "2026-10-05T00:00:00+00:00"}
+        balances = {"USDT": {"free": 123.45, "used": 4.0, "total": 127.45}}
+        with patch.object(web_api, "_make_exchange", return_value=FakeAdapter()),              patch.object(web_api, "_probe_exchange", return_value=(evidence, balances, None)):
+            verified = self.client.post("/api/v1/exchanges/binance/verify", headers=self.headers, json={
+                "auth_mode": "hmac", "symbol": "BTC/USDT",
+                "credentials": {"apiKey": "refresh-key", "secret": "refresh-secret"},
+            })
+            self.assertEqual(verified.status_code, 200)
+            refreshed = self.client.post("/api/v1/exchanges/binance/refresh", headers=self.headers)
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertEqual(refreshed.json()["balances"]["USDT"]["total"], 127.45)
+        listing = self.client.get("/api/v1/exchanges", headers=self.headers)
+        self.assertEqual(listing.status_code, 200)
+        venue = next(item for item in listing.json()["exchanges"] if item["id"] == "binance")
+        self.assertTrue(venue["credentialConnection"]["adapterConnected"])
+        self.assertTrue(venue["credentialConnection"]["balanceConnected"])
+        self.assertEqual(venue["balances"]["USDT"]["free"], 123.45)
