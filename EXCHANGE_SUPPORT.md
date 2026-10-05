@@ -45,3 +45,8 @@ For cross-venue comparison, the engine tests visible depth breakpoints, caps siz
 ## Required deployment resources
 
 The control API, its SQLite database, and the persistent WebSocket engine run on Railway. Vercel serves the static dashboard and Node API proxy. The Railway volume, public HTTPS domain, control-service token, encryption key, and Vercel environment variables must be configured in their respective hosting accounts; they are not repository files.
+
+
+## Live engagement activation
+
+The repository now exposes a read-only `/api/v1/live/activation-readiness` gate. It reports only accounts that are freshly verified, `LIVE_READY`, scanner-eligible, execution-capable, and live-eligible. It never enables live trading. The production operator flag `ARBX_LIVE_TRADING_ENABLED` remains fail-closed at `0` until the selected exchange accounts have been individually connected, verified, promoted, and preflighted. This prevents repository configuration from being mistaken for account-specific verification.
