@@ -35,6 +35,13 @@ class Config:
     target_profit_usd: float | None = None
     target_equity_usd: float | None = None
 
+    # Live strategy policy: $3 starter, reinvest realized profits, never average
+    # down a losing trade. The word DCA here means staged capital deployment
+    # from realized profits; it does not mean adding to a losing position.
+    strategy_mode: str = "profit_dca"
+    compound_profits: bool = True
+    halt_on_realized_loss: bool = True
+
     # ---- Modeled profit-floor gate ------------------------------------------
     min_net_bps: float = 3.0
     min_worst_bps: float = 0.5
@@ -49,8 +56,9 @@ class Config:
     depth: int = 10
 
     # ---- Risk ---------------------------------------------------------------
-    # Retained for backward-compatible control-plane payloads. The live gate
-    # does not use a session-loss ceiling.
+    # Kept only for backwards-compatible control-plane payloads. Live trading
+    # does not use a fixed session-loss ceiling; a realized loss is instead a
+    # circuit-breaker event under halt_on_realized_loss.
     max_loss_usd: float = 0.0
     max_consecutive_failures: int = 3
     max_trades_per_min: int = 30
@@ -96,6 +104,9 @@ class Config:
             start_capital_usd=starter, starter_capital_usd=starter, trade_size_usd=trade_size,
             target_profit_usd=float(profit_target) if profit_target else None,
             target_equity_usd=float(tgt) if tgt else None,
+            strategy_mode=os.getenv("BOT_STRATEGY_MODE", "profit_dca"),
+            compound_profits=b("BOT_COMPOUND_PROFITS", True),
+            halt_on_realized_loss=b("BOT_HALT_ON_REALIZED_LOSS", True),
             min_net_bps=f("BOT_MIN_NET_BPS", 3.0), min_worst_bps=f("BOT_MIN_WORST_BPS", 0.5),
             limit_tol_bps=f("BOT_LIMIT_TOL_BPS", 1.0), max_rtt_ms=f("BOT_MAX_RTT_MS", 80.0),
             fee_discount_pct=f("BOT_FEE_DISCOUNT_PCT", 0.0),
@@ -106,6 +117,8 @@ class Config:
     def validate(self) -> None:
         if self.mode not in ("paper", "live"):
             raise ValueError("BOT_MODE must be 'paper' or 'live'")
+        if self.strategy_mode != "profit_dca":
+            raise ValueError("live strategy is fixed to profit_dca") if self.mode == "live" else None
         if self.mode == "live":
             # Normalize every live entry path, including the authenticated web
             # control API, to the single $3 starter-capital condition.
@@ -114,6 +127,8 @@ class Config:
             self.trade_size_usd = LIVE_STARTER_CAPITAL_USD
             self.target_profit_usd = None
             self.max_loss_usd = 0.0
+            self.compound_profits = True
+            self.halt_on_realized_loss = True
         if not self.exchanges:
             raise ValueError("no exchanges configured (BOT_EXCHANGES)")
         venue_ids = [x.venue_id or x.id for x in self.exchanges]
