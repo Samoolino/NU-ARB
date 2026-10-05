@@ -26,7 +26,7 @@ def test_reservation_is_atomic_and_durable(tmp_path):
         now=101.0,
     )
     assert blocked is None
-    assert len(manager.active(now=101.0)) == 2 if False else len(manager.active(now=101.0)) == 2
+    assert len(manager.active(now=101.0)) == 2
     journal.close()
 
 
