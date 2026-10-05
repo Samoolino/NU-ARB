@@ -208,6 +208,11 @@ class ExchangeConnect(BaseModel):
         return credentials
 
 
+class LiveReadyPromotion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmation: Literal["PROMOTE LIVE READY"]
+
+
 class EngineStart(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     mode: Literal["paper", "live"]
@@ -520,6 +525,8 @@ async def exchanges(request: Request):
                 engagement_state, engagement_label = "VERIFICATION_FAILED", "Verification failed"
             elif saved_state == "STALE":
                 engagement_state, engagement_label = "STALE", "Verification expired"
+            elif saved_state == "LIVE_READY" and live_eligible:
+                engagement_state, engagement_label = "LIVE_READY", "Live-ready"
             elif live_eligible:
                 engagement_state, engagement_label = "VERIFIED_LIVE_CAPABLE", "Verified live-capable"
             elif execution_eligible:
@@ -542,7 +549,8 @@ async def exchanges(request: Request):
                            "scannerEligible": scanner_eligible,
                            "executionEligible": execution_eligible,
                            "liveEligible": live_eligible,
-                           "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
+                           "liveReady": bool(saved_state == "LIVE_READY" and live_eligible),
+                           "executionEnabled": bool(saved_state == "LIVE_READY" and live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1")})
         return {"exchanges": result}
     finally:
         db.close()
@@ -631,6 +639,42 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
                 "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
                 "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
                 "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/exchanges/{exchange_id}/promote-live-ready", dependencies=[Depends(_proxy_auth)])
+async def promote_live_ready(exchange_id: str, payload: LiveReadyPromotion, request: Request):
+    """Promote fresh, account-specific live-capable evidence to operational live-ready.
+
+    This records explicit human promotion only. It never enables live trading or submits an order.
+    """
+    if exchange_id not in VENUES:
+        raise HTTPException(404, "Exchange is not in the supported venue registry")
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+        row = db.execute(
+            "SELECT state,last_verified,verification_json FROM exchange_credentials WHERE user_id=? AND exchange_id=?",
+            (uid, exchange_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(409, "Verify the exchange account before promotion")
+        if not _verification_is_fresh(row["last_verified"]):
+            raise HTTPException(409, "Verification is expired; re-verify the exchange account before promotion")
+        saved = json.loads(row["verification_json"])
+        evidence = saved.get("evidence", {})
+        if not bool(evidence.get("liveEligible")):
+            raise HTTPException(409, "Exchange is not verified live-capable; permission and execution gates must pass")
+        if (evidence.get("permissions") or {}).get("liveEligible") is not True:
+            raise HTTPException(409, "Fresh account permission evidence does not authorize live-ready promotion")
+        db.execute("UPDATE exchange_credentials SET state=? WHERE user_id=? AND exchange_id=?",
+                   ("LIVE_READY", uid, exchange_id))
+        db.commit()
+        return {"id": exchange_id, "name": VENUES[exchange_id], "state": "LIVE_READY",
+                "liveReady": True, "liveEligible": True, "executionEnabled": False,
+                "liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
+                "orderSubmitted": False, "verifiedAt": row["last_verified"]}
     finally:
         db.close()
 
