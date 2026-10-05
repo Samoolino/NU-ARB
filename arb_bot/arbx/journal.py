@@ -201,6 +201,16 @@ class TradeJournal:
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS execution_runs_state_idx ON execution_runs(state, mode, updated_at)")
         self.db.execute("CREATE INDEX IF NOT EXISTS execution_legs_order_idx ON execution_legs(order_id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_results (
+            execution_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            gross_pnl REAL NOT NULL,
+            fees REAL NOT NULL,
+            net_pnl REAL NOT NULL,
+            verified_at REAL NOT NULL
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_results_session_idx ON execution_results(session_id, verified_at)")
         self.db.execute("""CREATE TABLE IF NOT EXISTS execution_settlements (
             execution_id TEXT NOT NULL,
             exchange_id TEXT NOT NULL,
@@ -215,12 +225,42 @@ class TradeJournal:
         self.db.commit()
         self.reservations = ReservationManager(self.db)
 
+    def record_verified_result(
+        self,
+        *,
+        execution_id: str,
+        session_id: str,
+        mode: str,
+        gross_pnl: float,
+        fees: float,
+        net_pnl: float,
+        verified_at: float | None = None,
+    ) -> None:
+        import time
+        verified_at = time.time() if verified_at is None else verified_at
+        state = self.db.execute(
+            "SELECT state FROM execution_runs WHERE execution_id=?", (execution_id,)
+        ).fetchone()
+        if state is None or state["state"] != "VERIFIED":
+            raise ValueError("realized PnL requires a VERIFIED execution")
+        self.db.execute(
+            """INSERT OR REPLACE INTO execution_results(
+                execution_id,session_id,mode,gross_pnl,fees,net_pnl,verified_at
+            ) VALUES(?,?,?,?,?,?,?)""",
+            (execution_id, session_id, mode, float(gross_pnl), float(fees), float(net_pnl), verified_at),
+        )
+        self.db.commit()
+
     def realized(self, session_id: str) -> float:
-        row = self.db.execute(
-            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM trades WHERE session_id=? AND execution_status='FILLED'",
+        legacy = self.db.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM trades WHERE session_id=? AND execution_status='FILLED' AND mode!='live'",
             (session_id,),
         ).fetchone()
-        return float(row["pnl"])
+        verified = self.db.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM execution_results WHERE session_id=? AND mode='live'",
+            (session_id,),
+        ).fetchone()
+        return float(legacy["pnl"]) + float(verified["pnl"])
 
     def append(self, record: dict[str, Any]) -> int:
         columns = (
