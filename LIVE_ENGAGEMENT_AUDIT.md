@@ -135,3 +135,11 @@ When an operator supplies an API key:
 **Highest-priority structural upgrades:** durable reservations, crash-recoverable leg state, exchange-confirmed fill reconciliation, typed/expiring evidence, complete market-universe certification, and target-aware opportunity ranking.
 
 The engine should never advance because code reached the next function. It advances only because the evidence required by the next state is true **now**.
+
+
+## Verified progression status — 2026-10-05
+
+- **P0-1 durable reservations: VERIFIED.** Atomic multi-resource SQLite reservations, expiry/recovery, release, inventory/execution/rate admission, and regression tests pass CI.
+- **P0-2 crash-recoverable execution: VERIFIED.** Live cross-exchange executions persist before submission; leg state survives process restart; unresolved live executions are recovered as a hard activation block; regression tests pass CI.
+- **Live activation admission: VERIFIED.** Activation readiness and live engine start now reject unresolved prior live execution state before any new live order can be admitted.
+- **Actual exchange engagement: PENDING REAL CREDENTIALS.** No real API key has been certified and no live order has been submitted. When credentials are entered, the system must independently prove authentication, balances, market/stream health, permission safety, execution capability, freshness and latency before LIVE_READY.
