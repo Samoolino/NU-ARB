@@ -177,7 +177,8 @@ def _encrypt(raw: bytes) -> bytes:
 def _decrypt(blob: bytes) -> bytes:
     key = bytes.fromhex(os.getenv("CREDENTIAL_ENCRYPTION_KEY", ""))
     if len(key) != 32:
-        raise RuntimeError("credential encryption key is not configured")    return AESGCM(key).decrypt(blob[:12], blob[12:], b"arbx-exchange-credentials-v1")
+        raise RuntimeError("credential encryption key is not configured")
+    return AESGCM(key).decrypt(blob[:12], blob[12:], b"arbx-exchange-credentials-v1")
 
 
 class Signup(BaseModel):
