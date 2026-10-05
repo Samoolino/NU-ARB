@@ -198,3 +198,37 @@ class ControlApiTests(unittest.TestCase):
         self.assertTrue(venue["credentialConnection"]["adapterConnected"])
         self.assertTrue(venue["credentialConnection"]["balanceConnected"])
         self.assertEqual(venue["balances"]["USDT"]["free"], 123.45)
+
+
+    def test_live_ready_promotion_reconnects_key_before_state_change(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "promote@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+
+        class FakeAdapter:
+            async def close(self):
+                return None
+
+        evidence = {"authentication": True, "rest": True, "account": True, "balances": True,
+                    "privateWebSocket": True, "publicWebSocket": True, "scannerEligible": True,
+                    "executionEligible": True, "liveEligible": True,
+                    "connectionState": "FULLY_VERIFIED",
+                    "permissions": {"liveEligible": True},
+                    "verifiedAt": "2026-10-05T00:00:00+00:00"}
+        balances = {"USDT": {"free": 9.0, "used": 1.0, "total": 10.0}}
+        with patch.object(web_api, "_make_exchange", return_value=FakeAdapter()) as make_exchange,              patch.object(web_api, "_probe_exchange", return_value=(evidence, balances, None)) as probe:
+            verified = self.client.post("/api/v1/exchanges/binance/verify", headers=self.headers, json={
+                "auth_mode": "hmac", "symbol": "BTC/USDT",
+                "credentials": {"apiKey": "promote-key", "secret": "promote-secret"},
+            })
+            self.assertEqual(verified.status_code, 200)
+            promoted = self.client.post("/api/v1/exchanges/binance/promote-live-ready",
+                                        headers=self.headers,
+                                        json={"confirmation": "PROMOTE LIVE READY"})
+        self.assertEqual(promoted.status_code, 200)
+        self.assertEqual(promoted.json()["state"], "LIVE_READY")
+        self.assertEqual(promoted.json()["balances"]["USDT"]["total"], 10.0)
+        self.assertGreaterEqual(make_exchange.call_count, 2)
+        self.assertGreaterEqual(probe.call_count, 2)
