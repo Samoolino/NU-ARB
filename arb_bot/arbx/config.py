@@ -12,12 +12,12 @@ MAX_EXCHANGES = 18
 
 @dataclass
 class ExchangeCfg:
-    id: str                       # ccxt.pro exchange id, e.g. "binance"
-    venue_id: str | None = None   # public registry id when a venue maps to an adapter alias
+    id: str
+    venue_id: str | None = None
     api_key: str = ""
     secret: str = ""
-    password: str = ""            # only some exchanges (okx, kucoin, bitget)
-    max_symbols: int = 120        # order-book streams to keep open on this exchange
+    password: str = ""
+    max_symbols: int = 120
     default_taker_bps: float = 10.0
     require_private_stream: bool = False
     auth_mode: str = "hmac"
@@ -25,41 +25,45 @@ class ExchangeCfg:
 
 @dataclass
 class Config:
-    mode: str = "paper"                                   # "paper" | "live"
+    mode: str = "paper"
     exchanges: list[ExchangeCfg] = field(default_factory=list)
-    start_assets: tuple[str, ...] = ("USDT", "USDC")      # cycles start/end here (must be stablecoins)
-    start_capital_usd: float = 100.0                      # paper only
-    trade_size_usd: float = 25.0
-    target_profit_usd: float | None = None       # session-wide realized net PnL target; stops new orders at attainment
-    target_equity_usd: float | None = None                # halt (never withdraw) when reached
+    start_assets: tuple[str, ...] = ("USDT", "USDC")
+    start_capital_usd: float = 3.0
+    starter_capital_usd: float = 3.0
+    trade_size_usd: float = 3.0
+    target_profit_usd: float | None = None
+    target_equity_usd: float | None = None
 
     # ---- Modeled profit-floor gate ------------------------------------------
-    min_net_bps: float = 3.0          # expected edge after fees (VWAP over depth)
-    min_worst_bps: float = 0.5        # modeled edge if every leg fills at its IOC limit
-    limit_tol_bps: float = 1.0        # IOC limit = marginal price +/- this tolerance
-    min_profit_usd: float = 0.01      # modeled net floor per trade
-    verify_slack_bps: float = 1.0     # halt tolerance when realized result misses modeled floor
+    min_net_bps: float = 3.0
+    min_worst_bps: float = 0.5
+    limit_tol_bps: float = 1.0
+    min_profit_usd: float = 0.01
+    verify_slack_bps: float = 1.0
 
     # ---- Latency / speed ----------------------------------------------------
-    max_book_age_ms: float = 250.0    # local receive-time freshness
-    max_rtt_ms: float = 80.0          # live refuses to start if median REST RTT is above this
-    pause_rtt_ms: float = 150.0       # trading pauses while rolling p95 RTT is above this
+    max_book_age_ms: float = 250.0
+    max_rtt_ms: float = 80.0
+    pause_rtt_ms: float = 150.0
     depth: int = 10
 
     # ---- Risk ---------------------------------------------------------------
-    max_loss_usd: float = 3.0
+    # Retained for backward-compatible API payloads; live execution no longer
+    # uses a session-loss ceiling. Capital is constrained by starter capital,
+    # available exchange inventory, profitability gates, and failure controls.
+    max_loss_usd: float = 0.0
     max_consecutive_failures: int = 3
     max_trades_per_min: int = 30
     cooldown_s: float = 0.2
 
     # ---- Fees / vehicles ----------------------------------------------------
-    fee_discount_pct: float = 0.0     # e.g. 25 if you pay fees in the exchange token (BNB on Binance)
+    fee_discount_pct: float = 0.0
 
     # ---- Cross-exchange (pre-funded inventory on both sides; no on-chain hop in the loop) ----
     cross_enabled: bool = True
-    cross_live: bool = False          # extra explicit opt-in for live cross-exchange orders
+    cross_live: bool = False
     cross_top_n: int = 30
-    rebalance_haircut_bps: float = 2.0  # amortized network/rebalancing cost charged against every cross trade
+    rebalance_haircut_bps: float = 2.0
 
     paper_penalty_bps: float = 1.0
     journal_path: Path = Path("trade_journal.csv")
@@ -85,14 +89,16 @@ class Config:
         mode = os.getenv("BOT_MODE", "paper").lower()
         tgt = os.getenv("BOT_TARGET_EQUITY_USD")
         profit_target = os.getenv("BOT_TARGET_PROFIT_USD")
+        starter = f("BOT_START_CAPITAL_USD", 3.0)
+        trade_size = f("BOT_TRADE_SIZE_USD", starter)
         return cls(
             mode=mode, exchanges=xs,
-            start_capital_usd=f("BOT_START_CAPITAL_USD", 100.0), trade_size_usd=f("BOT_TRADE_SIZE_USD", 25.0),
-            target_profit_usd=float(profit_target) if profit_target else (200.0 if mode == "live" else None),
+            start_capital_usd=starter, starter_capital_usd=starter, trade_size_usd=trade_size,
+            target_profit_usd=float(profit_target) if profit_target else None,
             target_equity_usd=float(tgt) if tgt else None,
             min_net_bps=f("BOT_MIN_NET_BPS", 3.0), min_worst_bps=f("BOT_MIN_WORST_BPS", 0.5),
             limit_tol_bps=f("BOT_LIMIT_TOL_BPS", 1.0), max_rtt_ms=f("BOT_MAX_RTT_MS", 80.0),
-            max_loss_usd=f("BOT_MAX_LOSS_USD", 3.0), fee_discount_pct=f("BOT_FEE_DISCOUNT_PCT", 0.0),
+            fee_discount_pct=f("BOT_FEE_DISCOUNT_PCT", 0.0),
             cross_enabled=b("BOT_CROSS", True), cross_live=b("BOT_CROSS_LIVE", False),
             journal_path=Path(os.getenv("BOT_JOURNAL_PATH", "trade_journal.csv")),
         )
@@ -107,16 +113,18 @@ class Config:
             raise ValueError(f"configure between one and {MAX_EXCHANGES} unique exchange venues")
         if self.target_profit_usd is not None and self.target_profit_usd <= 0:
             raise ValueError("BOT_TARGET_PROFIT_USD must be greater than zero")
-        if self.max_loss_usd <= 0 or (self.mode == "live" and self.max_loss_usd > 3.0):
-            raise ValueError("live BOT_MAX_LOSS_USD must be greater than zero and no more than the $3 pilot halt threshold")
-        if not 0 < self.trade_size_usd <= 25.0:
-            raise ValueError("BOT_TRADE_SIZE_USD must be greater than zero and no more than $25")
+        if self.starter_capital_usd <= 0:
+            raise ValueError("BOT_START_CAPITAL_USD must be greater than zero")
+        if self.trade_size_usd <= 0:
+            raise ValueError("BOT_TRADE_SIZE_USD must be greater than zero")
+        if self.mode == "live" and self.trade_size_usd > self.starter_capital_usd:
+            raise ValueError("live trade size cannot exceed the $3 starter capital allocation")
         bad = [a for a in self.start_assets if a not in STABLES]
         if bad:
             raise ValueError(f"start assets must be stablecoins, got {bad}")
         if self.mode == "live":
             if len(self.exchanges) < 2 or not self.cross_enabled or not self.cross_live:
-                raise ValueError("live pilot requires at least two venues and explicit BOT_CROSS_LIVE=1")
+                raise ValueError("live mode requires at least two venues and explicit BOT_CROSS_LIVE=1")
             for x in self.exchanges:
                 if not (x.api_key and x.secret):
                     venue_id = x.venue_id or x.id
