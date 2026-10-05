@@ -68,3 +68,6 @@ python run.py --headless
 ```
 
 The bot defaults to paper mode. Live mode can place real exchange orders; it requires exchange credentials, and cross-exchange live orders require the separate `BOT_CROSS_LIVE=1` opt-in. Arbitrage is risky and profits are not guaranteed. Read the full [operations guide](ARBX_README.md) before configuring exchanges. Never commit API keys.
+## Live mode / CCXT clarity
+
+See [LIVE_MODE_CLARITY.md](LIVE_MODE_CLARITY.md) for the authoritative separation between the Vercel public scanner and the Python CCXT Pro live engine, the per-exchange live-engagement contract, and the modeled-profit-floor / bounded-risk structure. A public CCXT snapshot is never a live-trading authorization, and a modeled positive floor is not a no-loss guarantee.
