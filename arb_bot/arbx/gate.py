@@ -24,8 +24,9 @@ OK = Decision(True)
 
 
 class RiskManager:
-    def __init__(self, cfg):
+    def __init__(self, cfg, on_halt=None):
         self.cfg = cfg
+        self._on_halt = on_halt
         self.pnl = 0.0
         self.failures = 0
         self.halted = False
@@ -35,6 +36,8 @@ class RiskManager:
     def halt(self, reason: str) -> None:
         if not self.halted:
             self.halted, self.reason = True, reason
+            if self._on_halt is not None:
+                self._on_halt(reason)
 
     def rate_ok(self) -> bool:
         now = time.monotonic()
