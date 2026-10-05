@@ -392,6 +392,25 @@ class Hub:
                     if not self.journal_store.settlement_complete(execution_id, [bw.id, sw.id]):
                         self.risk.halt("post-trade settlement evidence incomplete across selected venues")
                         return
+                    clean_a = self.journal_store.reconcile_capital(
+                        session_id=self.session_id,
+                        execution_id=execution_id,
+                        exchange_id=bw.id,
+                        before=self.journal_store.capital_baseline(self.session_id, bw.id) or bw.free,
+                        after=bw.free,
+                        expected_deltas=self.journal_store.execution_expected_deltas(execution_id, bw.id),
+                    )
+                    clean_b = self.journal_store.reconcile_capital(
+                        session_id=self.session_id,
+                        execution_id=execution_id,
+                        exchange_id=sw.id,
+                        before=self.journal_store.capital_baseline(self.session_id, sw.id) or sw.free,
+                        after=sw.free,
+                        expected_deltas=self.journal_store.execution_expected_deltas(execution_id, sw.id),
+                    )
+                    if not (clean_a and clean_b):
+                        self.risk.halt("capital reconciliation exception: unexplained positive balance delta")
+                        return
                     self.journal_store.transition_execution(execution_id, "VERIFIED")
             await asyncio.sleep(self.cfg.cooldown_s)
 
