@@ -407,6 +407,65 @@ class TradeJournal:
         self.db.execute("INSERT OR REPLACE INTO capital_events(event_id,session_id,exchange_id,asset,event_type,amount,reference,status,observed_at,reconciled_at,note) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (event_id, session_id, exchange_id, asset, event_type, amount, reference, status, now, None, note))
         self.db.commit()
 
+    def capital_baseline(self, session_id: str, exchange_id: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT balance_json FROM capital_baselines WHERE session_id=? AND exchange_id=?",
+            (session_id, exchange_id),
+        ).fetchone()
+        return json.loads(row["balance_json"]) if row else None
+
+    def reconcile_capital(
+        self,
+        *,
+        session_id: str,
+        execution_id: str,
+        exchange_id: str,
+        before: dict,
+        after: dict,
+        expected_deltas: dict[str, float],
+        tolerance: float = 1e-10,
+        now: float | None = None,
+    ) -> bool:
+        """Reconcile an authenticated balance snapshot against trade-attributable movement.
+
+        Any unexplained positive residual is capital injection/unknown and blocks new live
+        admissions. Negative residuals are recorded as UNKNOWN but are not treated as PnL.
+        """
+        import time
+        import uuid
+        now = time.time() if now is None else now
+        assets = set(before) | set(after) | set(expected_deltas)
+        unknown_positive = False
+        for asset in assets:
+            b = float(before.get(asset, 0.0) or 0.0)
+            a = float(after.get(asset, 0.0) or 0.0)
+            observed_delta = a - b
+            expected = float(expected_deltas.get(asset, 0.0) or 0.0)
+            residual = observed_delta - expected
+            if abs(residual) <= tolerance:
+                continue
+            event_type = "UNKNOWN"
+            status = "PENDING"
+            note = f"residual={residual:.12g}; observed={observed_delta:.12g}; expected={expected:.12g}"
+            self.record_capital_event(
+                event_id=f"{execution_id}:{exchange_id}:{asset}:{uuid.uuid4().hex[:12]}",
+                session_id=session_id,
+                exchange_id=exchange_id,
+                asset=asset,
+                event_type=event_type,
+                amount=residual,
+                reference=execution_id,
+                status=status,
+                note=note,
+                now=now,
+            )
+            if residual > tolerance:
+                unknown_positive = True
+        if unknown_positive:
+            return False
+        self.record_capital_baseline(session_id, exchange_id, after, now=now)
+        return True
+
     def capital_events(self, session_id: str, *, status: str | None = None, limit: int = 100) -> list[dict]:
         query = "SELECT * FROM capital_events WHERE session_id=?"
         args: list = [session_id]
