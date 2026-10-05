@@ -3,6 +3,7 @@ import os
 import pathlib
 import sys
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -283,7 +284,7 @@ class ControlApiTests(unittest.TestCase):
                 db.execute(
                     "INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json) VALUES(?,?,?,?,?,?,?)",
                     (uid, exchange_id, encrypted, "ccxt", "LIVE_READY",
-                     str(__import__("time").time()),
+                     datetime.now(timezone.utc).isoformat(),
                      json.dumps({"evidence": evidence, "balances": {"USDT": {"free": 10, "used": 0, "total": 10}}})),
                 )
             db.commit()
