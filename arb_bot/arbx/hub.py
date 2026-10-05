@@ -32,6 +32,8 @@ class Stats:
     target_progress_pct: float = 0.0
     rejects: Counter = field(default_factory=Counter)
     rtt: dict = field(default_factory=dict)
+    venue_health: dict = field(default_factory=dict)
+    market_universe: dict = field(default_factory=dict)
 
     def snapshot(self) -> dict:
         return {"status": self.status, "session_id": self.session_id,
