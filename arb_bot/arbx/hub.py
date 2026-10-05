@@ -300,6 +300,20 @@ class Hub:
                         f"cross-venue balance refresh failed before order ({type(errors[0]).__name__})"
                     )
                     return
+                for worker in (bw, sw):
+                    baseline = self.journal_store.capital_baseline(self.session_id, worker.id)
+                    if baseline is None:
+                        self.journal_store.record_capital_baseline(self.session_id, worker.id, worker.free)
+                    elif not self.journal_store.reconcile_capital(
+                        session_id=self.session_id,
+                        execution_id=f"admission:{self.session_id}:{worker.id}:{time.time_ns()}",
+                        exchange_id=worker.id,
+                        before=baseline,
+                        after=worker.free,
+                        expected_deltas={},
+                    ):
+                        self.risk.halt(f"[{worker.id}] unexplained positive capital delta before live admission")
+                        return
             buy_book = bw.md.books.get(x.symbol)
             sell_book = sw.md.books.get(x.symbol)
             if buy_book is None or sell_book is None:
