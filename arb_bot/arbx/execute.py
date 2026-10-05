@@ -115,26 +115,67 @@ class LiveExecutor:
 class CrossExecutor:
     """Simultaneous IOC limit orders using pre-funded inventory; unmatched fills halt for manual review."""
 
-    def __init__(self, exchanges: dict):
+    def __init__(self, exchanges: dict, *, execution_store=None, session_id: str = ""):
         self.exs = exchanges
+        self.execution_store = execution_store
+        self.session_id = session_id
 
-    async def execute(self, o) -> TradeResult:
+    async def execute(self, o, *, execution_id: str | None = None) -> TradeResult:
         eb, es = self.exs[o.buy_ex], self.exs[o.sell_ex]
         size = min(float(eb.amount_to_precision(o.symbol, o.base)), float(es.amount_to_precision(o.symbol, o.base)))
         if size <= 0:
             return TradeResult(0.0, ok=False)
-        rb, rs = await asyncio.gather(_ioc(eb, o.symbol, "buy", size, o.limit_buy),
-                                      _ioc(es, o.symbol, "sell", size, o.limit_sell), return_exceptions=True)
-        for r in (rb, rs):
-            if isinstance(r, Exception):
-                raise LegFailure(f"cross order error: {r!r} - CHECK BOTH ACCOUNTS")
+        if self.execution_store is not None and execution_id is None:
+            raise ValueError("live cross execution requires a durable execution_id")
+
+        if self.execution_store is not None:
+            self.execution_store.transition_execution(execution_id, "SUBMITTING")
+            self.execution_store.transition_leg(execution_id, 0, "SUBMITTING")
+            self.execution_store.transition_leg(execution_id, 1, "SUBMITTING")
+        try:
+            rb, rs = await asyncio.gather(
+                _ioc(eb, o.symbol, "buy", size, o.limit_buy),
+                _ioc(es, o.symbol, "sell", size, o.limit_sell),
+                return_exceptions=True,
+            )
+        except Exception:
+            if self.execution_store is not None:
+                self.execution_store.transition_execution(execution_id, "HALTED", error="order submission gather failed")
+            raise
+
+        results = ((0, rb), (1, rs))
+        for index, result in results:
+            if isinstance(result, Exception):
+                if self.execution_store is not None:
+                    self.execution_store.transition_leg(execution_id, index, "LEG_FAILED", error=repr(result))
+                other = rs if index == 0 else rb
+                if not isinstance(other, Exception):
+                    self.execution_store.transition_leg(execution_id, 1 - index, "SUBMITTED", order=other)
+                self.execution_store.transition_execution(execution_id, "HALTED", error=repr(result))
+                raise LegFailure(f"cross order error: {result!r} - CHECK BOTH ACCOUNTS")
+            self.execution_store.transition_leg(execution_id, index, "SUBMITTED", order=result) if self.execution_store is not None else None
+
         fb, fs = float(rb.get("filled") or 0.0), float(rs.get("filled") or 0.0)
+        for index, filled, order in ((0, fb, rb), (1, fs, rs)):
+            if self.execution_store is not None:
+                state = "FILLED" if filled > 0 and filled >= size else "PARTIAL" if filled > 0 else "LEG_FAILED"
+                self.execution_store.transition_leg(
+                    execution_id, index, state, order=order,
+                    error="zero fill" if filled <= 0 else None,
+                )
         if fb <= 0 and fs <= 0:
+            if self.execution_store is not None:
+                self.execution_store.transition_execution(execution_id, "LEG_FAILED", error="both IOC orders unfilled")
             return TradeResult(0.0, ok=False)
         if fb != fs:
+            if self.execution_store is not None:
+                self.execution_store.transition_execution(execution_id, "HALTED",
+                                                          error=f"inventory imbalance: bought {fb} vs sold {fs}")
             raise LegFailure(f"inventory imbalance: bought {fb} vs sold {fs} {o.symbol} - REBALANCE MANUALLY")
         cost = float(rb.get("cost") or fb * o.limit_buy)
         proceeds = float(rs.get("cost") or fs * o.limit_sell)
         fee_q = sum(float(f.get("cost") or 0) for r in (rb, rs) for f in (r.get("fees") or [r.get("fee") or {}])
                     if f and f.get("currency") == o.quote_ccy)
+        if self.execution_store is not None:
+            self.execution_store.transition_execution(execution_id, "SETTLEMENT_PENDING")
         return TradeResult(proceeds - cost - fee_q)
