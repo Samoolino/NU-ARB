@@ -426,6 +426,16 @@ class Hub:
                         return
                     if res.ok:
                         self.journal_store.transition_execution(execution_id, "VERIFIED")
+                        gross = float(res.pnl or 0.0) + float(getattr(res, "fees", 0.0) or 0.0)
+                        fees = float(getattr(res, "fees", 0.0) or 0.0)
+                        self.journal_store.record_verified_result(
+                            execution_id=execution_id,
+                            session_id=self.session_id,
+                            mode="live",
+                            gross_pnl=gross,
+                            fees=fees,
+                            net_pnl=float(res.pnl or 0.0),
+                        )
                     else:
                         self.journal_store.transition_execution(execution_id, "RELEASED")
                     self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
