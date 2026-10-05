@@ -106,6 +106,14 @@ class Config:
     def validate(self) -> None:
         if self.mode not in ("paper", "live"):
             raise ValueError("BOT_MODE must be 'paper' or 'live'")
+        if self.mode == "live":
+            # Normalize every live entry path, including the authenticated web
+            # control API, to the single $3 starter-capital condition.
+            self.start_capital_usd = LIVE_STARTER_CAPITAL_USD
+            self.starter_capital_usd = LIVE_STARTER_CAPITAL_USD
+            self.trade_size_usd = LIVE_STARTER_CAPITAL_USD
+            self.target_profit_usd = None
+            self.max_loss_usd = 0.0
         if not self.exchanges:
             raise ValueError("no exchanges configured (BOT_EXCHANGES)")
         venue_ids = [x.venue_id or x.id for x in self.exchanges]
