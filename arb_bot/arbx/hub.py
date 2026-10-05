@@ -226,9 +226,14 @@ class Hub:
                                          candidate_size, self.cfg, now)
             if opportunity is None:
                 continue
+            predicted_ms = max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0
+            speed_margin_bps = (
+                opportunity.volatility_bps_s * predicted_ms / 1000.0
+                + self.cfg.speed_safety_buffer_bps
+            )
             decision = self.gate.check_cross(
                 opportunity, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
-                free_quote, free_base,
+                free_quote, free_base, speed_margin_bps=speed_margin_bps,
             )
             utilization = opportunity.cost / free_quote if free_quote > 0 and math.isfinite(free_quote) else 0.0
             key = (decision.ok, opportunity.worst_usd, opportunity.expected_usd,
@@ -271,6 +276,9 @@ class Hub:
                                     max_book_age_ms=self.cfg.max_book_age_ms,
                                     capital_utilization=utilization,
                                     target_remaining_usd=target_remaining,
+                                    volatility_bps_s=opportunity.volatility_bps_s,
+                                    predicted_completion_ms=max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0,
+                                    speed_safety_buffer_bps=self.cfg.speed_safety_buffer_bps,
                                 )
                                 ranked.append((decision.ok, target_rank.score, opportunity.worst_usd,
                                                opportunity.expected_usd, utilization, opportunity.worst_bps,
@@ -298,7 +306,9 @@ class Hub:
                               "selectedFloorUsd": selected[2],
                               "availableQuoteUsd": free_quote if math.isfinite(free_quote) else None,
                               "availableBase": free_base if math.isfinite(free_base) else None,
-                              "capitalUtilization": utilization},
+                              "capitalUtilization": utilization,
+                              "volatilityBpsS": target_rank.volatility_bps_s,
+                              "speedMarginBps": target_rank.speed_margin_bps},
                 )
             _, target_score, _, _, _, _, _, target_rank, opportunity, bw, sw, _, free_quote, free_base, utilization = selected
             self.record_opportunity(
@@ -312,7 +322,9 @@ class Hub:
                           "executionConfidence": target_rank.execution_confidence,
                           "expectedTargetProgress": target_rank.expected_target_progress,
                           "targetRemainingUsd": target_remaining,
-                          "capitalUtilization": utilization},
+                          "capitalUtilization": utilization,
+                          "volatilityBpsS": target_rank.volatility_bps_s,
+                          "speedMarginBps": target_rank.speed_margin_bps},
                 force=True,
             )
             await self._fire_cross(opportunity, bw, sw, priority_rank=1,
@@ -378,6 +390,9 @@ class Hub:
                     "availableQuoteUsd": free_quote if math.isfinite(free_quote) else None,
                     "availableBase": free_base if math.isfinite(free_base) else None,
                     "capitalUtilization": utilization,
+                    "volatilityBpsS": x.volatility_bps_s,
+                    "predictedCompletionMs": max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0,
+                    "speedMarginBps": x.volatility_bps_s * (max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0) / 1000.0 + self.cfg.speed_safety_buffer_bps,
                 },
                 force=True,
             )
@@ -426,8 +441,16 @@ class Hub:
             finally:
                 if reservation is not None:
                     self.journal_store.reservations.release(reservation.reservation_id)
+            completion_ms = float(getattr(res, "execution_ms", 0.0) or 0.0) or (time.perf_counter() - t0) * 1000.0
+            actual_speed_margin_bps = x.volatility_bps_s * completion_ms / 1000.0 + self.cfg.speed_safety_buffer_bps
+            self.log("metric", f"[{name}] completion={completion_ms:.1f}ms volatility={x.volatility_bps_s:.2f}bps/s speed_margin={actual_speed_margin_bps:.2f}bps")
+            if live and actual_speed_margin_bps + self.cfg.min_worst_bps > x.worst_bps:
+                self.risk.halt(
+                    f"{name}: completion speed consumed modeled volatility margin "
+                    f"({actual_speed_margin_bps:.2f}bps; worst floor {x.worst_bps:.2f}bps)"
+                )
             if not live:
-                self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
+                self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, completion_ms)
             if live:
                 results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
                 errors = [result for result in results if isinstance(result, Exception)]
