@@ -331,6 +331,24 @@ class Hub:
             if not d.ok:
                 self.stats.rejects[d.reason] += 1
                 return
+            reservation = None
+            if live:
+                reservation = self.journal_store.reservations.acquire(
+                    session_id=self.session_id,
+                    opportunity_id=f"cross:{x.buy_ex}:{x.sell_ex}:{x.symbol}:{buy_book.sequence}:{sell_book.sequence}",
+                    resources=[
+                        (f"inventory:{bw.id}:{x.quote_ccy}", max(0.000001, x.cost * (1.0 + max(0.0, bw.fee_of(x.symbol)))), max(0.000001, free_quote)),
+                        (f"inventory:{sw.id}:{x.symbol.split("/")[0]}", max(0.000001, x.base), max(0.000001, free_base)),
+                        (f"execution-slot:{self.session_id}", 1.0, 1.0),
+                        (f"rate-slot:{bw.id}", 1.0, float(max(1, self.cfg.max_trades_per_min))),
+                        (f"rate-slot:{sw.id}", 1.0, float(max(1, self.cfg.max_trades_per_min))),
+                    ],
+                    ttl_s=self.cfg.reservation_ttl_s,
+                )
+                if reservation is None:
+                    self.stats.rejects["reservation_unavailable"] += 1
+                    self.log("warn", f"[{name if "name" in locals() else x.symbol}] live admission rejected: durable reservation unavailable")
+                    return
             t0, name = time.perf_counter(), f"X {x.symbol} {x.buy_ex}>{x.sell_ex}"
             try:
                 res = await (self.cross_exec.execute(x) if live else self._paper.execute_cross(x))
@@ -338,6 +356,9 @@ class Hub:
                 self.risk.halt(f"{name}: {e}" if isinstance(e, LegFailure) else f"{name} execution error {e!r}")
                 self.journal(x.buy_ex + "/" + x.sell_ex, name, x.cost, 0.0, x.worst_bps, False)
                 return
+            finally:
+                if reservation is not None:
+                    self.journal_store.reservations.release(reservation.reservation_id)
             self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
             if live:
                 results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
