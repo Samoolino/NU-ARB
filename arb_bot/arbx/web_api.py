@@ -357,7 +357,8 @@ async def _probe_exchange(exchange_id: str, exchange, symbol: str) -> tuple[dict
                                         and evidence["balances"]
                                         and evidence["privateWebSocket"] and evidence["publicWebSocket"])
     evidence["liveEligible"] = bool(evidence["scannerEligible"] and evidence["executionEligible"]
-                                     and (evidence.get("permissions") or {}).get("liveEligible") is True)    if evidence["scannerEligible"]:
+                                     and (evidence.get("permissions") or {}).get("liveEligible") is True)
+    if evidence["scannerEligible"]:
         evidence["connectionState"] = "FULLY_VERIFIED"
     elif evidence["authentication"] and evidence["account"] and evidence["balances"]:
         evidence["connectionState"] = "ACCOUNT_DATA_CONNECTED"
