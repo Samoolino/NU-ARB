@@ -66,6 +66,7 @@ class LiveExecutor:
         self.ex, self.cfg = ex, cfg
 
     async def execute_tri(self, o) -> TradeResult:
+        started = asyncio.get_running_loop().time()
         amount, done = o.start, []
         for leg, lim in zip(o.legs, o.limits):
             m = self.ex.market(leg.symbol)
@@ -80,7 +81,7 @@ class LiveExecutor:
                     raise NoFill(f"{leg.symbol} {leg.side} unfilled")
             except NoFill:
                 if not done:
-                    return TradeResult(0.0, 0.0, ok=False)            # nothing executed -> benign
+                    return TradeResult(0.0, 0.0, ok=False, execution_ms=(asyncio.get_running_loop().time() - started) * 1000.0)            # nothing executed -> benign
                 await self._unwind(done)
                 raise LegFailure(f"missed {leg.symbol} {leg.side} after earlier fills; unwind attempted")
             except Exception as e:
@@ -92,7 +93,7 @@ class LiveExecutor:
                 raise LegFailure(f"{leg.symbol} {leg.side}: {e!r} - CHECK ACCOUNT MANUALLY") from e
             done.append((leg, m, amount, got))
             amount = got
-        return TradeResult(amount - o.start, amount)
+        return TradeResult(amount - o.start, amount, execution_ms=(asyncio.get_running_loop().time() - started) * 1000.0)
 
     async def _free(self, ccy: str) -> float:
         return float(((await self.ex.fetch_balance()).get("free") or {}).get(ccy) or 0.0)
