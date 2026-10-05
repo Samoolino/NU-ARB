@@ -216,6 +216,21 @@ class TradeJournal:
             verified_at REAL NOT NULL
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS execution_results_session_idx ON execution_results(session_id, verified_at)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_metrics (
+            execution_id TEXT PRIMARY KEY,
+            opportunity_age_ms REAL,
+            volatility_bps_s REAL,
+            estimated_completion_ms REAL,
+            admission_to_submit_ms REAL,
+            submit_to_authoritative_ms REAL,
+            total_execution_ms REAL,
+            margin_decay_bps REAL,
+            protected_worst_bps REAL,
+            speed_headroom_bps REAL,
+            recorded_at REAL NOT NULL
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_metrics_recorded_idx ON execution_metrics(recorded_at)")
+
         self.db.execute("""CREATE TABLE IF NOT EXISTS execution_settlements (
             execution_id TEXT NOT NULL,
             exchange_id TEXT NOT NULL,
@@ -229,6 +244,34 @@ class TradeJournal:
         self.db.execute("CREATE INDEX IF NOT EXISTS capital_events_session_idx ON capital_events(session_id, observed_at)")
         self.db.commit()
         self.reservations = ReservationManager(self.db)
+
+    def record_execution_metrics(self, execution_id: str, *, opportunity_age_ms: float,
+                                 volatility_bps_s: float, estimated_completion_ms: float,
+                                 admission_to_submit_ms: float, submit_to_authoritative_ms: float,
+                                 total_execution_ms: float, margin_decay_bps: float,
+                                 protected_worst_bps: float, speed_headroom_bps: float,
+                                 recorded_at: float | None = None) -> None:
+        import time
+        recorded_at = time.time() if recorded_at is None else recorded_at
+        self.db.execute(
+            """INSERT OR REPLACE INTO execution_metrics(
+                execution_id, opportunity_age_ms, volatility_bps_s, estimated_completion_ms,
+                admission_to_submit_ms, submit_to_authoritative_ms, total_execution_ms,
+                margin_decay_bps, protected_worst_bps, speed_headroom_bps, recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (execution_id, float(opportunity_age_ms), float(volatility_bps_s),
+             float(estimated_completion_ms), float(admission_to_submit_ms),
+             float(submit_to_authoritative_ms), float(total_execution_ms),
+             float(margin_decay_bps), float(protected_worst_bps),
+             float(speed_headroom_bps), recorded_at),
+        )
+        self.db.commit()
+
+    def execution_metrics(self, execution_id: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT * FROM execution_metrics WHERE execution_id=?", (execution_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
     def record_verified_result(
         self,
