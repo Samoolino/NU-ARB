@@ -51,6 +51,7 @@ class Config:
     max_consecutive_failures: int = 3
     max_trades_per_min: int = 30
     cooldown_s: float = 0.2
+    reservation_ttl_s: float = 10.0
 
     # ---- Fees / vehicles ----------------------------------------------------
     fee_discount_pct: float = 0.0     # e.g. 25 if you pay fees in the exchange token (BNB on Binance)
