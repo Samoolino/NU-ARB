@@ -48,6 +48,7 @@ class Config:
     max_book_age_ms: float = 250.0    # local receive-time freshness
     max_rtt_ms: float = 80.0          # live refuses to start if median REST RTT is above this
     pause_rtt_ms: float = 150.0       # trading pauses while rolling p95 RTT is above this
+    speed_safety_buffer_bps: float = 1.0  # edge retained after latency/volatility decay
     depth: int = 10
 
     # ---- Risk ---------------------------------------------------------------
@@ -97,6 +98,7 @@ class Config:
             target_equity_usd=float(tgt) if tgt else None,
             min_net_bps=f("BOT_MIN_NET_BPS", 3.0), min_worst_bps=f("BOT_MIN_WORST_BPS", 0.5),
             limit_tol_bps=f("BOT_LIMIT_TOL_BPS", 1.0), max_rtt_ms=f("BOT_MAX_RTT_MS", 80.0),
+            speed_safety_buffer_bps=f("BOT_SPEED_SAFETY_BUFFER_BPS", 1.0),
             max_loss_usd=f("BOT_MAX_LOSS_USD", 3.0), fee_discount_pct=f("BOT_FEE_DISCOUNT_PCT", 0.0),
             cross_enabled=b("BOT_CROSS", True), cross_live=b("BOT_CROSS_LIVE", False),
             journal_path=Path(os.getenv("BOT_JOURNAL_PATH", "trade_journal.csv")),
