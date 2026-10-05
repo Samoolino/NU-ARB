@@ -12,6 +12,7 @@ class TradeResult:
     pnl: float
     final: float = 0.0
     ok: bool = True
+    execution_ms: float = 0.0
 
 
 class LegFailure(Exception):
@@ -121,6 +122,7 @@ class CrossExecutor:
         self.session_id = session_id
 
     async def execute(self, o, *, execution_id: str | None = None) -> TradeResult:
+        started = asyncio.get_running_loop().time()
         eb, es = self.exs[o.buy_ex], self.exs[o.sell_ex]
         size = min(float(eb.amount_to_precision(o.symbol, o.base)), float(es.amount_to_precision(o.symbol, o.base)))
         if size <= 0:
@@ -184,7 +186,7 @@ class CrossExecutor:
         if fb <= 0 and fs <= 0:
             if self.execution_store is not None:
                 self.execution_store.transition_execution(execution_id, "LEG_FAILED", error="both IOC orders unfilled")
-            return TradeResult(0.0, ok=False)
+            return TradeResult(0.0, ok=False, execution_ms=(asyncio.get_running_loop().time() - started) * 1000.0)
         if fb != fs:
             if self.execution_store is not None:
                 self.execution_store.transition_execution(execution_id, "HALTED",
@@ -196,4 +198,4 @@ class CrossExecutor:
                     if f and f.get("currency") == o.quote_ccy)
         if self.execution_store is not None:
             self.execution_store.transition_execution(execution_id, "SETTLEMENT_PENDING")
-        return TradeResult(proceeds - cost - fee_q)
+        return TradeResult(proceeds - cost - fee_q, execution_ms=(asyncio.get_running_loop().time() - started) * 1000.0)
