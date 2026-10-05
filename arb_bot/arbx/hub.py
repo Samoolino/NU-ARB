@@ -392,8 +392,6 @@ class Hub:
                     self.journal_store.reservations.release(reservation.reservation_id)
             if not live:
                 self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
-            if live and execution_id is not None and not res.ok:
-                self.journal_store.transition_execution(execution_id, "RELEASED")
             if live:
                 results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
                 errors = [result for result in results if isinstance(result, Exception)]
@@ -426,7 +424,10 @@ class Hub:
                     if not (clean_a and clean_b):
                         self.risk.halt("capital reconciliation exception: unexplained positive balance delta")
                         return
-                    self.journal_store.transition_execution(execution_id, "VERIFIED")
+                    if res.ok:
+                        self.journal_store.transition_execution(execution_id, "VERIFIED")
+                    else:
+                        self.journal_store.transition_execution(execution_id, "RELEASED")
                     self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
             await asyncio.sleep(self.cfg.cooldown_s)
 
