@@ -363,6 +363,32 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("LIVE_READY", response.json()["detail"])
 
+    def test_live_activation_is_blocked_by_unresolved_prior_execution(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "recovery-gate@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        uid = signup.json()["user"]["id"]
+        from arbx.journal import TradeJournal
+        journal = TradeJournal(web_api.APP_DB.parent / f"engine_{uid}.sqlite3")
+        try:
+            journal.create_execution(
+                execution_id="unresolved-1", session_id="old-session", mode="live",
+                strategy="cross_exchange", opportunity_id="old-opportunity",
+                legs=[
+                    {"leg_index": 0, "exchange_id": "binance", "symbol": "BTC/USDT", "side": "buy", "requested_amount": 0.001},
+                    {"leg_index": 1, "exchange_id": "bybit", "symbol": "BTC/USDT", "side": "sell", "requested_amount": 0.001},
+                ],
+            )
+        finally:
+            journal.close()
+        response = self.client.get("/api/v1/live/activation-readiness", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["activationReady"])
+        self.assertEqual(payload["unresolvedLiveExecutions"][0]["execution_id"], "unresolved-1")
+
     def test_live_activation_readiness_is_fail_closed(self):
         signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
             "email": "activation@example.com", "password": "another-long-password",
