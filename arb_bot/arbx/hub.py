@@ -51,6 +51,9 @@ class Hub:
         self.journal_store = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
         self.risk = RiskManager(cfg)
         self.risk.pnl = self.journal_store.realized(self.session_id)
+        self.unresolved_live_executions = self.journal_store.open_executions(mode="live")
+        if self.cfg.mode == "live" and self.unresolved_live_executions:
+            self.risk.halt("unresolved durable live execution state requires reconciliation before new orders")
         self.gate = ProfitGate(cfg, self.risk)
         self.stats = Stats(session_id=self.session_id, pnl=self.risk.pnl, equity=cfg.start_capital_usd + self.risk.pnl,
                            target_profit_usd=cfg.target_profit_usd)
@@ -332,6 +335,7 @@ class Hub:
                 self.stats.rejects[d.reason] += 1
                 return
             reservation = None
+            execution_id = None
             if live:
                 reservation = self.journal_store.reservations.acquire(
                     session_id=self.session_id,
@@ -350,8 +354,21 @@ class Hub:
                     self.log("warn", f"[{name if "name" in locals() else x.symbol}] live admission rejected: durable reservation unavailable")
                     return
             t0, name = time.perf_counter(), f"X {x.symbol} {x.buy_ex}>{x.sell_ex}"
+            if live:
+                execution_id = uuid.uuid4().hex
+                self.journal_store.create_execution(
+                    execution_id=execution_id,
+                    session_id=self.session_id,
+                    mode=self.cfg.mode,
+                    strategy="cross_exchange",
+                    opportunity_id=f"cross:{x.buy_ex}:{x.sell_ex}:{x.symbol}:{buy_book.sequence}:{sell_book.sequence}",
+                    legs=[
+                        {"leg_index": 0, "exchange_id": x.buy_ex, "symbol": x.symbol, "side": "buy", "requested_amount": x.base},
+                        {"leg_index": 1, "exchange_id": x.sell_ex, "symbol": x.symbol, "side": "sell", "requested_amount": x.base},
+                    ],
+                )
             try:
-                res = await (self.cross_exec.execute(x) if live else self._paper.execute_cross(x))
+                res = await (self.cross_exec.execute(x, execution_id=execution_id) if live else self._paper.execute_cross(x))
             except Exception as e:
                 self.risk.halt(f"{name}: {e}" if isinstance(e, LegFailure) else f"{name} execution error {e!r}")
                 self.journal(x.buy_ex + "/" + x.sell_ex, name, x.cost, 0.0, x.worst_bps, False)
@@ -360,6 +377,8 @@ class Hub:
                 if reservation is not None:
                     self.journal_store.reservations.release(reservation.reservation_id)
             self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
+            if live and execution_id is not None:
+                self.journal_store.transition_execution(execution_id, "VERIFIED" if res.ok else "RELEASED")
             if live:
                 results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
                 errors = [result for result in results if isinstance(result, Exception)]
@@ -403,7 +422,7 @@ class Hub:
             if self.cross_active:
                 self.cross_syms = self._pick_cross_symbols()
                 if self.cfg.mode == "live":
-                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok})
+                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok}, execution_store=self.journal_store, session_id=self.session_id)
             for w in ok:
                 w.start(self.cross_syms)
             tasks = [asyncio.create_task(w.run_loop(), name=f"loop:{w.id}") for w in ok]
