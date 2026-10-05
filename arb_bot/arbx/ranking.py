@@ -17,6 +17,8 @@ class TargetRank:
     score: float
     execution_confidence: float
     expected_target_progress: float
+    speed_margin_bps: float = 0.0
+    volatility_bps_s: float = 0.0
 
 
 def rank_target_progress(
@@ -27,6 +29,9 @@ def rank_target_progress(
     max_book_age_ms: float,
     capital_utilization: float,
     target_remaining_usd: float | None,
+    volatility_bps_s: float = 0.0,
+    predicted_completion_ms: float = 0.0,
+    speed_safety_buffer_bps: float = 0.0,
 ) -> TargetRank:
     """Rank an already-gated opportunity by expected verified target progress.
 
@@ -40,10 +45,12 @@ def rank_target_progress(
     max_age = max(1.0, float(max_book_age_ms))
     utilization = _clamp(float(capital_utilization))
 
+    speed_margin_bps = max(0.0, float(volatility_bps_s)) * max(0.0, float(predicted_completion_ms)) / 1000.0 + max(0.0, float(speed_safety_buffer_bps))
+    speed_confidence = _clamp(1.0 - speed_margin_bps / max(1.0, abs(worst)))
     floor_confidence = _clamp(worst / expected) if expected > 0.0 else 0.0
     freshness_confidence = _clamp(1.0 - age / max_age)
     utilization_confidence = 1.0 - 0.5 * utilization
-    confidence = floor_confidence * freshness_confidence * utilization_confidence
+    confidence = floor_confidence * freshness_confidence * utilization_confidence * speed_confidence
 
     remaining = float(target_remaining_usd) if target_remaining_usd is not None else 0.0
     if remaining > 0.0:
@@ -55,4 +62,6 @@ def rank_target_progress(
         score=progress,
         execution_confidence=confidence,
         expected_target_progress=progress,
+        speed_margin_bps=speed_margin_bps,
+        volatility_bps_s=max(0.0, float(volatility_bps_s)),
     )
