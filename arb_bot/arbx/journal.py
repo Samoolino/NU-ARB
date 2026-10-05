@@ -201,6 +201,14 @@ class TradeJournal:
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS execution_runs_state_idx ON execution_runs(state, mode, updated_at)")
         self.db.execute("CREATE INDEX IF NOT EXISTS execution_legs_order_idx ON execution_legs(order_id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_settlements (
+            execution_id TEXT NOT NULL,
+            exchange_id TEXT NOT NULL,
+            balance_json TEXT NOT NULL,
+            observed_at REAL NOT NULL,
+            PRIMARY KEY(execution_id, exchange_id)
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_settlements_exec_idx ON execution_settlements(execution_id, observed_at)")
         self.db.commit()
         self.reservations = ReservationManager(self.db)
 
@@ -368,6 +376,28 @@ class TradeJournal:
              now, execution_id, leg_index),
         )
         self.db.commit()
+
+    def record_settlement(self, execution_id: str, exchange_id: str, balances: dict, *, now: float | None = None) -> None:
+        """Persist an authenticated post-trade balance snapshot for settlement verification."""
+        import time
+        now = time.time() if now is None else now
+        if not self.db.execute("SELECT 1 FROM execution_runs WHERE execution_id=?", (execution_id,)).fetchone():
+            raise KeyError(f"unknown execution {execution_id}")
+        self.db.execute(
+            "INSERT OR REPLACE INTO execution_settlements(execution_id,exchange_id,balance_json,observed_at) VALUES(?,?,?,?)",
+            (execution_id, exchange_id, json.dumps(balances, separators=(",", ":"), allow_nan=False), now),
+        )
+        self.db.commit()
+
+    def settlement_complete(self, execution_id: str, exchange_ids: list[str]) -> bool:
+        if not exchange_ids:
+            return False
+        placeholders = ",".join("?" for _ in exchange_ids)
+        rows = self.db.execute(
+            f"SELECT exchange_id FROM execution_settlements WHERE execution_id=? AND exchange_id IN ({placeholders})",
+            [execution_id, *exchange_ids],
+        ).fetchall()
+        return len({row["exchange_id"] for row in rows}) == len(set(exchange_ids))
 
     def open_executions(self, *, mode: str | None = None) -> list[dict]:
         query = "SELECT * FROM execution_runs WHERE state NOT IN ('VERIFIED','RELEASED')"
