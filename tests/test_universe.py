@@ -1,4 +1,9 @@
-import pathlib\nimport sys\nsys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "arb_bot"))\n\nfrom arbx.universe import build_market_universe, select_hot_markets, universe_stats
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "arb_bot"))
+
+from arbx.universe import build_market_universe, select_hot_markets, universe_stats
 
 
 def test_build_market_universe_excludes_derivatives_and_inactive():
