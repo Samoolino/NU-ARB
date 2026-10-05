@@ -33,15 +33,13 @@ class LocalHostTests(unittest.TestCase):
     def test_serves_the_local_dashboard(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"ARBX", response.content)
+        self.assertIn(b"NU-ARB / TARGET EXECUTION CONSOLE", response.content)
         self.assertEqual(response.headers["x-frame-options"], "DENY")
-        self.assertIn(b"[hidden]{display:none!important}", response.content)
         self.assertIn(b'id="venues" multiple', response.content)
-        self.assertIn(b'id="selectAllVenues"', response.content)
-        self.assertIn(b'value="whitebit" selected', response.content)
-        self.assertIn(b'value="BTC/USDC"', response.content)
-        self.assertIn(b'id="minNetBps"', response.content)
-        self.assertIn(b'fetch("/api/scan?"', response.content)
+        self.assertIn(b'id="authForm"', response.content)
+        self.assertIn(b'id="liveGuard"', response.content)
+        self.assertIn(b'/api/v1/engine/start', response.content)
+        self.assertIn(b'/api/v1/engine/events', response.content)
 
     def test_control_proxy_forwards_only_api_routes_and_adds_local_token(self):
         with patch.dict(os.environ, {"ENGINE_PROXY_TOKEN": "local-test-token"}):
