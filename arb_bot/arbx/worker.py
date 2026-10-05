@@ -13,6 +13,7 @@ from arbx.market import LatencyGuard, MarketData
 from arbx.permissions import inspect_permissions
 from arbx.strategy import evaluate_triangle
 from arbx.util import STABLES
+from arbx.universe import build_market_universe, select_hot_markets, universe_stats
 
 
 def spot_market_options(exchange_id: str) -> dict:
@@ -95,11 +96,14 @@ class ExchangeWorker:
             raise RuntimeError("authenticated private balance WebSocket is required but unavailable")
         if self.live:
             permissions = await inspect_permissions(self.x.venue_id or self.id, self.ex)
-            if permissions.get("liveEligible") is not True:
+            machine_verified = permissions.get("liveEligible") is True
+            if not machine_verified and self.x.live_permission_mode != "operator_attested":
                 raise RuntimeError(
                     f"live key permissions are not verified for {self.x.venue_id or self.id}: "
                     f"{permissions.get('source', 'unknown permission probe')}"
                 )
+            if not machine_verified:
+                self.hub.log("warn", f"[{self.id}] using operator-attested trade-only permission mode; no machine scope proof is available")
         self.lat = LatencyGuard(self.ex, self.cfg)
         st = await self.lat.preflight()
         self.hub.log("info", f"[{self.id}] REST RTT p50={st['p50']:.0f}ms p95={st['p95']:.0f}ms "
@@ -269,7 +273,9 @@ class ExchangeWorker:
                 if o is None:
                     hub.stats.rejects["opportunity_disappeared"] += 1
                     return
-            d = hub.gate.check_tri(o, self.mlimits, self.lat.ok(), self.free_of(o.start_asset))
+            predicted_ms = self.lat.stats()["p95"] * max(1, len(o.legs)) + 20.0
+            speed_margin_bps = o.volatility_bps_s * predicted_ms / 1000.0 + self.cfg.speed_safety_buffer_bps
+            d = hub.gate.check_tri(o, self.mlimits, self.lat.ok(), self.free_of(o.start_asset), speed_margin_bps=speed_margin_bps)
             hub.record_opportunity(
                 strategy="triangular", exchange_a=self.id, exchange_b=None,
                 symbol=",".join(leg.symbol for leg in o.legs), requested_usd=o.start,
@@ -282,6 +288,9 @@ class ExchangeWorker:
                     "legs": [{"symbol": leg.symbol, "side": leg.side} for leg in o.legs],
                     "restLatency": self.lat.stats(),
                     "bookSequences": {leg.symbol: self.md.books[leg.symbol].sequence for leg in o.legs},
+                    "volatilityBpsS": o.volatility_bps_s,
+                    "predictedCompletionMs": predicted_ms,
+                    "speedMarginBps": speed_margin_bps,
                     "bookDepthLevels": {leg.symbol: {
                         "bids": len(self.md.books[leg.symbol].bids),
                         "asks": len(self.md.books[leg.symbol].asks),
@@ -299,7 +308,12 @@ class ExchangeWorker:
                               else f"[{self.id}] execution error {e!r}")
                 hub.journal(self.id, o.name, o.start, 0.0, o.worst_bps, False)
                 return
-            hub.settle(self.id, o.name, o.start, res, o.worst_bps, (time.perf_counter() - t0) * 1000.0)
+            completion_ms = float(getattr(res, "execution_ms", 0.0) or 0.0) or (time.perf_counter() - t0) * 1000.0
+            actual_speed_margin_bps = o.volatility_bps_s * completion_ms / 1000.0 + self.cfg.speed_safety_buffer_bps
+            hub.log("metric", f"[{self.id}] {o.name} completion={completion_ms:.1f}ms volatility={o.volatility_bps_s:.2f}bps/s speed_margin={actual_speed_margin_bps:.2f}bps")
+            if self.live and actual_speed_margin_bps + self.cfg.min_worst_bps > o.worst_bps:
+                hub.risk.halt(f"[{self.id}] {o.name}: completion speed consumed modeled volatility margin ({actual_speed_margin_bps:.2f}bps; worst floor {o.worst_bps:.2f}bps)")
+            hub.settle(self.id, o.name, o.start, res, o.worst_bps, completion_ms)
             if self.live:
                 asyncio.create_task(self.refresh_balance())
             await asyncio.sleep(self.cfg.cooldown_s)

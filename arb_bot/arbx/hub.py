@@ -14,6 +14,8 @@ from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
 from arbx.gate import ProfitGate, RiskManager
 from arbx.journal import TradeJournal
+from arbx.capital import live_engagement_after_verified_pnl
+from arbx.ranking import rank_target_progress
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
 
@@ -32,13 +34,16 @@ class Stats:
     target_progress_pct: float = 0.0
     rejects: Counter = field(default_factory=Counter)
     rtt: dict = field(default_factory=dict)
+    venue_health: dict = field(default_factory=dict)
+    market_universe: dict = field(default_factory=dict)
 
     def snapshot(self) -> dict:
         return {"status": self.status, "session_id": self.session_id,
                 "scans": self.scans, "signals": self.signals, "trades": self.trades,
                 "failed": self.failed, "pnl": self.pnl, "equity": self.equity,
                 "target_profit_usd": self.target_profit_usd, "target_progress_pct": self.target_progress_pct,
-                "rejects": dict(self.rejects.most_common(4)), "rtt": dict(self.rtt)}
+                "rejects": dict(self.rejects.most_common(4)), "rtt": dict(self.rtt),
+                "venue_health": dict(self.venue_health), "market_universe": dict(self.market_universe)}
 
 
 class Hub:
@@ -46,8 +51,15 @@ class Hub:
         self.cfg, self.out = cfg, out
         self.session_id = os.getenv("BOT_SESSION_ID") or uuid.uuid4().hex
         self.journal_store = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
-        self.risk = RiskManager(cfg)
+        self.risk = RiskManager(cfg, on_halt=lambda reason: self.journal_store.record_session_halt(self.session_id, reason))
+        durable_halt = self.journal_store.session_halt(self.session_id)
+        if durable_halt:
+            self.risk.halted = True
+            self.risk.reason = durable_halt["reason"]
         self.risk.pnl = self.journal_store.realized(self.session_id)
+        self.unresolved_live_executions = self.journal_store.open_executions(mode="live")
+        if self.cfg.mode == "live" and self.unresolved_live_executions:
+            self.risk.halt("unresolved durable live execution state requires reconciliation before new orders")
         self.gate = ProfitGate(cfg, self.risk)
         self.stats = Stats(session_id=self.session_id, pnl=self.risk.pnl, equity=cfg.start_capital_usd + self.risk.pnl,
                            target_profit_usd=cfg.target_profit_usd)
@@ -69,6 +81,13 @@ class Hub:
     @property
     def equity(self) -> float:
         return self.cfg.start_capital_usd + self.risk.pnl
+
+    @staticmethod
+    def _latency_p95(lat) -> float:
+        stats = getattr(lat, "stats", None)
+        if callable(stats):
+            return float(stats().get("p95", 0.0) or 0.0)
+        return float(getattr(lat, "p95", 0.0) or 0.0)
 
     def trade_size(self) -> float:
         return self.cfg.trade_size_usd if self.cfg.mode == "live" else min(self.cfg.trade_size_usd, self.equity)
@@ -214,9 +233,14 @@ class Hub:
                                          candidate_size, self.cfg, now)
             if opportunity is None:
                 continue
+            predicted_ms = max(self._latency_p95(bw.lat), self._latency_p95(sw.lat)) * 2.0 + 20.0
+            speed_margin_bps = (
+                float(getattr(opportunity, "volatility_bps_s", 0.0)) * predicted_ms / 1000.0
+                + self.cfg.speed_safety_buffer_bps
+            )
             decision = self.gate.check_cross(
                 opportunity, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
-                free_quote, free_base,
+                free_quote, free_base, speed_margin_bps=speed_margin_bps,
             )
             utilization = opportunity.cost / free_quote if free_quote > 0 and math.isfinite(free_quote) else 0.0
             key = (decision.ok, opportunity.worst_usd, opportunity.expected_usd,
@@ -234,6 +258,9 @@ class Hub:
         self._cross_scan_last = now
         async with self._cross_scan_lock:
             ranked = []
+            target_remaining = None
+            if self.cfg.target_profit_usd is not None:
+                target_remaining = max(0.0, self.cfg.target_profit_usd - self.risk.pnl)
             workers = self.workers
             for symbol in self.cross_syms:
                 available = [(worker, worker.md.books.get(symbol)) for worker in workers]
@@ -249,16 +276,29 @@ class Hub:
                             candidate = self._best_cross_for_direction(symbol, bw, sw, bb, sb, now)
                             if candidate:
                                 _, opportunity, decision, free_quote, free_base, utilization = candidate
-                                ranked.append((decision.ok, opportunity.worst_usd, opportunity.expected_usd,
-                                               utilization, opportunity.worst_bps, opportunity.cost,
-                                               opportunity, bw, sw, decision, free_quote, free_base, utilization))
-            ranked.sort(key=lambda item: item[:6], reverse=True)
+                                target_rank = rank_target_progress(
+                                    expected_net_usd=opportunity.expected_usd,
+                                    worst_case_net_usd=opportunity.worst_usd,
+                                    worst_case_net_bps=opportunity.worst_bps,
+                                    age_ms=opportunity.age_ms,
+                                    max_book_age_ms=self.cfg.max_book_age_ms,
+                                    capital_utilization=utilization,
+                                    target_remaining_usd=target_remaining,
+                                    volatility_bps_s=float(getattr(opportunity, "volatility_bps_s", 0.0)),
+                                    predicted_completion_ms=max(self._latency_p95(bw.lat), self._latency_p95(sw.lat)) * 2.0 + 20.0,
+                                    speed_safety_buffer_bps=self.cfg.speed_safety_buffer_bps,
+                                )
+                                ranked.append((decision.ok, target_rank.score, opportunity.worst_usd,
+                                               opportunity.expected_usd, utilization, opportunity.worst_bps,
+                                               opportunity.cost, target_rank, opportunity, bw, sw, decision,
+                                               free_quote, free_base, utilization))
+            ranked.sort(key=lambda item: item[:7], reverse=True)
             if not ranked:
                 return
 
             selected = ranked[0]
             for rank, candidate in enumerate(ranked[1:21], start=2):
-                _, _, _, _, _, _, opportunity, bw, sw, decision, free_quote, free_base, utilization = candidate
+                _, target_score, _, _, _, _, _, target_rank, opportunity, bw, sw, decision, free_quote, free_base, utilization = candidate
                 reason = decision.reason if not decision.ok else "lower_priority_than_selected"
                 self.record_opportunity(
                     strategy="cross_exchange", exchange_a=opportunity.buy_ex, exchange_b=opportunity.sell_ex,
@@ -267,12 +307,34 @@ class Hub:
                     expected_net_bps=opportunity.net_bps, worst_case_net_bps=opportunity.worst_bps,
                     book_age_ms=opportunity.age_ms, approved=False, rejection_reason=reason,
                     decision="REJECTED_BY_GATE" if not decision.ok else "RANKED_NOT_SELECTED",
-                    evidence={"priorityRank": rank, "selectedFloorUsd": selected[1],
+                    evidence={"priorityRank": rank, "targetProgressScore": target_score,
+                              "executionConfidence": target_rank.execution_confidence,
+                              "expectedTargetProgress": target_rank.expected_target_progress,
+                              "selectedTargetProgressScore": selected[1],
+                              "selectedFloorUsd": selected[2],
                               "availableQuoteUsd": free_quote if math.isfinite(free_quote) else None,
                               "availableBase": free_base if math.isfinite(free_base) else None,
-                              "capitalUtilization": utilization},
+                              "capitalUtilization": utilization,
+                              "volatilityBpsS": target_rank.volatility_bps_s,
+                              "speedMarginBps": target_rank.speed_margin_bps},
                 )
-            _, _, _, _, _, _, opportunity, bw, sw, _, free_quote, free_base, utilization = selected
+            _, target_score, _, _, _, _, _, target_rank, opportunity, bw, sw, _, free_quote, free_base, utilization = selected
+            self.record_opportunity(
+                strategy="cross_exchange", exchange_a=opportunity.buy_ex, exchange_b=opportunity.sell_ex,
+                symbol=opportunity.symbol, requested_usd=opportunity.cost,
+                expected_net_usd=opportunity.expected_usd, worst_case_net_usd=opportunity.worst_usd,
+                expected_net_bps=opportunity.net_bps, worst_case_net_bps=opportunity.worst_bps,
+                book_age_ms=opportunity.age_ms, approved=True, rejection_reason=None,
+                decision="SELECTED_TARGET_PROGRESS",
+                evidence={"priorityRank": 1, "targetProgressScore": target_score,
+                          "executionConfidence": target_rank.execution_confidence,
+                          "expectedTargetProgress": target_rank.expected_target_progress,
+                          "targetRemainingUsd": target_remaining,
+                          "capitalUtilization": utilization,
+                          "volatilityBpsS": target_rank.volatility_bps_s,
+                          "speedMarginBps": target_rank.speed_margin_bps},
+                force=True,
+            )
             await self._fire_cross(opportunity, bw, sw, priority_rank=1,
                                    compared_count=len(ranked), free_quote=free_quote,
                                    free_base=free_base, utilization=utilization)
@@ -294,6 +356,20 @@ class Hub:
                         f"cross-venue balance refresh failed before order ({type(errors[0]).__name__})"
                     )
                     return
+                for worker in (bw, sw):
+                    baseline = self.journal_store.capital_baseline(self.session_id, worker.id)
+                    if baseline is None:
+                        self.journal_store.record_capital_baseline(self.session_id, worker.id, worker.free)
+                    elif not self.journal_store.reconcile_capital(
+                        session_id=self.session_id,
+                        execution_id=f"admission:{self.session_id}:{worker.id}:{time.time_ns()}",
+                        exchange_id=worker.id,
+                        before=baseline,
+                        after=worker.free,
+                        expected_deltas={},
+                    ):
+                        self.risk.halt(f"[{worker.id}] unexplained positive capital delta before live admission")
+                        return
             buy_book = bw.md.books.get(x.symbol)
             sell_book = sw.md.books.get(x.symbol)
             if buy_book is None or sell_book is None:
@@ -322,20 +398,67 @@ class Hub:
                     "availableQuoteUsd": free_quote if math.isfinite(free_quote) else None,
                     "availableBase": free_base if math.isfinite(free_base) else None,
                     "capitalUtilization": utilization,
+                    "volatilityBpsS": x.volatility_bps_s,
+                    "predictedCompletionMs": max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0,
+                    "speedMarginBps": x.volatility_bps_s * (max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0) / 1000.0 + self.cfg.speed_safety_buffer_bps,
                 },
                 force=True,
             )
             if not d.ok:
                 self.stats.rejects[d.reason] += 1
                 return
+            reservation = None
+            execution_id = None
+            if live:
+                reservation = self.journal_store.reservations.acquire(
+                    session_id=self.session_id,
+                    opportunity_id=f"cross:{x.buy_ex}:{x.sell_ex}:{x.symbol}:{buy_book.sequence}:{sell_book.sequence}",
+                    resources=[
+                        (f"inventory:{bw.id}:{x.quote_ccy}", max(0.000001, x.cost * (1.0 + max(0.0, bw.fee_of(x.symbol)))), max(0.000001, free_quote)),
+                        (f"inventory:{sw.id}:{x.symbol.split("/")[0]}", max(0.000001, x.base), max(0.000001, free_base)),
+                        (f"execution-slot:{self.session_id}", 1.0, 1.0),
+                        (f"rate-slot:{bw.id}", 1.0, float(max(1, self.cfg.max_trades_per_min))),
+                        (f"rate-slot:{sw.id}", 1.0, float(max(1, self.cfg.max_trades_per_min))),
+                    ],
+                    ttl_s=self.cfg.reservation_ttl_s,
+                )
+                if reservation is None:
+                    self.stats.rejects["reservation_unavailable"] += 1
+                    self.log("warn", f"[{name if "name" in locals() else x.symbol}] live admission rejected: durable reservation unavailable")
+                    return
             t0, name = time.perf_counter(), f"X {x.symbol} {x.buy_ex}>{x.sell_ex}"
+            if live:
+                execution_id = uuid.uuid4().hex
+                self.journal_store.create_execution(
+                    execution_id=execution_id,
+                    session_id=self.session_id,
+                    mode=self.cfg.mode,
+                    strategy="cross_exchange",
+                    opportunity_id=f"cross:{x.buy_ex}:{x.sell_ex}:{x.symbol}:{buy_book.sequence}:{sell_book.sequence}",
+                    legs=[
+                        {"leg_index": 0, "exchange_id": x.buy_ex, "symbol": x.symbol, "side": "buy", "requested_amount": x.base},
+                        {"leg_index": 1, "exchange_id": x.sell_ex, "symbol": x.symbol, "side": "sell", "requested_amount": x.base},
+                    ],
+                )
             try:
-                res = await (self.cross_exec.execute(x) if live else self._paper.execute_cross(x))
+                res = await (self.cross_exec.execute(x, execution_id=execution_id) if live else self._paper.execute_cross(x))
             except Exception as e:
                 self.risk.halt(f"{name}: {e}" if isinstance(e, LegFailure) else f"{name} execution error {e!r}")
                 self.journal(x.buy_ex + "/" + x.sell_ex, name, x.cost, 0.0, x.worst_bps, False)
                 return
-            self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
+            finally:
+                if reservation is not None:
+                    self.journal_store.reservations.release(reservation.reservation_id)
+            completion_ms = float(getattr(res, "execution_ms", 0.0) or 0.0) or (time.perf_counter() - t0) * 1000.0
+            actual_speed_margin_bps = x.volatility_bps_s * completion_ms / 1000.0 + self.cfg.speed_safety_buffer_bps
+            self.log("metric", f"[{name}] completion={completion_ms:.1f}ms volatility={x.volatility_bps_s:.2f}bps/s speed_margin={actual_speed_margin_bps:.2f}bps")
+            if live and actual_speed_margin_bps + self.cfg.min_worst_bps > x.worst_bps:
+                self.risk.halt(
+                    f"{name}: completion speed consumed modeled volatility margin "
+                    f"({actual_speed_margin_bps:.2f}bps; worst floor {x.worst_bps:.2f}bps)"
+                )
+            if not live:
+                self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, completion_ms)
             if live:
                 results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
                 errors = [result for result in results if isinstance(result, Exception)]
@@ -343,6 +466,51 @@ class Hub:
                     self.risk.halt(
                         f"cross-venue balance refresh failed after order ({type(errors[0]).__name__})"
                     )
+                else:
+                    self.journal_store.record_settlement(execution_id, bw.id, bw.free)
+                    self.journal_store.record_settlement(execution_id, sw.id, sw.free)
+                    if not self.journal_store.settlement_complete(execution_id, [bw.id, sw.id]):
+                        self.risk.halt("post-trade settlement evidence incomplete across selected venues")
+                        return
+                    clean_a = self.journal_store.reconcile_capital(
+                        session_id=self.session_id,
+                        execution_id=execution_id,
+                        exchange_id=bw.id,
+                        before=self.journal_store.capital_baseline(self.session_id, bw.id) or bw.free,
+                        after=bw.free,
+                        expected_deltas=self.journal_store.execution_expected_deltas(execution_id, bw.id),
+                    )
+                    clean_b = self.journal_store.reconcile_capital(
+                        session_id=self.session_id,
+                        execution_id=execution_id,
+                        exchange_id=sw.id,
+                        before=self.journal_store.capital_baseline(self.session_id, sw.id) or sw.free,
+                        after=sw.free,
+                        expected_deltas=self.journal_store.execution_expected_deltas(execution_id, sw.id),
+                    )
+                    if not (clean_a and clean_b):
+                        self.risk.halt("capital reconciliation exception: unexplained positive balance delta")
+                        return
+                    if res.ok:
+                        self.journal_store.transition_execution(execution_id, "VERIFIED")
+                        gross = float(res.pnl or 0.0) + float(getattr(res, "fees", 0.0) or 0.0)
+                        fees = float(getattr(res, "fees", 0.0) or 0.0)
+                        self.journal_store.record_verified_result(
+                            execution_id=execution_id,
+                            session_id=self.session_id,
+                            mode="live",
+                            gross_pnl=gross,
+                            fees=fees,
+                            net_pnl=float(res.pnl or 0.0),
+                        )
+                    else:
+                        self.journal_store.transition_execution(execution_id, "RELEASED")
+                    self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
+                    if live_engagement_after_verified_pnl(float(res.pnl or 0.0)) == "HALT_LOSS":
+                        self.risk.halt(
+                            f"live engagement halted after verified loss: net PnL {float(res.pnl or 0.0):+.4f} USD"
+                        )
+                        return
             await asyncio.sleep(self.cfg.cooldown_s)
 
     # ---- main -----------------------------------------------------------------
@@ -379,7 +547,7 @@ class Hub:
             if self.cross_active:
                 self.cross_syms = self._pick_cross_symbols()
                 if self.cfg.mode == "live":
-                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok})
+                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok}, execution_store=self.journal_store, session_id=self.session_id)
             for w in ok:
                 w.start(self.cross_syms)
             tasks = [asyncio.create_task(w.run_loop(), name=f"loop:{w.id}") for w in ok]

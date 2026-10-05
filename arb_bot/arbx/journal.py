@@ -3,8 +3,115 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+@dataclass(frozen=True)
+class Reservation:
+    reservation_id: str
+    session_id: str
+    opportunity_id: str
+    expires_at: float
+
+
+class ReservationManager:
+    """Durable, atomic resource reservations used before live execution."""
+
+    def __init__(self, db: sqlite3.Connection):
+        self.db = db
+        self.db.execute("""CREATE TABLE IF NOT EXISTS reservations (
+            reservation_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            opportunity_id TEXT NOT NULL,
+            resource_key TEXT NOT NULL,
+            amount REAL NOT NULL CHECK(amount > 0),
+            resource_limit REAL NOT NULL CHECK(resource_limit > 0),
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('ACTIVE','RELEASED','EXPIRED')),
+            released_at REAL
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS reservations_resource_idx ON reservations(resource_key, status, expires_at)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS reservations_session_idx ON reservations(session_id, status)")
+        self.db.commit()
+
+    def _expire(self, now: float) -> None:
+        self.db.execute(
+            "UPDATE reservations SET status='EXPIRED' WHERE status='ACTIVE' AND expires_at <= ?", (now,)
+        )
+
+    def acquire(self, *, session_id: str, opportunity_id: str,
+                resources: list[tuple[str, float, float]], ttl_s: float,
+                now: float | None = None) -> Reservation | None:
+        """Atomically reserve every requested resource or none of them."""
+        import time
+        import uuid
+        now = time.time() if now is None else now
+        if ttl_s <= 0 or not resources:
+            raise ValueError("reservation requires a positive TTL and at least one resource")
+        if any(amount <= 0 or limit <= 0 or amount > limit for _, amount, limit in resources):
+            return None
+        if len({key for key, _, _ in resources}) != len(resources):
+            raise ValueError("reservation resource keys must be unique")
+        reservation_id = uuid.uuid4().hex
+        expires_at = now + ttl_s
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            self._expire(now)
+            for key, amount, limit in resources:
+                row = self.db.execute(
+                    "SELECT COALESCE(SUM(amount),0) AS used FROM reservations "
+                    "WHERE resource_key=? AND status='ACTIVE' AND expires_at > ?",
+                    (key, now),
+                ).fetchone()
+                if float(row["used"]) + amount > limit + 1e-12:
+                    self.db.rollback()
+                    return None
+            for key, amount, limit in resources:
+                self.db.execute(
+                    "INSERT INTO reservations(reservation_id,session_id,opportunity_id,resource_key,amount,resource_limit,created_at,expires_at,status) "
+                    "VALUES(?,?,?,?,?,?,?,?, 'ACTIVE')",
+                    (reservation_id, session_id, opportunity_id, key, amount, limit, now, expires_at),
+                )
+            self.db.commit()
+            return Reservation(reservation_id, session_id, opportunity_id, expires_at)
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def release(self, reservation_id: str, *, now: float | None = None) -> bool:
+        import time
+        now = time.time() if now is None else now
+        cursor = self.db.execute(
+            "UPDATE reservations SET status='RELEASED', released_at=? "
+            "WHERE reservation_id=? AND status='ACTIVE'", (now, reservation_id),
+        )
+        self.db.commit()
+        return cursor.rowcount > 0
+
+    def recover_expired(self, *, now: float | None = None) -> int:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute("BEGIN IMMEDIATE")
+        self._expire(now)
+        changed = self.db.total_changes
+        self.db.commit()
+        return changed
+
+    def active(self, *, session_id: str | None = None, now: float | None = None) -> list[dict]:
+        import time
+        now = time.time() if now is None else now
+        self._expire(now)
+        self.db.commit()
+        if session_id is None:
+            rows = self.db.execute("SELECT * FROM reservations WHERE status='ACTIVE' ORDER BY created_at").fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM reservations WHERE session_id=? AND status='ACTIVE' ORDER BY created_at", (session_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
 
 
 class TradeJournal:
@@ -17,6 +124,11 @@ class TradeJournal:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS session_halts (
+            session_id TEXT PRIMARY KEY,
+            reason TEXT NOT NULL,
+            halted_at REAL NOT NULL
+        )""")
         self.db.execute("""CREATE TABLE IF NOT EXISTS trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -65,14 +177,138 @@ class TradeJournal:
             evidence TEXT NOT NULL DEFAULT '{}'
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS opportunities_session_idx ON opportunities(session_id, id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_runs (
+            execution_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            opportunity_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            error TEXT
+        )""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_legs (
+            execution_id TEXT NOT NULL,
+            leg_index INTEGER NOT NULL,
+            exchange_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            requested_amount REAL NOT NULL,
+            state TEXT NOT NULL,
+            order_id TEXT,
+            filled REAL,
+            cost REAL,
+            fee REAL,
+            updated_at REAL NOT NULL,
+            error TEXT,
+            PRIMARY KEY(execution_id, leg_index)
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_runs_state_idx ON execution_runs(state, mode, updated_at)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_legs_order_idx ON execution_legs(order_id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_results (
+            execution_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            gross_pnl REAL NOT NULL,
+            fees REAL NOT NULL,
+            net_pnl REAL NOT NULL,
+            verified_at REAL NOT NULL
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_results_session_idx ON execution_results(session_id, verified_at)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_metrics (
+            execution_id TEXT PRIMARY KEY,
+            opportunity_age_ms REAL,
+            volatility_bps_s REAL,
+            estimated_completion_ms REAL,
+            admission_to_submit_ms REAL,
+            submit_to_authoritative_ms REAL,
+            total_execution_ms REAL,
+            margin_decay_bps REAL,
+            protected_worst_bps REAL,
+            speed_headroom_bps REAL,
+            recorded_at REAL NOT NULL
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_metrics_recorded_idx ON execution_metrics(recorded_at)")
+
+        self.db.execute("""CREATE TABLE IF NOT EXISTS execution_settlements (
+            execution_id TEXT NOT NULL,
+            exchange_id TEXT NOT NULL,
+            balance_json TEXT NOT NULL,
+            observed_at REAL NOT NULL,
+            PRIMARY KEY(execution_id, exchange_id)
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS execution_settlements_exec_idx ON execution_settlements(execution_id, observed_at)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS capital_baselines (session_id TEXT NOT NULL, exchange_id TEXT NOT NULL, balance_json TEXT NOT NULL, observed_at REAL NOT NULL, PRIMARY KEY(session_id, exchange_id))""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS capital_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, exchange_id TEXT NOT NULL, asset TEXT, event_type TEXT NOT NULL, amount REAL, reference TEXT, status TEXT NOT NULL, observed_at REAL NOT NULL, reconciled_at REAL, note TEXT)""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS capital_events_session_idx ON capital_events(session_id, observed_at)")
+        self.db.commit()
+        self.reservations = ReservationManager(self.db)
+
+    def record_execution_metrics(self, execution_id: str, *, opportunity_age_ms: float,
+                                 volatility_bps_s: float, estimated_completion_ms: float,
+                                 admission_to_submit_ms: float, submit_to_authoritative_ms: float,
+                                 total_execution_ms: float, margin_decay_bps: float,
+                                 protected_worst_bps: float, speed_headroom_bps: float,
+                                 recorded_at: float | None = None) -> None:
+        import time
+        recorded_at = time.time() if recorded_at is None else recorded_at
+        self.db.execute(
+            """INSERT OR REPLACE INTO execution_metrics(
+                execution_id, opportunity_age_ms, volatility_bps_s, estimated_completion_ms,
+                admission_to_submit_ms, submit_to_authoritative_ms, total_execution_ms,
+                margin_decay_bps, protected_worst_bps, speed_headroom_bps, recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (execution_id, float(opportunity_age_ms), float(volatility_bps_s),
+             float(estimated_completion_ms), float(admission_to_submit_ms),
+             float(submit_to_authoritative_ms), float(total_execution_ms),
+             float(margin_decay_bps), float(protected_worst_bps),
+             float(speed_headroom_bps), recorded_at),
+        )
+        self.db.commit()
+
+    def execution_metrics(self, execution_id: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT * FROM execution_metrics WHERE execution_id=?", (execution_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_verified_result(
+        self,
+        *,
+        execution_id: str,
+        session_id: str,
+        mode: str,
+        gross_pnl: float,
+        fees: float,
+        net_pnl: float,
+        verified_at: float | None = None,
+    ) -> None:
+        import time
+        verified_at = time.time() if verified_at is None else verified_at
+        state = self.db.execute(
+            "SELECT state FROM execution_runs WHERE execution_id=?", (execution_id,)
+        ).fetchone()
+        if state is None or state["state"] != "VERIFIED":
+            raise ValueError("realized PnL requires a VERIFIED execution")
+        self.db.execute(
+            """INSERT OR REPLACE INTO execution_results(
+                execution_id,session_id,mode,gross_pnl,fees,net_pnl,verified_at
+            ) VALUES(?,?,?,?,?,?,?)""",
+            (execution_id, session_id, mode, float(gross_pnl), float(fees), float(net_pnl), verified_at),
+        )
         self.db.commit()
 
     def realized(self, session_id: str) -> float:
-        row = self.db.execute(
-            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM trades WHERE session_id=? AND execution_status='FILLED'",
+        legacy = self.db.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM trades WHERE session_id=? AND execution_status='FILLED' AND mode!='live'",
             (session_id,),
         ).fetchone()
-        return float(row["pnl"])
+        verified = self.db.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM execution_results WHERE session_id=? AND mode='live'",
+            (session_id,),
+        ).fetchone()
+        return float(legacy["pnl"]) + float(verified["pnl"])
 
     def append(self, record: dict[str, Any]) -> int:
         columns = (
@@ -122,6 +358,269 @@ class TradeJournal:
             record["evidence"] = json.loads(record["evidence"])
             results.append(record)
         return results
+
+    def create_execution(self, *, execution_id: str, session_id: str, mode: str,
+                         strategy: str, opportunity_id: str, legs: list[dict],
+                         now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute(
+                "INSERT INTO execution_runs(execution_id,session_id,mode,strategy,opportunity_id,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (execution_id, session_id, mode, strategy, opportunity_id, "RESERVED", now, now),
+            )
+            for leg in legs:
+                self.db.execute(
+                    "INSERT INTO execution_legs(execution_id,leg_index,exchange_id,symbol,side,requested_amount,state,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?)",
+                    (execution_id, leg["leg_index"], leg["exchange_id"], leg["symbol"], leg["side"],
+                     leg["requested_amount"], "RESERVED", now),
+                )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def transition_execution(self, execution_id: str, state: str, *,
+                             error: str | None = None, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        allowed = {
+            "RESERVED": {"SUBMITTING", "HALTED", "RELEASED"},
+            "SUBMITTING": {"SUBMITTED", "LEG_FAILED", "HALTED"},
+            "SUBMITTED": {"FILLED", "PARTIAL", "LEG_FAILED", "HALTED", "SETTLEMENT_PENDING"},
+            "PARTIAL": {"SUBMITTING", "HALTED", "SETTLEMENT_PENDING"},
+            "FILLED": {"SETTLEMENT_PENDING", "VERIFIED"},
+            "LEG_FAILED": {"HALTED", "SETTLEMENT_PENDING", "RELEASED"},
+            "SETTLEMENT_PENDING": {"VERIFIED", "HALTED"},
+            "VERIFIED": set(),
+            "HALTED": set(),
+            "RELEASED": set(),
+        }
+        row = self.db.execute("SELECT state FROM execution_runs WHERE execution_id=?", (execution_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"unknown execution {execution_id}")
+        if state not in allowed.get(row["state"], set()):
+            raise ValueError(f"invalid execution transition {row['state']} -> {state}")
+        self.db.execute(
+            "UPDATE execution_runs SET state=?, updated_at=?, error=? WHERE execution_id=?",
+            (state, now, error, execution_id),
+        )
+        self.db.commit()
+
+    def transition_leg(self, execution_id: str, leg_index: int, state: str, *,
+                       order: dict | None = None, error: str | None = None,
+                       now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        row = self.db.execute(
+            "SELECT state FROM execution_legs WHERE execution_id=? AND leg_index=?",
+            (execution_id, leg_index),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown execution leg {execution_id}/{leg_index}")
+        allowed = {
+            "RESERVED": {"SUBMITTING", "SUBMITTED", "LEG_FAILED", "HALTED"},
+            "SUBMITTING": {"SUBMITTED", "LEG_FAILED", "HALTED"},
+            "SUBMITTED": {"FILLED", "PARTIAL", "LEG_FAILED", "HALTED"},
+            "PARTIAL": {"FILLED", "LEG_FAILED", "HALTED"},
+            "FILLED": {"SETTLEMENT_PENDING", "VERIFIED"},
+            "LEG_FAILED": {"HALTED", "SETTLEMENT_PENDING"},
+            "SETTLEMENT_PENDING": {"VERIFIED", "HALTED"},
+            "VERIFIED": set(),
+            "HALTED": set(),
+        }
+        if state not in allowed.get(row["state"], set()):
+            raise ValueError(f"invalid leg transition {row['state']} -> {state}")
+        fields = ["state=?", "updated_at=?", "error=?"]
+        values: list = [state, now, error]
+        if order is not None:
+            fields += ["order_id=?", "filled=?", "cost=?", "fee=?"]
+            fees = order.get("fees") or ([order["fee"]] if order.get("fee") else [])
+            fee = sum(float(f.get("cost") or 0.0) for f in fees if f)
+            values += [order.get("id"), float(order.get("filled") or 0.0),
+                       float(order.get("cost") or 0.0), fee]
+        values += [execution_id, leg_index]
+        self.db.execute(
+            f"UPDATE execution_legs SET {','.join(fields)} WHERE execution_id=? AND leg_index=?",
+            values,
+        )
+        self.db.commit()
+
+    def reconcile_leg(self, execution_id: str, leg_index: int, order: dict, *, now: float | None = None) -> None:
+        """Persist the latest exchange-authoritative order snapshot without changing lifecycle state."""
+        import time
+        now = time.time() if now is None else now
+        row = self.db.execute(
+            "SELECT 1 FROM execution_legs WHERE execution_id=? AND leg_index=?",
+            (execution_id, leg_index),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown execution leg {execution_id}/{leg_index}")
+        fees = order.get("fees") or ([order["fee"]] if order.get("fee") else [])
+        fee = sum(float(f.get("cost") or 0.0) for f in fees if f)
+        self.db.execute(
+            "UPDATE execution_legs SET order_id=?, filled=?, cost=?, fee=?, updated_at=? WHERE execution_id=? AND leg_index=?",
+            (order.get("id"), float(order.get("filled") or 0.0), float(order.get("cost") or 0.0), fee,
+             now, execution_id, leg_index),
+        )
+        self.db.commit()
+
+    def record_settlement(self, execution_id: str, exchange_id: str, balances: dict, *, now: float | None = None) -> None:
+        """Persist an authenticated post-trade balance snapshot for settlement verification."""
+        import time
+        now = time.time() if now is None else now
+        if not self.db.execute("SELECT 1 FROM execution_runs WHERE execution_id=?", (execution_id,)).fetchone():
+            raise KeyError(f"unknown execution {execution_id}")
+        self.db.execute(
+            "INSERT OR REPLACE INTO execution_settlements(execution_id,exchange_id,balance_json,observed_at) VALUES(?,?,?,?)",
+            (execution_id, exchange_id, json.dumps(balances, separators=(",", ":"), allow_nan=False), now),
+        )
+        self.db.commit()
+
+    def record_capital_baseline(self, session_id: str, exchange_id: str, balances: dict, *, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute("INSERT OR REPLACE INTO capital_baselines(session_id,exchange_id,balance_json,observed_at) VALUES(?,?,?,?)", (session_id, exchange_id, json.dumps(balances, separators=(",", ":"), allow_nan=False), now))
+        self.db.commit()
+
+    def record_capital_event(self, *, event_id: str, session_id: str, exchange_id: str, event_type: str, amount: float | None = None, asset: str | None = None, reference: str | None = None, status: str = "PENDING", note: str | None = None, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        allowed = {"EXTERNAL_INJECTION", "INTERNAL_TRANSFER", "EXTERNAL_WITHDRAWAL", "FUNDING_OR_YIELD", "ADJUSTMENT_OR_DUST", "UNKNOWN"}
+        if event_type not in allowed:
+            raise ValueError(f"invalid capital event type: {event_type}")
+        self.db.execute("INSERT OR REPLACE INTO capital_events(event_id,session_id,exchange_id,asset,event_type,amount,reference,status,observed_at,reconciled_at,note) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (event_id, session_id, exchange_id, asset, event_type, amount, reference, status, now, None, note))
+        self.db.commit()
+
+    def execution_expected_deltas(self, execution_id: str, exchange_id: str) -> dict[str, float]:
+        """Return conservative balance movement attributable to authoritative fills.
+
+        The result includes principal movement only. Fees may add further debits, so
+        reconciliation treats negative residuals as non-PnL capital events rather than
+        falsely declaring them external withdrawals.
+        """
+        rows = self.db.execute(
+            "SELECT symbol, side, filled, cost FROM execution_legs WHERE execution_id=? AND exchange_id=?",
+            (execution_id, exchange_id),
+        ).fetchall()
+        expected: dict[str, float] = {}
+        for row in rows:
+            symbol = str(row["symbol"])
+            if "/" not in symbol:
+                continue
+            base, quote = symbol.split("/", 1)
+            filled = float(row["filled"] or 0.0)
+            cost = float(row["cost"] or 0.0)
+            sign = 1.0 if row["side"] == "buy" else -1.0
+            expected[base] = expected.get(base, 0.0) + sign * filled
+            expected[quote] = expected.get(quote, 0.0) - sign * cost
+        return expected
+
+    def capital_baseline(self, session_id: str, exchange_id: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT balance_json FROM capital_baselines WHERE session_id=? AND exchange_id=?",
+            (session_id, exchange_id),
+        ).fetchone()
+        return json.loads(row["balance_json"]) if row else None
+
+    def reconcile_capital(
+        self,
+        *,
+        session_id: str,
+        execution_id: str,
+        exchange_id: str,
+        before: dict,
+        after: dict,
+        expected_deltas: dict[str, float],
+        tolerance: float = 1e-10,
+        now: float | None = None,
+    ) -> bool:
+        """Reconcile an authenticated balance snapshot against trade-attributable movement.
+
+        Any unexplained positive residual is capital injection/unknown and blocks new live
+        admissions. Negative residuals are recorded as UNKNOWN but are not treated as PnL.
+        """
+        import time
+        import uuid
+        now = time.time() if now is None else now
+        assets = set(before) | set(after) | set(expected_deltas)
+        unknown_positive = False
+        for asset in assets:
+            b = float(before.get(asset, 0.0) or 0.0)
+            a = float(after.get(asset, 0.0) or 0.0)
+            observed_delta = a - b
+            expected = float(expected_deltas.get(asset, 0.0) or 0.0)
+            residual = observed_delta - expected
+            if abs(residual) <= tolerance:
+                continue
+            event_type = "UNKNOWN"
+            status = "PENDING"
+            note = f"residual={residual:.12g}; observed={observed_delta:.12g}; expected={expected:.12g}"
+            self.record_capital_event(
+                event_id=f"{execution_id}:{exchange_id}:{asset}:{uuid.uuid4().hex[:12]}",
+                session_id=session_id,
+                exchange_id=exchange_id,
+                asset=asset,
+                event_type=event_type,
+                amount=residual,
+                reference=execution_id,
+                status=status,
+                note=note,
+                now=now,
+            )
+            if residual > tolerance:
+                unknown_positive = True
+        if unknown_positive:
+            return False
+        self.record_capital_baseline(session_id, exchange_id, after, now=now)
+        return True
+
+    def capital_events(self, session_id: str, *, status: str | None = None, limit: int = 100) -> list[dict]:
+        query = "SELECT * FROM capital_events WHERE session_id=?"
+        args: list = [session_id]
+        if status is not None:
+            query += " AND status=?"
+            args.append(status)
+        query += " ORDER BY observed_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.db.execute(query, args).fetchall()]
+
+    def settlement_complete(self, execution_id: str, exchange_ids: list[str]) -> bool:
+        if not exchange_ids:
+            return False
+        placeholders = ",".join("?" for _ in exchange_ids)
+        rows = self.db.execute(
+            f"SELECT exchange_id FROM execution_settlements WHERE execution_id=? AND exchange_id IN ({placeholders})",
+            [execution_id, *exchange_ids],
+        ).fetchall()
+        return len({row["exchange_id"] for row in rows}) == len(set(exchange_ids))
+
+    def open_executions(self, *, mode: str | None = None) -> list[dict]:
+        query = "SELECT * FROM execution_runs WHERE state NOT IN ('VERIFIED','RELEASED')"
+        args: tuple = ()
+        if mode is not None:
+            query += " AND mode=?"
+            args = (mode,)
+        query += " ORDER BY updated_at"
+        return [dict(row) for row in self.db.execute(query, args).fetchall()]
+
+
+    def record_session_halt(self, session_id: str, reason: str, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute(
+            "INSERT INTO session_halts(session_id, reason, halted_at) VALUES(?,?,?) "
+            "ON CONFLICT(session_id) DO UPDATE SET reason=excluded.reason, halted_at=excluded.halted_at",
+            (session_id, reason, now),
+        )
+        self.db.commit()
+
+    def session_halt(self, session_id: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM session_halts WHERE session_id=?", (session_id,)).fetchone()
+        return dict(row) if row else None
 
     def close(self) -> None:
         self.db.close()

@@ -19,6 +19,7 @@ class Opp:
     legs: tuple
     limits: tuple
     path: tuple      # ((amount_in, amount_out) per leg)
+    volatility_bps_s: float = 0.0
 
 
 @dataclass(slots=True)
@@ -37,6 +38,7 @@ class CrossOpp:
     age_ms: float
     base_ccy: str
     quote_ccy: str
+    volatility_bps_s: float = 0.0
 
 
 def evaluate_triangle(tri, books, size, fee_of, min_net_bps, tol_bps, round_px, now):
@@ -64,8 +66,9 @@ def evaluate_triangle(tri, books, size, fee_of, min_net_bps, tol_bps, round_px, 
     for l, lim in zip(tri.legs, limits):
         w = w / lim if l.side == "buy" else w * lim
         w *= 1.0 - fee_of(l.symbol)
+    volatility_bps_s = max(float(getattr(books.get(leg.symbol), "volatility_bps_s", 0.0)) for leg in tri.legs)
     return Opp(tri.name, tri.start, size, amt, w, net_bps, (w / size - 1.0) * 1e4, age,
-               tri.legs, limits, tuple(path))
+               tri.legs, limits, tuple(path), volatility_bps_s)
 
 
 def evaluate_cross(sym, bw, sw, bb, sb, size_usd, cfg, now):
@@ -96,8 +99,9 @@ def evaluate_cross(sym, bw, sw, bb, sb, size_usd, cfg, now):
     worst_cost = base * lim_buy
     worst_net = base * lim_sell * (1.0 - fs) - worst_cost * (1.0 + fb) - worst_cost * cfg.rebalance_haircut_bps / 1e4
     m = bw.ex.markets[sym]
+    volatility_bps_s = max(float(getattr(bb, "volatility_bps_s", 0.0)), float(getattr(sb, "volatility_bps_s", 0.0)))
     return CrossOpp(sym, bw.id, sw.id, base, lim_buy, lim_sell, cost, net, worst_net, net_bps,
-                    worst_net / worst_cost * 1e4, age, m["base"], m["quote"])
+                    worst_net / worst_cost * 1e4, age, m["base"], m["quote"], volatility_bps_s)
 
 
 def cross_candidate_sizes(buy_book, sell_book, max_usd):
