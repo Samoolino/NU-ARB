@@ -8,6 +8,7 @@ from arbx.util import STABLES
 
 CCXT_ADAPTERS = {"gateio": "gate"}
 MAX_EXCHANGES = 18
+LIVE_STARTER_CAPITAL_USD = 3.0
 
 
 @dataclass
@@ -28,9 +29,9 @@ class Config:
     mode: str = "paper"
     exchanges: list[ExchangeCfg] = field(default_factory=list)
     start_assets: tuple[str, ...] = ("USDT", "USDC")
-    start_capital_usd: float = 3.0
-    starter_capital_usd: float = 3.0
-    trade_size_usd: float = 3.0
+    start_capital_usd: float = LIVE_STARTER_CAPITAL_USD
+    starter_capital_usd: float = LIVE_STARTER_CAPITAL_USD
+    trade_size_usd: float = LIVE_STARTER_CAPITAL_USD
     target_profit_usd: float | None = None
     target_equity_usd: float | None = None
 
@@ -48,9 +49,8 @@ class Config:
     depth: int = 10
 
     # ---- Risk ---------------------------------------------------------------
-    # Retained for backward-compatible API payloads; live execution no longer
-    # uses a session-loss ceiling. Capital is constrained by starter capital,
-    # available exchange inventory, profitability gates, and failure controls.
+    # Retained for backward-compatible control-plane payloads. The live gate
+    # does not use a session-loss ceiling.
     max_loss_usd: float = 0.0
     max_consecutive_failures: int = 3
     max_trades_per_min: int = 30
@@ -89,8 +89,8 @@ class Config:
         mode = os.getenv("BOT_MODE", "paper").lower()
         tgt = os.getenv("BOT_TARGET_EQUITY_USD")
         profit_target = os.getenv("BOT_TARGET_PROFIT_USD")
-        starter = f("BOT_START_CAPITAL_USD", 3.0)
-        trade_size = f("BOT_TRADE_SIZE_USD", starter)
+        starter = LIVE_STARTER_CAPITAL_USD if mode == "live" else f("BOT_START_CAPITAL_USD", LIVE_STARTER_CAPITAL_USD)
+        trade_size = starter if mode == "live" else f("BOT_TRADE_SIZE_USD", starter)
         return cls(
             mode=mode, exchanges=xs,
             start_capital_usd=starter, starter_capital_usd=starter, trade_size_usd=trade_size,
@@ -115,9 +115,11 @@ class Config:
             raise ValueError("BOT_TARGET_PROFIT_USD must be greater than zero")
         if self.starter_capital_usd <= 0:
             raise ValueError("BOT_START_CAPITAL_USD must be greater than zero")
+        if self.mode == "live" and self.starter_capital_usd != LIVE_STARTER_CAPITAL_USD:
+            raise ValueError("live mode is fixed to $3 starter capital")
         if self.trade_size_usd <= 0:
             raise ValueError("BOT_TRADE_SIZE_USD must be greater than zero")
-        if self.mode == "live" and self.trade_size_usd > self.starter_capital_usd:
+        if self.mode == "live" and self.trade_size_usd > LIVE_STARTER_CAPITAL_USD:
             raise ValueError("live trade size cannot exceed the $3 starter capital allocation")
         bad = [a for a in self.start_assets if a not in STABLES]
         if bad:
