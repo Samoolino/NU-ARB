@@ -82,8 +82,8 @@ class ProfitGate:
         mn_amt, mn_cost = mlimits.get(symbol, (None, None))
         return not ((mn_amt and amount < mn_amt) or (mn_cost and cost < mn_cost))
 
-    def check_tri(self, o, mlimits, lat_ok: bool, free: float) -> Decision:
-        d = self._common(o.age_ms, o.net_bps, o.worst_bps, o.worst_final - o.start, lat_ok)
+    def check_tri(self, o, mlimits, lat_ok: bool, free: float, speed_margin_bps: float = 0.0) -> Decision:
+        d = self._common(o.age_ms, o.net_bps, o.worst_bps, o.worst_final - o.start, lat_ok, speed_margin_bps)
         if not d.ok:
             return d
         for leg, (a_in, a_out) in zip(o.legs, o.path):
