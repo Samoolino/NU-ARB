@@ -3,8 +3,115 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+@dataclass(frozen=True)
+class Reservation:
+    reservation_id: str
+    session_id: str
+    opportunity_id: str
+    expires_at: float
+
+
+class ReservationManager:
+    """Durable, atomic resource reservations used before live execution."""
+
+    def __init__(self, db: sqlite3.Connection):
+        self.db = db
+        self.db.execute("""CREATE TABLE IF NOT EXISTS reservations (
+            reservation_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            opportunity_id TEXT NOT NULL,
+            resource_key TEXT NOT NULL,
+            amount REAL NOT NULL CHECK(amount > 0),
+            resource_limit REAL NOT NULL CHECK(resource_limit > 0),
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('ACTIVE','RELEASED','EXPIRED')),
+            released_at REAL
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS reservations_resource_idx ON reservations(resource_key, status, expires_at)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS reservations_session_idx ON reservations(session_id, status)")
+        self.db.commit()
+
+    def _expire(self, now: float) -> None:
+        self.db.execute(
+            "UPDATE reservations SET status='EXPIRED' WHERE status='ACTIVE' AND expires_at <= ?", (now,)
+        )
+
+    def acquire(self, *, session_id: str, opportunity_id: str,
+                resources: list[tuple[str, float, float]], ttl_s: float,
+                now: float | None = None) -> Reservation | None:
+        """Atomically reserve every requested resource or none of them."""
+        import time
+        import uuid
+        now = time.time() if now is None else now
+        if ttl_s <= 0 or not resources:
+            raise ValueError("reservation requires a positive TTL and at least one resource")
+        if any(amount <= 0 or limit <= 0 or amount > limit for _, amount, limit in resources):
+            return None
+        if len({key for key, _, _ in resources}) != len(resources):
+            raise ValueError("reservation resource keys must be unique")
+        reservation_id = uuid.uuid4().hex
+        expires_at = now + ttl_s
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            self._expire(now)
+            for key, amount, limit in resources:
+                row = self.db.execute(
+                    "SELECT COALESCE(SUM(amount),0) AS used FROM reservations "
+                    "WHERE resource_key=? AND status='ACTIVE' AND expires_at > ?",
+                    (key, now),
+                ).fetchone()
+                if float(row["used"]) + amount > limit + 1e-12:
+                    self.db.rollback()
+                    return None
+            for key, amount, limit in resources:
+                self.db.execute(
+                    "INSERT INTO reservations(reservation_id,session_id,opportunity_id,resource_key,amount,resource_limit,created_at,expires_at,status) "
+                    "VALUES(?,?,?,?,?,?,?,?, 'ACTIVE')",
+                    (reservation_id, session_id, opportunity_id, key, amount, limit, now, expires_at),
+                )
+            self.db.commit()
+            return Reservation(reservation_id, session_id, opportunity_id, expires_at)
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def release(self, reservation_id: str, *, now: float | None = None) -> bool:
+        import time
+        now = time.time() if now is None else now
+        cursor = self.db.execute(
+            "UPDATE reservations SET status='RELEASED', released_at=? "
+            "WHERE reservation_id=? AND status='ACTIVE'", (now, reservation_id),
+        )
+        self.db.commit()
+        return cursor.rowcount > 0
+
+    def recover_expired(self, *, now: float | None = None) -> int:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute("BEGIN IMMEDIATE")
+        self._expire(now)
+        changed = self.db.total_changes
+        self.db.commit()
+        return changed
+
+    def active(self, *, session_id: str | None = None, now: float | None = None) -> list[dict]:
+        import time
+        now = time.time() if now is None else now
+        self._expire(now)
+        self.db.commit()
+        if session_id is None:
+            rows = self.db.execute("SELECT * FROM reservations WHERE status='ACTIVE' ORDER BY created_at").fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM reservations WHERE session_id=? AND status='ACTIVE' ORDER BY created_at", (session_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
 
 
 class TradeJournal:
@@ -66,6 +173,7 @@ class TradeJournal:
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS opportunities_session_idx ON opportunities(session_id, id)")
         self.db.commit()
+        self.reservations = ReservationManager(self.db)
 
     def realized(self, session_id: str) -> float:
         row = self.db.execute(
