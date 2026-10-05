@@ -504,7 +504,7 @@ def live_activation_readiness(request: Request):
     by_exchange = {}
     for row in rows:
         evidence = json.loads(row["verification_json"] or "{}").get("evidence") or {}
-        fresh = bool(row["last_verified"]) and (time.time() - float(row["last_verified"]) <= VERIFICATION_TTL_SECONDS)
+        fresh = _verification_is_fresh(row["last_verified"])
         scanner_ready = bool(evidence.get("scannerEligible"))
         execution_ready = bool(evidence.get("executionEligible"))
         live_ready = bool(evidence.get("liveEligible"))
