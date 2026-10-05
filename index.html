@@ -1,539 +1,86 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#080b0d">
-  <meta name="description" content="Cross-exchange public market scanner with secure exchange account verification.">
-  <title>ARBX | Market Scanner</title>
-  <style>
-    :root{color-scheme:dark;--bg:#080b0d;--panel:#101619;--panel2:#141c20;--line:#263238;--muted:#8a9a9e;--text:#e9f1ef;--green:#6de0b2;--red:#ff6b78;--amber:#e7bd69;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 75% -15%,#17342b 0,transparent 35%),var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
-    .shell{max-width:1320px;margin:auto;padding:26px 30px 50px}.top{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:4px 0 22px}.brand{display:flex;align-items:center;gap:12px}.mark{width:38px;height:38px;border:1px solid #39755d;border-radius:11px;display:grid;place-items:center;color:var(--green);font:700 17px var(--mono);background:#0e211a}.brand-name{font-weight:650;letter-spacing:.02em}.brand-sub{font-size:12px;color:var(--muted);margin-top:3px}.live-label{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:99px;padding:8px 12px;color:#c2cecb;font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--green);box-shadow:0 0 12px #6de0b277}.dot.error{background:var(--red)}
-    .hero{display:flex;justify-content:space-between;align-items:end;padding:35px 0 24px}.hero h1{font-size:clamp(27px,4vw,38px);letter-spacing:-.04em;margin:0 0 8px}.hero p{margin:0;color:var(--muted);font-size:14px}.stamp{font:12px var(--mono);color:var(--muted)}
-    .controls,.panel{background:linear-gradient(145deg,#11191c,#0d1215);border:1px solid var(--line);border-radius:14px}.controls{display:flex;align-items:end;gap:14px;padding:17px;flex-wrap:wrap}.field{display:flex;flex-direction:column;gap:7px;min-width:125px}.field label{font-size:11px;color:#9aa9a8;letter-spacing:.04em}.field input{height:39px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:14px var(--mono);padding:0 11px;outline:none}.field input:focus{border-color:#4e9e7d}.field.small{max-width:145px}.field.exchange{max-width:180px}.field select{height:39px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.field.symbol{max-width:160px}.field.amount{max-width:165px}.fee-group{display:flex;gap:10px}.actions{display:flex;align-items:center;gap:10px;margin-left:auto}.button{height:39px;border-radius:7px;padding:0 15px;font-weight:620;cursor:pointer}.primary{background:var(--green);color:#07100d;border:0}.primary:hover{background:#93edc8}.secondary{background:#172126;color:#dce7e3;border:1px solid #344348}.secondary:hover{background:#202e33}.toggle{color:#9aa9a8;font-size:12px;display:flex;align-items:center;gap:7px}
-    .venues{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:16px 0}.panel{padding:17px 19px}.venue-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:17px}.venue-name{display:flex;align-items:center;gap:10px;font-weight:620}.venue-code{font:11px var(--mono);color:var(--muted);border:1px solid var(--line);padding:4px 7px;border-radius:5px}.venue-status{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px}.book{display:grid;grid-template-columns:1fr 1fr;gap:14px}.book label{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px}.price{font:21px var(--mono);letter-spacing:-.05em}.price.ask{color:#e9b982}.price.bid{color:var(--green)}.latency{margin-top:14px;color:#788a8d;font:11px var(--mono)}
-    .section-head{display:flex;justify-content:space-between;align-items:center;margin:28px 2px 12px}.section-head h2{margin:0;font-size:15px;font-weight:620}.section-head span{color:var(--muted);font-size:12px}.table-wrap{overflow:auto}.opps{width:100%;border-collapse:collapse;min-width:690px}.opps th{text-align:left;color:#829397;font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:550;padding:11px 14px;border-bottom:1px solid var(--line)}.opps td{padding:14px;border-bottom:1px solid #1c272b;font:13px var(--mono)}.opps tr:last-child td{border:0}.positive{color:var(--green)}.negative{color:#a3adae}.status-pill{font:10px var(--sans);letter-spacing:.02em;border:1px solid #30413a;color:#a9d9c2;background:#13211b;border-radius:99px;padding:5px 8px;white-space:nowrap}.status-pill.neutral{background:#1a1d1f;color:#aab3b4;border-color:#343b3d}.empty{padding:29px 14px;text-align:center;color:var(--muted);font-size:13px}.fineprint{display:flex;gap:10px;align-items:flex-start;color:#829093;font-size:11px;line-height:1.6;margin-top:19px;padding:13px 15px;border-left:2px solid #a47e38;background:#15130e;border-radius:0 8px 8px 0}.fineprint strong{color:#d4b572;font-weight:600}.error-banner{display:none;margin-top:14px;padding:12px 14px;background:#291619;border:1px solid #51252a;color:#ffadb4;border-radius:8px;font-size:12px}.error-banner.show{display:block}.footer{color:#657579;font:11px var(--mono);display:flex;justify-content:space-between;margin-top:30px;padding-top:16px;border-top:1px solid var(--line)}
-    .account{margin-top:24px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:620}.account-note,.account-status{color:var(--muted);font-size:12px;line-height:1.6}.account-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0d1316}.account-box h3{font-size:13px;margin:0 0 13px}.account-form{display:grid;gap:10px}.account-form input,.account-form select{height:38px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:11px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px}.balance-list{font:12px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto}.disabled-note{color:var(--amber);font-size:11px;line-height:1.5}
-    @media(max-width:760px){.shell{padding:18px 15px 35px}.top{padding-bottom:16px}.hero{align-items:start;flex-direction:column;gap:13px;padding:27px 0 19px}.venues{grid-template-columns:1fr}.controls{gap:10px}.field{flex:1 1 42%}.actions{margin:5px 0 0;width:100%}.actions .button{flex:1}.fee-group{flex:1 1 100%}.fee-group .field{max-width:none}.stamp{font-size:10px}.footer{gap:10px;flex-direction:column}.account-grid{grid-template-columns:1fr}}
-    .account{margin-top:24px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:620}.account-note,.account-status{color:var(--muted);font-size:12px;line-height:1.6}.account-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0d1316}.account-box h3{font-size:13px;margin:0 0 13px}.account-form{display:grid;gap:10px}.account-form input,.account-form select{height:38px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:11px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px}.balance-list{font:12px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto}.disabled-note{color:var(--amber);font-size:11px;line-height:1.5}
-  </style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07100d"><title>NU-ARB / Target Execution Console</title>
+<style>
+:root{color-scheme:dark;--bg:#070a0c;--panel:#0e1416;--panel2:#121b1e;--line:#253236;--muted:#819194;--text:#e7f0ed;--ok:#68ddb0;--warn:#e2b967;--bad:#ff707b;--blue:#82b8ff;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 75% -15%,#16352a 0,transparent 35%),var(--bg);color:var(--text);font:13px var(--sans)}button,input,select{font:inherit}.shell{max-width:1500px;margin:auto;padding:20px 24px 60px}.top{display:flex;justify-content:space-between;align-items:center;padding:8px 0 18px;border-bottom:1px solid var(--line)}.brand{display:flex;gap:12px;align-items:center}.mark{display:grid;place-items:center;width:40px;height:40px;border:1px solid #3b765e;border-radius:12px;background:#0c2018;color:var(--ok);font:700 17px var(--mono)}.title{font-weight:700;letter-spacing:.02em}.sub{font-size:11px;color:var(--muted);margin-top:3px}.status{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:11px}.dot{width:8px;height:8px;border-radius:50%;background:#5d696b}.dot.ok{background:var(--ok);box-shadow:0 0 12px #68ddb055}.dot.bad{background:var(--bad)}.hero{display:flex;justify-content:space-between;align-items:end;padding:26px 0 18px}.hero h1{font-size:30px;letter-spacing:-.04em;margin:0 0 6px}.hero p{margin:0;color:var(--muted)}.grid{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:12px}.card{background:linear-gradient(145deg,#11191c,#0b1012);border:1px solid var(--line);border-radius:14px;padding:16px}.eyebrow{font:10px var(--mono);letter-spacing:.1em;color:var(--muted);text-transform:uppercase}.metric{font:26px var(--mono);margin-top:9px}.metric.ok{color:var(--ok)}.metric.warn{color:var(--warn)}.metric.bad{color:var(--bad)}.section{margin-top:14px}.sectionhead{display:flex;justify-content:space-between;align-items:center;margin:24px 2px 10px}.sectionhead h2{font-size:15px;margin:0}.sectionhead span{color:var(--muted);font-size:11px}.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.field{display:grid;gap:6px}.field label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.field input,.field select{height:38px;background:#080d0f;border:1px solid #2b393c;border-radius:7px;color:var(--text);padding:0 10px;outline:none}.field input:focus,.field select:focus{border-color:#4c9c7a}.actions{display:flex;gap:8px;align-items:end}.btn{height:38px;padding:0 14px;border-radius:7px;border:1px solid #344346;background:#172125;color:var(--text);cursor:pointer}.btn.primary{background:var(--ok);border-color:var(--ok);color:#06100c;font-weight:700}.btn.danger{border-color:#65343a;color:#ffb0b7;background:#251417}.btn:disabled{opacity:.45;cursor:not-allowed}.banner{display:none;padding:11px 13px;border-radius:8px;margin-top:10px;background:#281519;border:1px solid #5a2d34;color:#ffb1b8}.banner.show{display:block}.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-top:20px}.tab{padding:10px 12px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}.tab.active{color:var(--text);border-color:var(--ok)}.pane{display:none}.pane.active{display:block}.exchangegrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.ex{padding:14px;border:1px solid var(--line);border-radius:11px;background:#0c1214}.exhead{display:flex;justify-content:space-between;gap:8px}.pill{font:10px var(--mono);border:1px solid #344346;border-radius:99px;padding:4px 7px;color:var(--muted)}.pill.ok{color:var(--ok);border-color:#2d654f;background:#0d211a}.pill.bad{color:var(--bad);border-color:#613039;background:#211315}.pill.warn{color:var(--warn);border-color:#614d29;background:#211b10}.mini{font-size:11px;color:var(--muted);line-height:1.6;margin-top:8px}.evidence{margin-top:9px;font:10px var(--mono);white-space:pre-wrap;color:#aebcba}.exactions{display:flex;gap:7px;margin-top:10px}.tablewrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:820px}.table th{font-size:9px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);text-align:left;padding:10px;border-bottom:1px solid var(--line)}.table td{padding:11px 10px;border-bottom:1px solid #1a2528;font:11px var(--mono)}.positive{color:var(--ok)}.negative{color:var(--bad)}.progress{height:10px;background:#182326;border-radius:99px;overflow:hidden;margin-top:10px}.bar{height:100%;width:0;background:var(--ok);transition:width .25s}.liveguard{border:1px solid #633a2e;background:#1b1410}.liveguard strong{color:var(--warn)}.checklist{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:10px}.check{padding:9px;border:1px solid var(--line);border-radius:8px;background:#0a1012;font-size:10px}.check.ok{border-color:#2e644f}.check.bad{border-color:#603039}.logs{max-height:220px;overflow:auto;font:10px var(--mono);line-height:1.7;background:#080c0e;padding:10px;border-radius:8px}.muted{color:var(--muted)}.right{margin-left:auto}.hide{display:none!important}@media(max-width:1000px){.grid{grid-template-columns:1fr 1fr}.exchangegrid{grid-template-columns:1fr 1fr}.controls{grid-template-columns:1fr 1fr}.checklist{grid-template-columns:1fr 1fr}}@media(max-width:650px){.shell{padding:14px}.grid,.exchangegrid,.controls{grid-template-columns:1fr}.hero{display:block}.hero .status{margin-top:10px}.actions{align-items:stretch}.actions .btn{flex:1}}
+</style>
 </head>
 <body>
-  <main class="shell">
-    <header class="top">
-      <div class="brand"><div class="mark">A</div><div><div class="brand-name">ARBX <span style="color:var(--muted);font-weight:450">/ MARKET SCANNER</span></div><div class="brand-sub">Cross-exchange spot intelligence</div></div></div>
-      <div class="live-label"><span id="globalDot" class="dot"></span><span id="globalStatus">Waiting for first snapshot</span></div>
-    </header>
-    <section class="hero"><div><h1>Market edge, measured.</h1><p>Choose from 18 public spot venues. Depth-aware estimates. No orders sent.</p></div><div class="stamp" id="updatedAt">—</div></section>
-    <form class="controls" id="controls">
-      <div class="field symbol"><label for="symbol">SPOT MARKET · USDT</label><input id="symbol" value="BTCUSDT" maxlength="20" pattern="[A-Za-z0-9]{2,16}USDT" autocomplete="off"></div>
-      <div class="field amount"><label for="size">TRADE SIZE · USDT</label><input id="size" type="number" min="10" max="100000" step="10" value="100"></div>
-      <div class="field exchange"><label for="exchangeA">BUY / SELL VENUE A</label><select id="exchangeA">          <option value="binance">Binance</option>
-          <option value="bybit">Bybit</option>
-          <option value="okx">OKX</option>
-          <option value="kucoin">KuCoin</option>
-          <option value="gateio">Gate.io</option>
-          <option value="mexc">MEXC</option>
-          <option value="htx">HTX</option>
-          <option value="lbank">LBank</option>
-          <option value="bitget">Bitget</option>
-          <option value="kraken">Kraken</option>
-          <option value="coinbaseexchange">Coinbase Exchange</option>
-          <option value="bitfinex">Bitfinex</option>
-          <option value="bitstamp">Bitstamp</option>
-          <option value="gemini">Gemini</option>
-          <option value="cryptocom">Crypto.com Exchange</option>
-          <option value="coinex">CoinEx</option>
-          <option value="bingx">BingX</option>
-          <option value="whitebit">WhiteBIT</option></select></div>
-      <div class="field exchange"><label for="exchangeB">BUY / SELL VENUE B</label><select id="exchangeB">          <option value="binance">Binance</option>
-          <option value="bybit">Bybit</option>
-          <option value="okx">OKX</option>
-          <option value="kucoin">KuCoin</option>
-          <option value="gateio">Gate.io</option>
-          <option value="mexc">MEXC</option>
-          <option value="htx">HTX</option>
-          <option value="lbank">LBank</option>
-          <option value="bitget">Bitget</option>
-          <option value="kraken">Kraken</option>
-          <option value="coinbaseexchange">Coinbase Exchange</option>
-          <option value="bitfinex">Bitfinex</option>
-          <option value="bitstamp">Bitstamp</option>
-          <option value="gemini">Gemini</option>
-          <option value="cryptocom">Crypto.com Exchange</option>
-          <option value="coinex">CoinEx</option>
-          <option value="bingx">BingX</option>
-          <option value="whitebit">WhiteBIT</option></select></div>
-      <div class="fee-group">
-        <div class="field small"><label id="feeLabelA" for="feeA">VENUE A TAKER · BPS</label><input id="feeA" type="number" min="0" max="100" step="0.1" value="10"></div>
-        <div class="field small"><label id="feeLabelB" for="feeB">VENUE B TAKER · BPS</label><input id="feeB" type="number" min="0" max="100" step="0.1" value="10"></div>
-      </div>
-      <div class="actions"><label class="toggle"><input id="auto" type="checkbox" checked> Auto refresh · 15s</label><button class="button secondary" id="refresh" type="button">Refresh now</button><button class="button primary" id="scan" type="submit">Scan market</button></div>
-    </form>
-    <div id="error" class="error-banner" role="status"></div>
-    <section class="venues" aria-label="Exchange order books">
-      <article class="panel" id="venueACard"><div class="venue-head"><div class="venue-name"><span class="venue-code">A</span><span data-venue-name="a">Binance</span><span class="venue-code">PUBLIC REST</span></div><div class="venue-status"><i class="dot"></i><span>Waiting</span></div></div><div class="book"><div><label>Best bid</label><div class="price bid" data-price="a-bid">—</div></div><div><label>Best ask</label><div class="price ask" data-price="a-ask">—</div></div></div><div class="latency" data-latency="a">Snapshot latency —</div></article>
-      <article class="panel" id="venueBCard"><div class="venue-head"><div class="venue-name"><span class="venue-code">B</span><span data-venue-name="b">Bybit</span><span class="venue-code">PUBLIC REST</span></div><div class="venue-status"><i class="dot"></i><span>Waiting</span></div></div><div class="book"><div><label>Best bid</label><div class="price bid" data-price="b-bid">—</div></div><div><label>Best ask</label><div class="price ask" data-price="b-ask">—</div></div></div><div class="latency" data-latency="b">Snapshot latency —</div></article>
-    </section>
-    <section>
-      <div class="section-head"><h2>Cross-venue opportunities</h2><span id="marketMeta">Estimated from visible REST depth</span></div>
-      <div class="panel table-wrap"><table class="opps"><thead><tr><th>Buy</th><th>Sell</th><th>Base qty</th><th>Buy VWAP</th><th>Sell VWAP</th><th>Est. fees · USDT</th><th>Net PnL · USDT</th><th>State</th></tr></thead><tbody id="rows"><tr><td colspan="8" class="empty">Scan to request current public order-book snapshots.</td></tr></tbody></table></div>
-    </section>
-    <div class="fineprint"><strong>Read-only estimates.</strong><span>Fees are the values you enter; actual account fee tiers, rebates, balances, transfer costs, execution latency, and slippage may differ. Public REST snapshots are not a streaming feed. A positive estimate is not guaranteed or executable profit. The separate engine panel uses the existing risk-gated Python strategy.</span></div>
-    <details class="account" id="accountPanel">
-      <summary>Account and exchange verification</summary>
-      <p class="account-note">Create an application account to verify an exchange. Passwords are hashed and exchange credentials are encrypted by the persistent HTTPS control service. Verification uses live authenticated REST and WebSocket requests. Live eligibility requires fresh account and stream checks, spot execution support, and venue-specific key-permission evidence. Binance reports combined spot/margin trading permission; Bitfinex reports key scopes that do not establish spot-only orders or IP restriction. Other venues remain unverified.</p>
-      <div class="account-grid">
-        <section class="account-box" id="authBox">
-          <h3 id="authTitle">Sign in or create an account</h3>
-          <form class="account-form" id="authForm">
-            <label class="field"><span>Email</span><input id="accountEmail" type="email" autocomplete="username" required></label>
-            <label class="field" id="passwordField"><span>Password</span><input id="accountPassword" type="password" minlength="12" autocomplete="current-password" required></label>
-            <label class="field" id="confirmField" hidden><span>Confirm password</span><input id="accountPasswordConfirm" type="password" minlength="12" autocomplete="new-password"></label>
-            <div class="account-actions"><button class="button primary" id="loginButton" type="submit">Sign in</button><button class="button secondary" id="signupButton" type="button">Create account</button><button class="button secondary" id="logoutButton" type="button" hidden>Sign out</button></div>
-          </form>
-          <div class="account-status" id="authStatus" role="status">Control API status: checking configuration…</div>
-        </section>
-        <section class="account-box" id="exchangeBox" hidden>
-          <h3>Verify exchange account</h3>
-          <form class="account-form" id="exchangeForm">
-            <label class="field"><span>Exchange</span><select id="credentialVenue"></select></label>
-            <label class="field"><span>Authentication mode</span><select id="authMode"></select></label>
-            <div id="credentialFields" class="account-form"></div>
-            <label class="field"><span>Spot market for the live book proof</span><input id="verifySymbol" value="BTC/USDT" autocomplete="off"></label>
-            <div class="account-actions"><button class="button primary" id="verifyButton" type="submit">Verify account</button><button class="button secondary" id="reloadExchanges" type="button">Refresh states</button></div>
-          </form>
-          <div class="account-status" id="exchangeStatus" role="status"></div>
-          <div class="balance-list" id="balanceList"></div>
-          <pre class="evidence" id="verificationEvidence"></pre>
-          <p class="disabled-note">Binance and Bitfinex use signed, read-only permission endpoints. Binance combines spot and margin permission; Bitfinex's orders scope is not spot-specific and does not prove IP restriction. Only Binance can currently pass the permission gate. Other exchanges remain ineligible until an equivalent authoritative probe is available. The service never tests permission by submitting an order.</p>
-        </section>
-        <section class="account-box" id="engineBox" hidden style="grid-column:1 / -1">
-          <h3>Streaming scanner and execution engine</h3>
-          <p class="account-note">The engine streams spot markets and runs the existing paper or live strategy. Paper mode uses virtual execution. Live orders remain operator-disabled by default and require fresh account, permission, private-stream, market-data, and latency checks before activation.</p>
-          <form class="account-form" id="engineForm">
-            <label class="field"><span>Mode</span><select id="engineMode"><option value="paper">Paper scan</option><option value="live">Live orders</option></select></label>
-            <label class="field"><span>Exchange</span><select id="engineVenue"></select></label>
-            <label class="field"><span>Trade size · USD (max $25)</span><input id="engineTradeSize" type="number" min="0.01" max="25" step="0.01" value="5" required></label>
-            <label class="field"><span>Session loss stop · USD (max $3 pilot limit)</span><input id="engineMaxLoss" type="number" min="0.01" max="3" step="0.01" value="3" required></label>
-            <label class="field"><span>Realized profit stop · USD (per ignition)</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="200" required></label>
-            <div class="disabled-note">Both paper and live sessions require a recently verified account, live public order book, and authenticated private balance stream. Unverified venues are excluded.</div>
-            <label class="field" id="liveConfirmField" hidden><span>To confirm live orders, type I ACCEPT REAL ORDERS</span><input id="liveConfirmation" autocomplete="off" spellcheck="false"></label>
-            <div class="account-actions"><button class="button primary" id="engineStart" type="submit">Start paper scanner</button><button class="button secondary" id="engineStop" type="button" disabled>Stop engine</button><button class="button secondary" id="engineRefresh" type="button">Refresh status</button></div>
-          </form>
-          <div class="account-status" id="engineStatus" role="status">Sign in and verify an exchange to use the engine.</div>
-          <pre class="evidence" id="engineDetails"></pre>
-        </section>
-        <section class="account-box" id="capitalBox" hidden>
-          <h3>Verified capital sources</h3>
-          <p class="account-note">Balances are real exchange snapshots from recent authenticated verification. This panel is read-only; it does not deposit, withdraw, or transfer funds.</p>
-          <div class="account-actions"><button class="button secondary" id="capitalRefresh" type="button">Refresh balances</button></div>
-          <div class="balance-list" id="capitalSources">No recent verified balance snapshots.</div>
-        </section>
-        <section class="account-box" id="journalBox" hidden>
-          <h3>Execution journal</h3>
-          <p class="account-note">Durable journal entries only. Target attainment remains session-scoped; this total includes completed records across saved engine sessions.</p>
-          <div class="account-actions"><button class="button secondary" id="journalRefresh" type="button">Refresh journal</button></div>
-          <div class="account-status" id="journalSummary"></div>
-          <pre class="evidence" id="journalRows"></pre>
-        </section>
-      </div>
-    </details>
-    <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>18 configured public spot adapters · credentials remain server-side</span></footer>
-  </main>
-  <script type="module">
-    const EXCHANGES = [{"id":"binance","name":"Binance"},{"id":"bybit","name":"Bybit"},{"id":"okx","name":"OKX"},{"id":"kucoin","name":"KuCoin"},{"id":"gateio","name":"Gate.io"},{"id":"mexc","name":"MEXC"},{"id":"htx","name":"HTX"},{"id":"lbank","name":"LBank"},{"id":"bitget","name":"Bitget"},{"id":"kraken","name":"Kraken"},{"id":"coinbaseexchange","name":"Coinbase Exchange"},{"id":"bitfinex","name":"Bitfinex"},{"id":"bitstamp","name":"Bitstamp"},{"id":"gemini","name":"Gemini"},{"id":"cryptocom","name":"Crypto.com Exchange"},{"id":"coinex","name":"CoinEx"},{"id":"bingx","name":"BingX"},{"id":"whitebit","name":"WhiteBIT"}];
-    const $ = (id) => document.getElementById(id);
-    const currency = (n, digits = 4) => Number.isFinite(n) ? n.toLocaleString(undefined, {minimumFractionDigits: digits, maximumFractionDigits: digits}) : "—";
-    const nameById = Object.fromEntries(EXCHANGES.map((exchange) => [exchange.id, exchange.name]));
-    let timer = null;
-    let scanning = false;
-    let signupMode = false;
-    let venueDefinitions = [];
-    let signedInUser = null;
-    let runtimeSettings = {liveTradingEnabled: false};
-    let engineTimer = null;
+<main class="shell">
+<header class="top"><div class="brand"><div class="mark">N</div><div><div class="title">NU-ARB / TARGET EXECUTION CONSOLE</div><div class="sub">Global spot discovery · adaptive real-time observation · verified execution</div></div></div><div class="status"><i id="globalDot" class="dot"></i><span id="globalStatus">CONTROL OFFLINE</span></div></header>
+<section class="hero"><div><h1>Engage the engine, not a static scanner.</h1><p>Every listed spot market can be discovered; only validated hot markets are promoted into real-time execution.</p></div><div class="muted" id="clock">—</div></section>
+<div class="grid">
+<div class="card"><div class="eyebrow">Target progress</div><div id="targetMetric" class="metric">—</div><div class="progress"><div id="targetBar" class="bar"></div></div><div id="targetMeta" class="mini">Sign in to load the active session.</div></div>
+<div class="card"><div class="eyebrow">Engine state</div><div id="engineMetric" class="metric">STOPPED</div><div id="engineMeta" class="mini">No execution session.</div></div>
+<div class="card"><div class="eyebrow">Live authorization</div><div id="liveMetric" class="metric warn">LOCKED</div><div id="liveMeta" class="mini">Operator flag and venue evidence required.</div></div>
+</div>
 
-    function syncVenueNames() {
-      const a = $("exchangeA").value;
-      if ($("exchangeB").value === a) $("exchangeB").value = EXCHANGES.find((exchange) => exchange.id !== a).id;
-      const b = $("exchangeB").value;
-      $("feeLabelA").textContent = nameById[a] + " TAKER · BPS";
-      $("feeLabelB").textContent = nameById[b] + " TAKER · BPS";
-      document.querySelector('[data-venue-name="a"]').textContent = nameById[a];
-      document.querySelector('[data-venue-name="b"]').textContent = nameById[b];
-    }
+<div id="banner" class="banner" role="alert"></div>
+<div class="tabs">
+<div class="tab active" data-tab="command">Command</div><div class="tab" data-tab="venues">Exchange certification</div><div class="tab" data-tab="markets">Market universe</div><div class="tab" data-tab="journal">Execution journal</div>
+</div>
 
-    function setVenue(slot, venue, book) {
-      const card = $(slot === "a" ? "venueACard" : "venueBCard");
-      const dot = card.querySelector(".venue-status .dot");
-      const label = card.querySelector(".venue-status span");
-      const bid = card.querySelector('[data-price="' + slot + '-bid"]');
-      const ask = card.querySelector('[data-price="' + slot + '-ask"]');
-      const latency = card.querySelector('[data-latency="' + slot + '"]');
-      if (!venue || venue.status !== "live" || !book) {
-        dot.className = "dot error";
-        label.textContent = venue?.status === "unsupported" ? "Unsupported" : "Unavailable";
-        bid.textContent = "—";
-        ask.textContent = "—";
-        latency.textContent = venue?.error || "Snapshot unavailable";
-        return;
-      }
-      dot.className = "dot on";
-      label.textContent = "Public REST live";
-      bid.textContent = currency(book.bestBid, 2);
-      ask.textContent = currency(book.bestAsk, 2);
-      latency.textContent = "Request latency " + venue.latencyMs + " ms · snapshot received";
-    }
+<section id="pane-command" class="pane active">
+<div class="sectionhead"><h2>Target + execution policy</h2><span id="sessionLabel">SESSION —</span></div>
+<div class="card">
+<form id="engineForm" class="controls">
+<div class="field"><label>Mode</label><select id="mode"><option value="paper">Paper</option><option value="live">Live</option></select></div>
+<div class="field"><label>Trade notional USD</label><input id="tradeSize" type="number" min="0.01" max="25" step=".01" value="5"></div>
+<div class="field"><label>Max session loss USD</label><input id="maxLoss" type="number" min=".01" max="3" step=".01" value="2"></div>
+<div class="field"><label>Target realized profit USD</label><input id="target" type="number" min=".01" max="1000" step=".01" value="25"></div>
+<div class="field"><label>Execution venues</label><select id="venues" multiple size="4"></select></div>
+<div class="field"><label>Live cross-exchange</label><select id="cross"><option value="false">Disabled</option><option value="true">Enabled</option></select></div>
+<div class="field"><label>Live confirmation</label><input id="confirmation" placeholder="I ACCEPT REAL ORDERS" autocomplete="off"></div>
+<div class="actions"><button id="start" class="btn primary" type="submit">Start engine</button><button id="stop" class="btn danger" type="button">Stop</button><button id="refresh" class="btn" type="button">Refresh</button></div>
+</form>
+<div id="liveGuard" class="card liveguard" style="margin-top:12px"><strong>LIVE IS FAIL-CLOSED.</strong> A live request is rejected unless the operator flag is enabled, every selected venue is freshly verified, permission evidence is explicit, public/private streams are healthy, execution capabilities pass, latency is acceptable, and cross-live is explicitly enabled.</div>
+<div class="checklist" id="checklist"></div>
+</div>
+</section>
 
-    function renderRows(opportunities, venueNames) {
-      const rows = $("rows");
-      if (!opportunities.length) {
-        rows.innerHTML = '<tr><td colspan="8" class="empty">Both selected exchanges need current books and a shared spot market.</td></tr>';
-        return;
-      }
-      rows.innerHTML = opportunities.map((o) => {
-        const complete = Number.isFinite(o.netPnlUsdt);
-        const positive = o.status === "positive_after_estimated_fees";
-        const state = o.status === "insufficient_depth" ? "Insufficient depth" : positive ? "Positive estimate" : "No net edge";
-        const pnl = complete ? (o.netPnlUsdt >= 0 ? "+" : "") + currency(o.netPnlUsdt, 4) + " USDT" + " <small>(" + currency(o.netReturnBps, 2) + " bps)</small>" : "—";
-        const fees = complete ? currency(o.estimatedFeesUsdt, 4) + " USDT" : "—";
-        return '<tr><td>' + venueNames[o.buyVenue] + '</td><td>' + venueNames[o.sellVenue] + '</td><td>' + currency(o.quantityBase, 6) + '</td><td>' + currency(o.buyVwap, 2) + '</td><td>' + currency(o.sellVwap, 2) + '</td><td>' + fees + '</td><td class="' + (positive ? "positive" : "negative") + '">' + pnl + '</td><td><span class="status-pill ' + (positive ? "" : "neutral") + '">' + state + '</span></td></tr>';
-      }).join("");
-    }
+<section id="pane-venues" class="pane">
+<div class="sectionhead"><h2>Exchange adapter + account certification</h2><span>Registry ≠ live eligibility</span></div>
+<div id="exchangeGrid" class="exchangegrid"></div>
+</section>
 
-    async function scan(event) {
-      event?.preventDefault();
-      if (scanning) return;
-      scanning = true;
-      $("error").classList.remove("show");
-      $("error").textContent = "";
-      $("globalStatus").textContent = "Fetching public snapshots…";
-      $("globalDot").className = "dot";
-      $("scan").disabled = true;
-      $("scan").textContent = "Scanning…";
-      const params = new URLSearchParams({
-        symbol: $("symbol").value.trim().toUpperCase(),
-        size: $("size").value,
-        exchangeA: $("exchangeA").value,
-        exchangeB: $("exchangeB").value,
-        feeA: $("feeA").value,
-        feeB: $("feeB").value
-      });
+<section id="pane-markets" class="pane">
+<div class="sectionhead"><h2>Global market universe</h2><span>Discovery is broader than streaming</span></div>
+<div id="marketGrid" class="exchangegrid"></div>
+</section>
 
-      try {
-        const response = await fetch("/api/scan?" + params.toString(), {headers: {accept: "application/json"}, cache: "no-store"});
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Scan request failed.");
-        syncVenueNames();
-        for (let i = 0; i < data.venues.length; i++) {
-          const slot = i === 0 ? "a" : "b";
-          setVenue(slot, data.venues[i], data.books[data.venues[i].id]);
-        }
-        const venueNames = Object.fromEntries(data.venues.map((venue) => [venue.id, venue.name]));
-        renderRows(data.opportunities || [], venueNames);
-        const available = data.venues.filter((venue) => venue.status === "live").length;
-        $("globalDot").className = "dot " + (available === 2 ? "on" : "error");
-        $("globalStatus").textContent = available === 2 ? "Public APIs responding" : "Partial public data";
-        $("updatedAt").textContent = "Snapshot · " + new Date(data.observedAt).toLocaleTimeString();
-        $("marketMeta").textContent = data.symbol + " · REST snapshots · fee estimates";
-        const failed = data.venues.filter((venue) => venue.status !== "live");
-        if (failed.length) {
-          $("error").textContent = failed.map((venue) => venue.name + ": " + venue.error).join(" · ");
-          $("error").classList.add("show");
-        }
-      } catch (error) {
-        syncVenueNames();
-        setVenue("a", null, null);
-        setVenue("b", null, null);
-        renderRows([]);
-        $("updatedAt").textContent = "No current snapshot";
-        $("globalDot").className = "dot error";
-        $("globalStatus").textContent = "Request failed";
-        $("error").textContent = error.message || "Could not retrieve public market data.";
-        $("error").classList.add("show");
-      } finally {
-        scanning = false;
-        $("scan").disabled = false;
-        $("scan").textContent = "Scan market";
-      }
-    }
+<section id="pane-journal" class="pane">
+<div class="sectionhead"><h2>Recent execution evidence</h2><span id="journalMeta">—</span></div>
+<div class="card tablewrap"><table class="table"><thead><tr><th>Time</th><th>Mode</th><th>Strategy</th><th>Venue A</th><th>Venue B</th><th>Path</th><th>Net PnL</th><th>Status</th></tr></thead><tbody id="journalRows"><tr><td colspan="8" class="muted">Sign in to load journal.</td></tr></tbody></table></div>
+<div class="sectionhead"><h2>Engine event stream</h2></div><div id="logs" class="logs">Waiting for engine events…</div>
+</section>
 
-    async function control(path, options = {}) {
-      const query = new URLSearchParams({path});
-      const response = await fetch("/api/control?" + query.toString(), {
-        method: options.method || "GET", credentials: "same-origin", cache: "no-store",
-        headers: {accept: "application/json", ...(options.body ? {"content-type": "application/json"} : {})},
-        body: options.body ? JSON.stringify(options.body) : undefined
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = Array.isArray(data.detail) ? data.detail.map((item) => item.msg).join("; ") : data.detail;
-        throw new Error(detail || data.error || "Control request failed (" + response.status + ").");
-      }
-      return data;
-    }
-    function authMessage(message, error = false) {
-      $("authStatus").textContent = message;
-      $("authStatus").style.color = error ? "var(--red)" : "var(--muted)";
-    }
-    function setSignedIn(user) {
-      signedInUser = user || null;
-      $("accountEmail").disabled = Boolean(user);
-      $("passwordField").hidden = Boolean(user);
-      $("confirmField").hidden = Boolean(user) || !signupMode;
-      $("loginButton").hidden = Boolean(user);
-      $("signupButton").hidden = Boolean(user);
-      $("logoutButton").hidden = !user;
-      $("authTitle").textContent = user ? "Signed in as " + user.email : signupMode ? "Create an application account" : "Sign in to your application account";
-      $("exchangeBox").hidden = !user;
-      $("engineBox").hidden = !user;
-      $("capitalBox").hidden = !user;
-      $("journalBox").hidden = !user;
-      if (user) {
-        $("accountPassword").value = "";
-        $("accountPasswordConfirm").value = "";
-        authMessage("Signed in. Exchange credentials are sent only to the control service.");
-        loadExchanges();
-        loadRuntime();
-        loadEngineState();
-        loadCapitalSources();
-        loadJournal();
-      }
-    }
-    async function loadRuntime() {
-      try {
-        runtimeSettings = await control("/api/v1/runtime");
-        updateEngineChoices();
-      } catch (error) { $("engineStatus").textContent = error.message; }
-    }
-    function renderCredentialFields() {
-      const venue = venueDefinitions.find((item) => item.id === $("credentialVenue").value);
-      const mode = venue?.authenticationModes?.find((item) => item.id === $("authMode").value);
-      const host = $("credentialFields");
-      host.replaceChildren();
-      if (!mode) return;
-      for (const field of mode.fields) {
-        const label = document.createElement("label");
-        label.className = "field";
-        const title = document.createElement("span");
-        title.textContent = field.label;
-        const input = document.createElement("input");
-        input.name = field.name;
-        input.type = "password";
-        input.autocomplete = "new-password";
-        input.required = true;
-        input.spellcheck = false;
-        label.append(title, input);
-        host.append(label);
-      }
-    }
-    async function loadExchanges() {
-      if (!signedInUser) return;
-      try {
-        const data = await control("/api/v1/exchanges");
-        venueDefinitions = data.exchanges;
-        const select = $("credentialVenue");
-        const previous = select.value;
-        select.replaceChildren();
-        for (const venue of venueDefinitions) {
-          const option = document.createElement("option");
-          option.value = venue.id;
-          option.textContent = venue.name + " · " + venue.state + (venue.adapterAvailable ? "" : " · adapter unavailable");
-          select.append(option);
-        }
-        select.value = previous && venueDefinitions.some((venue) => venue.id === previous) ? previous : "binance";
-        updateAuthModes();
-        updateEngineChoices();
-      } catch (error) {
-        $("exchangeStatus").textContent = error.message;
-      }
-    }
-    function updateAuthModes(showState = true) {
-      const venue = venueDefinitions.find((item) => item.id === $("credentialVenue").value);
-      const select = $("authMode");
-      select.replaceChildren();
-      for (const mode of venue?.authenticationModes || []) {
-        const option = document.createElement("option");
-        option.value = mode.id;
-        option.textContent = mode.label;
-        select.append(option);
-      }
-      const unavailable = !venue?.adapterAvailable || !venue?.authenticationModes?.length;
-      $("verifyButton").disabled = unavailable;
-      if (showState) {
-        const verified = venue?.lastVerified ? " · checked " + new Date(venue.lastVerified).toLocaleString() : "";
-        const key = venue?.maskedKey ? " · " + venue.maskedKey : "";
-        $("exchangeStatus").textContent = unavailable ? "No compatible CCXT Pro adapter is installed for this venue." : "Saved state: " + (venue?.state || "NOT_CONFIGURED") + key + verified;
-        $("verificationEvidence").textContent = venue?.evidence && Object.keys(venue.evidence).length ? JSON.stringify(venue.evidence, null, 2) : "";
-        $("balanceList").textContent = venue?.balances ? Object.entries(venue.balances).map(([asset, amounts]) =>
-          asset + "  free " + amounts.free + "  used " + amounts.used + "  total " + amounts.total).join("\n") : "";
-      }
-      renderCredentialFields();
-    }
-    function updateEngineChoices() {
-      const mode = $("engineMode").value;
-      const eligible = venueDefinitions.filter((venue) => venue.adapterAvailable && venue.verificationFresh &&
-        venue.scannerEligible && (mode !== "live" || (runtimeSettings.liveTradingEnabled && venue.liveEligible)));
-      const select = $("engineVenue");
-      const previous = select.value;
-      select.replaceChildren();
-      for (const venue of eligible) {
-        const option = document.createElement("option");
-        option.value = venue.id;
-        option.textContent = venue.name + (mode === "live" ? " · live permission verified" : " · verified");
-        select.append(option);
-      }
-      if (!eligible.length) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = mode === "live" ? "No fresh live-verified venue available" : "No fresh fully verified venue available";
-        select.append(option);
-      }
-      select.value = eligible.some((venue) => venue.id === previous) ? previous : eligible[0]?.id || "";
-      $("liveConfirmField").hidden = mode !== "live";
-      $("engineStart").disabled = !eligible.length;
-      $("engineStart").textContent = mode === "live" ? "Start live orders" : "Start paper scanner";
-      if (mode === "live" && !eligible.length) {
-        $("engineStatus").textContent = runtimeSettings.liveTradingEnabled
-          ? "Live preflight is not verified for any connected exchange."
-          : "Live execution is disabled by the control-service operator.";
-      }
-    }
-    async function loadEngineState() {
-      if (!signedInUser) return;
-      try {
-        const data = await control("/api/v1/engine/state");
-        const stats = data.stats;
-        $("engineStatus").textContent = stats
-          ? data.status + (data.error ? " · preflight failed (" + data.error + ")" : "") + " · " + data.mode.toUpperCase() + " · scans " + stats.scans + " · signals " + stats.signals + " · trades " + stats.trades + " · net PnL $" + currency(stats.pnl, 4)
-          : "Engine stopped.";
-        $("engineDetails").textContent = stats ? JSON.stringify({equity: stats.equity, target_profit_usd: stats.target_profit_usd,
-          target_progress_pct: stats.target_progress_pct, failed: stats.failed, rejects: stats.rejects, venues: stats.venues}, null, 2) : "";
-        const active = ["starting", "running", "preflight", "stopping"].some((word) => data.status.toLowerCase().startsWith(word));
-        $("engineStop").disabled = !active;
-        if (active && !engineTimer) engineTimer = setInterval(loadEngineState, 2500);
-        if (!active && engineTimer) { clearInterval(engineTimer); engineTimer = null; }
-      } catch (error) { $("engineStatus").textContent = error.message; }
-    }
-    async function loadCapitalSources() {
-      if (!signedInUser) return;
-      try {
-        const data = await control("/api/v1/capital-sources");
-        $("capitalSources").textContent = data.sources.length
-          ? data.sources.map((item) => `${item.exchange} · ${item.asset}  available ${item.available}  reserved ${item.reserved}  usable ${item.usable}  verified ${new Date(item.lastVerified).toLocaleString()}`).join("\n")
-          : "No recent, fully verified balances are available.";
-      } catch (error) { $("capitalSources").textContent = error.message; }
-    }
-    async function loadJournal() {
-      if (!signedInUser) return;
-      try {
-        const data = await control("/api/v1/engine/journal");
-        $("journalSummary").textContent = `Realized net PnL across saved engine sessions: $${currency(data.realizedNetPnl, 4)}`;
-        $("journalRows").textContent = data.trades.length
-          ? data.trades.map((item) => `${item.timestamp} · ${item.mode.toUpperCase()} · ${item.strategy} · ${item.exchange_a}${item.exchange_b ? " → " + item.exchange_b : ""} · ${item.execution_status} · net ${currency(item.net_pnl, 4)} USD · target ${currency(item.target_before, 4)} → ${currency(item.target_after, 4)}`).join("\n")
-          : "No journal entries yet.";
-      } catch (error) { $("journalRows").textContent = error.message; }
-    }
-    $("authForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const email = $("accountEmail").value.trim();
-      const password = $("accountPassword").value;
-      try {
-        const result = signupMode
-          ? await control("/api/v1/auth/signup", {method: "POST", body: {email, password, password_confirmation: $("accountPasswordConfirm").value}})
-          : await control("/api/v1/auth/login", {method: "POST", body: {email, password}});
-        setSignedIn(result.user);
-      } catch (error) { authMessage(error.message, true); }
-    });
-    $("signupButton").addEventListener("click", () => {
-      signupMode = !signupMode;
-      $("confirmField").hidden = !signupMode;
-      $("accountPassword").setAttribute("autocomplete", signupMode ? "new-password" : "current-password");
-      $("authTitle").textContent = signupMode ? "Create an application account" : "Sign in to your application account";
-      $("authStatus").textContent = signupMode ? "Use a unique password with at least 12 characters." : "Sign in with your application account.";
-      $("loginButton").textContent = signupMode ? "Create account" : "Sign in";
-      $("signupButton").textContent = signupMode ? "Already have an account? Sign in" : "Create account";
-    });
-    $("logoutButton").addEventListener("click", async () => {
-      try { await control("/api/v1/auth/logout", {method: "POST"}); }
-      catch (error) { authMessage(error.message, true); return; }
-      setSignedIn(null);
-      authMessage("Signed out.");
-    });
-    $("credentialVenue").addEventListener("change", updateAuthModes);
-    $("authMode").addEventListener("change", renderCredentialFields);
-    $("reloadExchanges").addEventListener("click", loadExchanges);
-    $("exchangeForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const venueId = $("credentialVenue").value;
-      const credentials = Object.fromEntries([...$("credentialFields").querySelectorAll("input")].map((input) => [input.name, input.value]));
-      $("verifyButton").disabled = true;
-      $("exchangeStatus").textContent = "Checking authenticated REST, private balance WebSocket, public order-book WebSocket, and venue key permissions…";
-      $("verificationEvidence").textContent = "";
-      $("balanceList").textContent = "";
-      try {
-        const data = await control("/api/v1/exchanges/" + encodeURIComponent(venueId) + "/verify", {
-          method: "POST", body: {credentials, auth_mode: $("authMode").value, symbol: $("verifySymbol").value.trim()}
-        });
-        $("exchangeStatus").textContent = data.name + " · " + data.state + " · " + (data.maskedKey || "public connection");
-        $("verificationEvidence").textContent = JSON.stringify(data.evidence, null, 2);
-        if (data.balances) $("balanceList").textContent = Object.entries(data.balances).map(([asset, amounts]) =>
-          asset + "  free " + amounts.free + "  used " + amounts.used + "  total " + amounts.total).join("\n");
-        for (const input of $("credentialFields").querySelectorAll("input")) input.value = "";
-        await loadExchanges();
-      } catch (error) { $("exchangeStatus").textContent = error.message; }
-      finally {
-        for (const input of $("credentialFields").querySelectorAll("input")) input.value = "";
-        updateAuthModes(false);
-      }
-    });
-    $("engineMode").addEventListener("change", updateEngineChoices);
-    $("engineForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const mode = $("engineMode").value;
-      $("engineStart").disabled = true;
-      $("engineStatus").textContent = mode === "live" ? "Rechecking private stream, permissions, and live preflight…" : "Starting paper scanner…";
-      try {
-        const data = await control("/api/v1/engine/start", {method: "POST", body: {
-          mode, exchange_ids: [$("engineVenue").value], trade_size_usd: Number($("engineTradeSize").value),
-          max_loss_usd: Number($("engineMaxLoss").value), target_profit_usd: Number($("engineTarget").value),
-          require_private_stream: true,
-          live_confirmation: $("liveConfirmation").value
-        }});
-        $("liveConfirmation").value = "";
-        $("engineStatus").textContent = data.message;
-        if (!engineTimer) engineTimer = setInterval(loadEngineState, 2500);
-        loadEngineState();
-      } catch (error) { $("engineStatus").textContent = error.message; }
-      finally { updateEngineChoices(); }
-    });
-    $("engineStop").addEventListener("click", async () => {
-      try {
-        const data = await control("/api/v1/engine/stop", {method: "POST"});
-        $("engineStatus").textContent = data.status;
-        loadEngineState();
-      } catch (error) { $("engineStatus").textContent = error.message; }
-    });
-    $("engineRefresh").addEventListener("click", loadEngineState);
-    $("capitalRefresh").addEventListener("click", loadCapitalSources);
-    $("journalRefresh").addEventListener("click", loadJournal);
-    $("exchangeA").value = "binance";
-    $("exchangeB").value = "bybit";
-    syncVenueNames();
-    $("exchangeA").addEventListener("change", () => { syncVenueNames(); scan(); });
-    $("exchangeB").addEventListener("change", () => { syncVenueNames(); scan(); });
-    for (const field of ["symbol", "size", "feeA", "feeB"]) $(field).addEventListener("change", scan);
-    $("controls").addEventListener("submit", scan);
-    $("refresh").addEventListener("click", scan);
-    $("auto").addEventListener("change", () => {
-      if (timer) clearInterval(timer);
-      timer = $("auto").checked ? setInterval(() => scan(), 15000) : null;
-    });
-    control("/api/v1/auth/me").then((data) => setSignedIn(data.user)).catch((error) => authMessage(error.message));
-    scan();
-    timer = $("auto").checked ? setInterval(() => scan(), 15000) : null;
-  </script>
-</body>
-</html>
+<section class="section">
+<div class="card"><div class="eyebrow">Operational contract</div><div class="mini">NU-ARB never treats an exchange name as proof of execution. Verification evidence is timestamped and expires. Cross-exchange execution assumes pre-funded inventory on both sides; transfers remain outside the atomic trading path. A positive modeled edge is not a guaranteed realized profit.</div></div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let exchanges=[], engineTimer=null, refreshTimer=null, user=null, runtime={};
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+function money(v){return Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4});}
+function banner(msg){$("banner").textContent=msg||"";$("banner").classList.toggle("show",!!msg);}
+async function api(path,options={}){const o={credentials:"include",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}};if(o.body&&typeof o.body!=="string")o.body=JSON.stringify(o.body);const r=await fetch("/api/control?path="+encodeURIComponent(path),o);let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.detail||d.error||"Request failed");return d;}
+function setGlobal(ok,label){$("globalDot").className="dot "+(ok?"ok":"bad");$("globalStatus").textContent=label;}
+function renderVenues(){const select=$("venues");select.innerHTML=exchanges.map(x=>'<option value="'+esc(x.id)+'" '+(x.liveEligible?'selected':'')+'>'+esc(x.name)+(x.liveEligible?' · LIVE ELIGIBLE':'')+'</option>').join("");$("exchangeGrid").innerHTML=exchanges.map(x=>{const e=x.evidence||{}, p=e.permissions||{};const state=x.liveEligible?"ok":x.scannerEligible?"warn":x.state==="STALE"?"warn":"bad";return '<article class="ex"><div class="exhead"><strong>'+esc(x.name)+'</strong><span class="pill '+state+'">'+esc(x.state||"NOT CONFIGURED")+'</span></div><div class="mini">Adapter: '+(x.adapterAvailable?"available":"missing")+' · fresh: '+(x.verificationFresh?"yes":"no")+' · scanner: '+(x.scannerEligible?"eligible":"blocked")+' · live: '+(x.liveEligible?"eligible":"blocked")+'</div><div class="evidence">trade='+esc(e.tradePermission||"unverified")+' withdrawalDisabled='+esc(e.withdrawalsDisabled??"unverified")+' privateWS='+(e.privateWebSocket?"OK":"NO")+' publicWS='+(e.publicWebSocket?"OK":"NO")+'\nexecution='+JSON.stringify(e.executionCapabilities||{})+'\npermissions='+JSON.stringify(p)+'</div><div class="exactions"><button class="btn" onclick="verifyVenue(\''+esc(x.id)+'\')">Verify</button></div></article>'}).join("");}
+async function loadRuntime(){try{runtime=await api("/api/v1/runtime");$("liveMetric").textContent=runtime.liveTradingEnabled?"ARMED":"LOCKED";$("liveMeta").textContent=runtime.liveTradingEnabled?"Operator flag is enabled; venue gates still apply.":"Operator flag is disabled; no live order can start.";renderChecklist();}catch(e){banner(e.message)}}
+function renderChecklist(){const selected=[...$("venues").selectedOptions].map(o=>o.value);const checks=[["Operator flag",!!runtime.liveTradingEnabled],["Two+ venues for cross-live",selected.length>=2],["Fresh venue evidence",selected.length>0&&selected.every(id=>exchanges.find(x=>x.id===id)?.verificationFresh)],["Live permission evidence",selected.length>0&&selected.every(id=>exchanges.find(x=>x.id===id)?.liveEligible)]];$("checklist").innerHTML=checks.map(c=>'<div class="check '+(c[1]?"ok":"bad")+'">'+(c[1]?"✓":"×")+" "+esc(c[0])+"</div>").join("");}
+async function loadExchanges(){if(!user)return;const d=await api("/api/v1/exchanges");exchanges=d.exchanges||[];renderVenues();renderChecklist();const eligible=exchanges.filter(x=>x.liveEligible).length;$("liveMeta").textContent=(runtime.liveTradingEnabled?"Operator armed. ":"Operator locked. ")+eligible+" venue(s) currently live eligible.";}
+async function loadEngine(){if(!user)return;try{const d=await api("/api/v1/engine/state");const s=d.stats;const status=d.status||"STOPPED";$("engineMetric").textContent=status.toUpperCase();$("sessionLabel").textContent=s?"SESSION "+(s.session_id||"—"):"SESSION —";$("engineMeta").textContent=s?"scans "+s.scans+" · signals "+s.signals+" · trades "+s.trades+" · PnL $"+money(s.pnl):"No execution session.";if(s){const target=Number(s.target_profit_usd||0),pct=Math.max(0,Math.min(100,Number(s.target_progress_pct||0)));$("targetMetric").textContent="$"+money(s.pnl)+" / $"+money(target);$("targetBar").style.width=pct+"%";$("targetMeta").textContent=pct.toFixed(1)+"% of target · equity $"+money(s.equity)+" · failed "+s.failed;$("marketGrid").innerHTML=Object.entries(s.market_universe||{}).map(([id,m])=>'<article class="ex"><div class="exhead"><strong>'+esc(id)+'</strong><span class="pill ok">'+esc(m.observationModel||"")+'</span></div><div class="metric">'+money(m.discoveredMarkets)+'</div><div class="mini">discovered spot markets · '+money(m.uniqueBaseAssets)+' bases · '+money(m.stableQuoteMarkets)+' stable-quote markets · '+money(m.hotMarkets)+' hot streams</div></article>').join("")||'<div class="card muted">No live market-universe snapshot yet.</div>';const health=Object.values(s.venue_health||{});$("logs").textContent=health.map(h=>h.exchange+" "+h.state+" public="+h.publicWebSocket.state+" private="+h.privateWebSocket.state+" p95="+h.restLatencyMs.p95+"ms").join("\n")||"No engine events yet."}else{$("targetMetric").textContent="—";$("targetBar").style.width="0%"}const active=/^(starting|running|preflight|stopping)/i.test(status);$("start").disabled=active;$("stop").disabled=!active;if(active&&!engineTimer)engineTimer=setInterval(loadEngine,2000);if(!active&&engineTimer){clearInterval(engineTimer);engineTimer=null}}catch(e){banner(e.message)}}
+async function loadJournal(){if(!user)return;try{const d=await api("/api/v1/engine/journal");$("journalMeta").textContent="Realized net PnL $"+money(d.realizedNetPnl||0);const rows=d.rows||d.trades||[];$("journalRows").innerHTML=rows.slice(0,50).map(r=>'<tr><td>'+esc(r.ts||r.created_at||"—")+'</td><td>'+esc(r.mode||"")+'</td><td>'+esc(r.strategy||"")+'</td><td>'+esc(r.exchange_a||"")+'</td><td>'+esc(r.exchange_b||"")+'</td><td>'+esc((r.path||[]).join(" "))+'</td><td class="'+(Number(r.net_pnl||0)>=0?"positive":"negative")+'">$'+money(r.net_pnl)+'</td><td>'+esc(r.execution_status||r.verification_status||"")+'</td></tr>').join("")||'<tr><td colspan="8" class="muted">No completed execution rows.</td></tr>'}catch(e){$("journalRows").innerHTML='<tr><td colspan="8" class="muted">Journal unavailable: '+esc(e.message)+'</td></tr>'}}
+async function verifyVenue(id){const x=exchanges.find(v=>v.id===id);if(!x)return;const schema=(x.authenticationModes?.[0]?.fields||[]);const creds={};for(const f of schema){const v=prompt("Enter "+x.name+" "+f.label+" (value is sent only for verification):");if(v===null)return;creds[f.name]=v}try{banner("Verifying "+x.name+" with REST + account + public/private streams…");const d=await api("/api/v1/exchanges/"+encodeURIComponent(id)+"/verify",{method:"POST",body:{credentials:creds,auth_mode:x.authenticationModes?.[0]?.id||"ccxt",symbol:"BTC/USDT"}});banner(d.message||"Verification completed.");await loadExchanges();await loadRuntime()}catch(e){banner(e.message)}}
+$("engineForm").addEventListener("submit",async ev=>{ev.preventDefault();banner("");const selected=[...$("venues").selectedOptions].map(o=>o.value);const mode=$("mode").value;if(!selected.length){banner("Select at least one verified venue.");return}if(mode==="live"&&selected.length<2){banner("Live cross-exchange execution requires at least two selected venues.");return}try{const d=await api("/api/v1/engine/start",{method:"POST",body:{mode,exchange_ids:selected,trade_size_usd:Number($("tradeSize").value),max_loss_usd:Number($("maxLoss").value),target_profit_usd:Number($("target").value),cross_live:$("cross").value==="true",require_private_stream:true,live_confirmation:$("confirmation").value}});$("confirmation").value="";banner(d.message||"Engine start accepted; preflight running.");await loadEngine()}catch(e){banner(e.message);await loadEngine()}});
+$("stop").onclick=async()=>{try{const d=await api("/api/v1/engine/stop",{method:"POST"});banner(d.status||"Stop requested.");await loadEngine()}catch(e){banner(e.message)}};
+$("refresh").onclick=async()=>{await Promise.all([loadRuntime(),loadExchanges(),loadEngine(),loadJournal()])};
+[...document.querySelectorAll(".tab")].forEach(t=>t.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));document.querySelectorAll(".pane").forEach(x=>x.classList.remove("active"));t.classList.add("active");$("pane-"+t.dataset.tab).classList.add("active")});
+$("venues").addEventListener("change",renderChecklist);setInterval(()=>{$("clock").textContent=new Date().toLocaleTimeString()},1000);
+(async()=>{try{const d=await api("/api/v1/auth/me");user=d.user;setGlobal(true,"SIGNED IN · CONTROL READY");await Promise.all([loadRuntime(),loadExchanges(),loadEngine(),loadJournal()]);refreshTimer=setInterval(()=>Promise.all([loadRuntime(),loadExchanges(),loadEngine()]),5000)}catch(e){setGlobal(false,"SIGN IN REQUIRED");banner("Sign in through the account control in the current deployment before engaging the engine. "+e.message)}})();
+</script>
+</body></html>
