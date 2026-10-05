@@ -19,6 +19,7 @@ class Opp:
     legs: tuple
     limits: tuple
     path: tuple      # ((amount_in, amount_out) per leg)
+    volatility_bps_s: float = 0.0
 
 
 @dataclass(slots=True)
@@ -65,8 +66,9 @@ def evaluate_triangle(tri, books, size, fee_of, min_net_bps, tol_bps, round_px, 
     for l, lim in zip(tri.legs, limits):
         w = w / lim if l.side == "buy" else w * lim
         w *= 1.0 - fee_of(l.symbol)
+    volatility_bps_s = max(float(getattr(books.get(leg.symbol), "volatility_bps_s", 0.0)) for leg in tri.legs)
     return Opp(tri.name, tri.start, size, amt, w, net_bps, (w / size - 1.0) * 1e4, age,
-               tri.legs, limits, tuple(path))
+               tri.legs, limits, tuple(path), volatility_bps_s)
 
 
 def evaluate_cross(sym, bw, sw, bb, sb, size_usd, cfg, now):
