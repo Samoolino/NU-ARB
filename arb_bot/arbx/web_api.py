@@ -523,10 +523,14 @@ def live_activation_readiness(request: Request):
         scanner_ready = bool(evidence.get("scannerEligible"))
         execution_ready = bool(evidence.get("executionEligible"))
         live_ready = bool(evidence.get("liveEligible"))
-        connectivity = db.execute(
-            "SELECT consecutive_successes,last_success FROM live_connectivity WHERE user_id=? AND exchange_id=?",
-            (uid, row["exchange_id"]),
-        ).fetchone()
+        connectivity_db = _connect()
+        try:
+            connectivity = connectivity_db.execute(
+                "SELECT consecutive_successes,last_success FROM live_connectivity WHERE user_id=? AND exchange_id=?",
+                (uid, row["exchange_id"]),
+            ).fetchone()
+        finally:
+            connectivity_db.close()
         connectivity_fresh = bool(connectivity and connectivity["last_success"] and _verification_is_fresh(connectivity["last_success"]))
         connectivity_ready = bool(connectivity_fresh and int(connectivity["consecutive_successes"]) >= 2)
         activation_ready = (row["state"] == "LIVE_READY" and fresh and scanner_ready and execution_ready
