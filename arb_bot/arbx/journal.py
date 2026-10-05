@@ -294,7 +294,7 @@ class TradeJournal:
             "SUBMITTED": {"FILLED", "PARTIAL", "LEG_FAILED", "HALTED", "SETTLEMENT_PENDING"},
             "PARTIAL": {"SUBMITTING", "HALTED", "SETTLEMENT_PENDING"},
             "FILLED": {"SETTLEMENT_PENDING", "VERIFIED"},
-            "LEG_FAILED": {"HALTED", "SETTLEMENT_PENDING"},
+            "LEG_FAILED": {"HALTED", "SETTLEMENT_PENDING", "RELEASED"},
             "SETTLEMENT_PENDING": {"VERIFIED", "HALTED"},
             "VERIFIED": set(),
             "HALTED": set(),
