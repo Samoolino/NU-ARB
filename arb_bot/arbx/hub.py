@@ -377,8 +377,8 @@ class Hub:
                 if reservation is not None:
                     self.journal_store.reservations.release(reservation.reservation_id)
             self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
-            if live and execution_id is not None:
-                self.journal_store.transition_execution(execution_id, "VERIFIED" if res.ok else "RELEASED")
+            if live and execution_id is not None and not res.ok:
+                self.journal_store.transition_execution(execution_id, "RELEASED")
             if live:
                 results = await asyncio.gather(bw.refresh_balance(), sw.refresh_balance(), return_exceptions=True)
                 errors = [result for result in results if isinstance(result, Exception)]
@@ -386,6 +386,13 @@ class Hub:
                     self.risk.halt(
                         f"cross-venue balance refresh failed after order ({type(errors[0]).__name__})"
                     )
+                else:
+                    self.journal_store.record_settlement(execution_id, bw.id, bw.free)
+                    self.journal_store.record_settlement(execution_id, sw.id, sw.free)
+                    if not self.journal_store.settlement_complete(execution_id, [bw.id, sw.id]):
+                        self.risk.halt("post-trade settlement evidence incomplete across selected venues")
+                        return
+                    self.journal_store.transition_execution(execution_id, "VERIFIED")
             await asyncio.sleep(self.cfg.cooldown_s)
 
     # ---- main -----------------------------------------------------------------
