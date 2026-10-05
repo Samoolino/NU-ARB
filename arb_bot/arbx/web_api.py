@@ -558,7 +558,7 @@ def capital_sources(request: Request):
             "SELECT exchange_id,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
             (uid,),
         ).fetchall()
-    sources = []
+        sources = []
         for row in rows:
             if not _verification_is_fresh(row["last_verified"]):
                 continue
