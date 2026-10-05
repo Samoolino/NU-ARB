@@ -683,7 +683,8 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
         masked = f"{key_preview[:3]}••••{key_preview[-3:]}" if len(key_preview) >= 7 else "••••"
         encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
         saved_verification = {"evidence": evidence, "balances": balance_summary,
-                              "orderBook": book_summary, "maskedKey": masked}
+                              "orderBook": book_summary, "maskedKey": masked,
+                              "balanceRefreshedAt": datetime.now(timezone.utc).isoformat()}
         db.execute("""INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json)
                       VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
                       encrypted_credentials=excluded.encrypted_credentials,auth_mode=excluded.auth_mode,state=excluded.state,
