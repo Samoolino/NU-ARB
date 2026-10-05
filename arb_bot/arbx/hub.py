@@ -38,7 +38,7 @@ class Stats:
                 "scans": self.scans, "signals": self.signals, "trades": self.trades,
                 "failed": self.failed, "pnl": self.pnl, "equity": self.equity,
                 "target_profit_usd": self.target_profit_usd, "target_progress_pct": self.target_progress_pct,
-                "rejects": dict(self.rejects.most_common(4)), "rtt": dict(self.rtt)}
+                "rejects": dict(self.rejects.most_common(4)), "rtt": dict(self.rtt),\n                "venue_health": dict(self.venue_health), "market_universe": dict(self.market_universe)}
 
 
 class Hub:
