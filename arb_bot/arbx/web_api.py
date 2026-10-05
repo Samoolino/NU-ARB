@@ -77,9 +77,16 @@ async def _credential_refresh_loop():
                     credentials = json.loads(_decrypt(row["encrypted_credentials"]).decode())
                     exchange = _make_exchange(row["exchange_id"], row["auth_mode"], credentials)
                     evidence, balances, book = await _probe_exchange(row["exchange_id"], exchange, "BTC/USDT")
-                    if not (evidence.get("authentication") and evidence.get("account") and evidence.get("balances") and evidence.get("liveEligible")):
-                        continue
                     saved = json.loads(row["verification_json"] or "{}")
+                    attested = bool((saved.get("evidence") or {}).get("operatorAttestedLive"))
+                    if not (evidence.get("authentication") and evidence.get("account") and evidence.get("balances")
+                             and evidence.get("scannerEligible") and evidence.get("executionEligible")
+                             and (evidence.get("liveEligible") or attested)):
+                        continue
+                    if attested and not evidence.get("liveEligible"):
+                        evidence["operatorAttestedLive"] = True
+                        evidence["livePermissionMode"] = "operator_attested"
+                        evidence["liveEligible"] = True
                     saved["evidence"] = evidence
                     saved["balances"] = balances or {}
                     if book: saved["orderBook"] = book
@@ -265,6 +272,7 @@ class ExchangeConnect(BaseModel):
 class LiveReadyPromotion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirmation: Literal["PROMOTE LIVE READY"]
+    permission_attestation: Literal["I CONFIRM TRADE-ONLY API KEY"] | None = None
 
 
 class EngineStart(BaseModel):
@@ -605,6 +613,7 @@ async def exchanges(request: Request):
                            "scannerEligible": scanner_eligible,
                            "executionEligible": execution_eligible,
                            "liveEligible": live_eligible,
+                           "livePermissionMode": ((saved_evidence.get("evidence") or {}).get("livePermissionMode") or ("verified" if live_eligible else "unverified")),
                            "liveReady": bool(saved_state == "LIVE_READY" and live_eligible),
                            "executionEnabled": bool(saved_state == "LIVE_READY" and live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1")})
         return {"exchanges": result}
@@ -735,6 +744,12 @@ async def refresh_exchange_account(exchange_id: str, request: Request):
         saved["balances"] = balances or {}
         if book: saved["orderBook"] = book
         saved["balanceRefreshedAt"] = datetime.now(timezone.utc).isoformat()
+        saved_evidence = json.loads(row["verification_json"] or "{}").get("evidence") or {}
+        attested = bool(saved_evidence.get("operatorAttestedLive"))
+        if attested and not evidence.get("liveEligible") and evidence.get("scannerEligible") and evidence.get("executionEligible"):
+            evidence["operatorAttestedLive"] = True
+            evidence["livePermissionMode"] = "operator_attested"
+            evidence["liveEligible"] = True
         next_state = "LIVE_READY" if row["state"] == "LIVE_READY" and evidence.get("liveEligible") else evidence.get("connectionState", row["state"])
         if evidence.get("liveEligible"):
             db.execute("UPDATE exchange_credentials SET state=?,last_verified=?,verification_json=? WHERE user_id=? AND exchange_id=?", (next_state, evidence["verifiedAt"], json.dumps(saved, separators=(",", ":")), uid, exchange_id))
@@ -773,8 +788,16 @@ async def promote_live_ready(exchange_id: str, payload: LiveReadyPromotion, requ
             except Exception: pass
     if not (evidence.get("authentication") and evidence.get("account") and evidence.get("balances")):
         raise HTTPException(409, evidence.get("accountError") or "Stored API key could not authenticate and return balances")
-    if not evidence.get("liveEligible") or (evidence.get("permissions") or {}).get("liveEligible") is not True:
-        raise HTTPException(409, "Fresh adapter, permission, stream, execution, and live-safety evidence is required")
+    permission_verified = (evidence.get("permissions") or {}).get("liveEligible") is True
+    operator_attested = payload.permission_attestation == "I CONFIRM TRADE-ONLY API KEY"
+    if not permission_verified:
+        if not operator_attested or not evidence.get("scannerEligible") or not evidence.get("executionEligible"):
+            raise HTTPException(409, "Fresh adapter, stream, execution, and explicit trade-only API-key attestation are required for this venue")
+        evidence["operatorAttestedLive"] = True
+        evidence["livePermissionMode"] = "operator_attested"
+        evidence["liveEligible"] = True
+    else:
+        evidence["livePermissionMode"] = "verified"
     saved = json.loads(row["verification_json"] or "{}")
     saved["evidence"] = evidence
     saved["balances"] = balances or {}
