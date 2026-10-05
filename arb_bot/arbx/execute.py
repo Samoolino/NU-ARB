@@ -143,6 +143,24 @@ class CrossExecutor:
                 self.execution_store.transition_execution(execution_id, "HALTED", error="order submission gather failed")
             raise
 
+        # The create/fetch response is only an initial observation. Re-fetch both order IDs
+        # after submission so lifecycle decisions use exchange-authoritative state.
+        if self.execution_store is not None:
+            authoritative = []
+            for index, result in ((0, rb), (1, rs)):
+                try:
+                    order_id = result.get("id") if isinstance(result, dict) else None
+                    if not order_id:
+                        raise LegFailure(f"missing exchange order id on leg {index}")
+                    ex = eb if index == 0 else es
+                    fresh = await ex.fetch_order(order_id, o.symbol)
+                    self.execution_store.reconcile_leg(execution_id, index, fresh)
+                    authoritative.append((index, fresh))
+                except Exception as exc:
+                    self.execution_store.transition_execution(execution_id, "HALTED", error=f"authoritative reconciliation failed: {exc!r}")
+                    raise LegFailure(f"authoritative reconciliation failed on leg {index}: {exc!r} - CHECK ACCOUNT") from exc
+            rb, rs = authoritative[0][1], authoritative[1][1]
+
         results = ((0, rb), (1, rs))
         for index, result in results:
             if isinstance(result, Exception):
