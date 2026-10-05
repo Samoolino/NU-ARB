@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import hashlib
 import hmac
 import json
@@ -34,6 +35,7 @@ APP_DB = Path(os.getenv("ARBX_APP_DB", "arbx_app.sqlite3"))
 SESSION_COOKIE = "arbx_session"
 SESSION_TTL = 60 * 60 * 24 * 7
 VERIFICATION_TTL_SECONDS = 5 * 60
+ACCOUNT_REFRESH_SECONDS = max(30, int(os.getenv("ARBX_ACCOUNT_REFRESH_SECONDS", "60")))
 VENUES = {
     "binance": "Binance", "bybit": "Bybit", "okx": "OKX", "kucoin": "KuCoin", "gateio": "Gate.io",
     "mexc": "MEXC", "htx": "HTX", "lbank": "LBank", "bitget": "Bitget", "kraken": "Kraken",
@@ -60,7 +62,59 @@ AUTH_SCHEMAS["binance"] = {"modes": [
     {"id": "ed25519", "label": "Ed25519 key pair", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "privateKey", "label": "Ed25519 private key"}]},
 ]}
 PYTHON_ADAPTERS = CCXT_ADAPTERS
-app = FastAPI(title="ARBX Control API", version="1.0.0")
+async def _credential_refresh_loop():
+    """Refresh live-capable saved accounts without ever submitting orders."""
+    while True:
+        try:
+            db = _connect()
+            try:
+                rows = db.execute("SELECT user_id,exchange_id,auth_mode,encrypted_credentials,verification_json,state FROM exchange_credentials WHERE state='LIVE_READY' OR verification_json LIKE '%liveEligible%true%'").fetchall()
+            finally:
+                db.close()
+            for row in rows:
+                exchange = None
+                try:
+                    credentials = json.loads(_decrypt(row["encrypted_credentials"]).decode())
+                    exchange = _make_exchange(row["exchange_id"], row["auth_mode"], credentials)
+                    evidence, balances, book = await _probe_exchange(row["exchange_id"], exchange, "BTC/USDT")
+                    if not (evidence.get("authentication") and evidence.get("account") and evidence.get("balances") and evidence.get("liveEligible")):
+                        continue
+                    saved = json.loads(row["verification_json"] or "{}")
+                    saved["evidence"] = evidence
+                    saved["balances"] = balances or {}
+                    if book: saved["orderBook"] = book
+                    saved["balanceRefreshedAt"] = datetime.now(timezone.utc).isoformat()
+                    db = _connect()
+                    try:
+                        db.execute("UPDATE exchange_credentials SET last_verified=?,verification_json=?,state=? WHERE user_id=? AND exchange_id=?", (evidence["verifiedAt"], json.dumps(saved, separators=(",", ":")), "LIVE_READY" if row["state"] == "LIVE_READY" else "FULLY_VERIFIED", row["user_id"], row["exchange_id"]))
+                        db.commit()
+                    finally:
+                        db.close()
+                except Exception:
+                    continue
+                finally:
+                    if exchange is not None:
+                        try: await exchange.close()
+                        except Exception: pass
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        await asyncio.sleep(ACCOUNT_REFRESH_SECONDS)
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    task = asyncio.create_task(_credential_refresh_loop(), name="arbx-credential-refresh")
+    try:
+        yield
+    finally:
+        task.cancel()
+        try: await task
+        except asyncio.CancelledError: pass
+
+
+app = FastAPI(title="ARBX Control API", version="1.0.0", lifespan=_lifespan)
 engine_owner_id: str | None = None
 engine_hub = None
 engine_task: asyncio.Task | None = None
@@ -546,6 +600,8 @@ async def exchanges(request: Request):
                            "verificationFresh": fresh,
                            "evidence": saved_evidence, "balances": saved.get("balances"),
                            "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
+                           "balanceRefreshedAt": saved.get("balanceRefreshedAt"),
+                           "credentialConnection": {"configured": bool(row), "adapterConnected": bool(saved_evidence.get("authentication") and saved_evidence.get("account")), "balanceConnected": bool(saved_evidence.get("balances")), "lastBalanceRefresh": saved.get("balanceRefreshedAt") or (row["last_verified"] if row else None), "balanceAssetCount": len(saved.get("balances") or {}), "refreshMode": "persistent" if saved_evidence.get("liveEligible") else "on-demand"},
                            "scannerEligible": scanner_eligible,
                            "executionEligible": execution_eligible,
                            "liveEligible": live_eligible,
@@ -642,6 +698,51 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
     finally:
         db.close()
 
+
+@app.post("/api/v1/exchanges/{exchange_id}/refresh", dependencies=[Depends(_proxy_auth)])
+async def refresh_exchange_account(exchange_id: str, request: Request):
+    """Reconnect a saved API key and persist a fresh authenticated balance snapshot."""
+    if exchange_id not in VENUES:
+        raise HTTPException(404, "Exchange is not in the supported venue registry")
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+        row = db.execute("SELECT auth_mode,encrypted_credentials,state,verification_json FROM exchange_credentials WHERE user_id=? AND exchange_id=?", (uid, exchange_id)).fetchone()
+    finally:
+        db.close()
+    if not row:
+        raise HTTPException(409, "Connect and verify the exchange API key before refreshing")
+    exchange = None
+    try:
+        credentials = json.loads(_decrypt(row["encrypted_credentials"]).decode())
+        exchange = _make_exchange(exchange_id, row["auth_mode"], credentials)
+        evidence, balances, book = await _probe_exchange(exchange_id, exchange, "BTC/USDT")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Exchange adapter connection failed: {type(exc).__name__}") from exc
+    finally:
+        if exchange is not None:
+            try: await exchange.close()
+            except Exception: pass
+    if not (evidence.get("authentication") and evidence.get("account") and evidence.get("balances")):
+        raise HTTPException(502, evidence.get("accountError") or "API key authentication/balance probe failed")
+    db = _connect()
+    try:
+        saved = json.loads(row["verification_json"] or "{}")
+        saved["evidence"] = evidence
+        saved["balances"] = balances or {}
+        if book: saved["orderBook"] = book
+        saved["balanceRefreshedAt"] = datetime.now(timezone.utc).isoformat()
+        next_state = "LIVE_READY" if row["state"] == "LIVE_READY" and evidence.get("liveEligible") else evidence.get("connectionState", row["state"])
+        if evidence.get("liveEligible"):
+            db.execute("UPDATE exchange_credentials SET state=?,last_verified=?,verification_json=? WHERE user_id=? AND exchange_id=?", (next_state, evidence["verifiedAt"], json.dumps(saved, separators=(",", ":")), uid, exchange_id))
+        else:
+            db.execute("UPDATE exchange_credentials SET state=?,verification_json=? WHERE user_id=? AND exchange_id=?", (next_state, json.dumps(saved, separators=(",", ":")), uid, exchange_id))
+        db.commit()
+        return {"id": exchange_id, "name": VENUES[exchange_id], "state": next_state, "liveEligible": bool(evidence.get("liveEligible")), "liveReady": bool(next_state == "LIVE_READY" and evidence.get("liveEligible")), "adapterConnected": True, "balanceConnected": True, "balanceRefreshedAt": saved["balanceRefreshedAt"], "balances": saved["balances"], "evidence": evidence}
+    finally:
+        db.close()
 
 @app.post("/api/v1/exchanges/{exchange_id}/promote-live-ready", dependencies=[Depends(_proxy_auth)])
 async def promote_live_ready(exchange_id: str, payload: LiveReadyPromotion, request: Request):
