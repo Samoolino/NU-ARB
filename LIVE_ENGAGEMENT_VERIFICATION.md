@@ -30,7 +30,8 @@ IMPORTANT: LIVE_READY is account-specific, not venue-global.
 10. Private stream ready: authenticated balance WebSocket is producing current snapshots.
 11. Permission: prefer machine-readable exchange permission proof; otherwise require exact operator attestation: I CONFIRM TRADE-ONLY API KEY.
 12. Fresh evidence: verification has a finite TTL; refresh failure never extends an old TTL.
-13. LIVE_READY promotion: reconnect and repeat the required probes; promotion never submits an order.
+13. Connectivity heartbeat: activation requires two consecutive read-only authenticated connectivity probes per participating account; each probe revalidates account/balance access, scanner/execution/live eligibility, and private balance-stream connectivity when supported. The persisted heartbeat is TTL-bound and does not authorize orders.
+14. LIVE_READY promotion: reconnect and repeat the required probes; promotion never submits an order.
 
 ## Permission modes
 ### verified
@@ -51,12 +52,12 @@ This does NOT mean exchange permission was verified. It means technical readines
 - It does not certify profitability.
 
 ## Global live activation
-Live start requires every selected venue to be LIVE_READY, fresh, scanner/execution/live eligible, and free of unresolved prior live execution state. Runtime preflight then requires authenticated private streams, fresh public books, acceptable latency, and all risk gates. Only after that do the global operator flag and exact I ACCEPT REAL ORDERS confirmation matter.
+Live start requires every selected venue to be LIVE_READY, fresh, scanner/execution/live eligible, connected by the persisted read-only heartbeat, and free of unresolved prior live execution state. Runtime preflight then requires authenticated private streams, fresh public books, acceptable latency, and all risk gates. Only after that do the global operator flag and exact I ACCEPT REAL ORDERS confirmation matter.
 
-Live cross-exchange mode requires at least two independently LIVE_READY accounts. Transfers/rebalancing remain outside the atomic trade loop.
+Live cross-exchange mode requires at least two independently LIVE_READY accounts with fresh connectivity evidence. Transfers/rebalancing remain outside the atomic trade loop.
 
 ## Continuous invalidation
-Evidence is a TTL-bound assertion, not a permanent permission grant. Authentication failure, private-stream loss, stale books, execution-capability regression, balance failure, permission invalidation, excessive latency, unresolved execution state, session-loss limits, or target attainment must regress/stop the live path.
+Evidence is a TTL-bound assertion, not a permanent permission grant. Authentication failure, private-stream loss, stale books, execution-capability regression, balance failure, permission invalidation, excessive latency, unresolved execution state, session-loss limits, target attainment, or connectivity heartbeat expiry must regress/stop the live path.
 
 ## Engagement vs opportunity
 Engagement answers: can this account/venue safely participate in live runtime now?
@@ -67,11 +68,11 @@ A venue can be LIVE_READY while every opportunity is rejected. A profitable-look
 Exchange-confirmed order/fill/balance > authenticated private stream > authenticated REST > public order book > discovery ticker > theoretical model.
 
 ## Runtime contract
-The control plane persists state, last_verified, evidence, operatorAttestedLive, livePermissionMode, balances, balanceRefreshedAt, and a masked key identity. The runtime receives livePermissionMode through ExchangeCfg and enforces it during live preflight.
+The control plane persists state, last_verified, evidence, operatorAttestedLive, livePermissionMode, balances, balanceRefreshedAt, masked key identity, and a per-account connectivity heartbeat (consecutive successes, last success/failure, and probe evidence). The runtime receives livePermissionMode through ExchangeCfg and enforces it during live preflight.
 
 ## Safety boundary
-No verification mode authorizes a live order by itself. The intended progression remains P0-1 durable reservations -> P0-2 crash-recoverable execution -> P0-3 exchange-authoritative fill reconciliation -> P0-4 settlement/balance/PnL reconciliation -> target-aware ranking.
+No verification mode authorizes a live order by itself. The intended progression remains P0-1 durable reservations -> P0-2 crash-recoverable execution -> P0-3 exchange-authoritative fill reconciliation -> P0-4 settlement/balance/PnL reconciliation -> target-aware ranking -> persistent connectivity proof.
 
 CI proves the control logic; it does not certify a real exchange account.
 ## Verification status
-This contract is software-level verification. Actual exchange certification occurs only when a real account is connected and fresh probes pass in the running control plane.
+This contract is software-level verification. Actual exchange certification occurs only when a real account is connected and fresh probes pass in the running control plane. Connectivity evidence is a bounded proof of current authenticated reachability, not a guarantee of uninterrupted network service.
