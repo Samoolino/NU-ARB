@@ -51,7 +51,11 @@ class Hub:
         self.cfg, self.out = cfg, out
         self.session_id = os.getenv("BOT_SESSION_ID") or uuid.uuid4().hex
         self.journal_store = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
-        self.risk = RiskManager(cfg)
+        self.risk = RiskManager(cfg, on_halt=lambda reason: self.journal_store.record_session_halt(self.session_id, reason))
+        durable_halt = self.journal_store.session_halt(self.session_id)
+        if durable_halt:
+            self.risk.halted = True
+            self.risk.reason = durable_halt["reason"]
         self.risk.pnl = self.journal_store.realized(self.session_id)
         self.unresolved_live_executions = self.journal_store.open_executions(mode="live")
         if self.cfg.mode == "live" and self.unresolved_live_executions:
