@@ -40,6 +40,9 @@ class LocalHostTests(unittest.TestCase):
         self.assertIn(b'id="liveGuard"', response.content)
         self.assertIn(b'/api/v1/engine/start', response.content)
         self.assertIn(b'/api/v1/engine/events', response.content)
+        self.assertIn(b'VERIFIED LIVE-CAPABLE', response.content)
+        self.assertIn(b'Potential', response.content)
+        self.assertNotIn(b'LIVE ELIGIBLE', response.content)
 
     def test_control_proxy_forwards_only_api_routes_and_adds_local_token(self):
         with patch.dict(os.environ, {"ENGINE_PROXY_TOKEN": "local-test-token"}):
