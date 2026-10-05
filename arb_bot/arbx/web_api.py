@@ -200,6 +200,11 @@ def _connect():
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, exchange_id TEXT NOT NULL,
         encrypted_credentials BLOB NOT NULL, auth_mode TEXT NOT NULL, state TEXT NOT NULL,
         last_verified TEXT, verification_json TEXT NOT NULL DEFAULT '{}',
+        PRIMARY KEY(user_id, exchange_id));
+      CREATE TABLE IF NOT EXISTS live_connectivity (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, exchange_id TEXT NOT NULL,
+        consecutive_successes INTEGER NOT NULL DEFAULT 0,
+        last_success TEXT, last_failure TEXT, evidence_json TEXT NOT NULL DEFAULT '{}',
         PRIMARY KEY(user_id, exchange_id));""")
     db.commit()
     return db
@@ -518,7 +523,14 @@ def live_activation_readiness(request: Request):
         scanner_ready = bool(evidence.get("scannerEligible"))
         execution_ready = bool(evidence.get("executionEligible"))
         live_ready = bool(evidence.get("liveEligible"))
-        activation_ready = row["state"] == "LIVE_READY" and fresh and scanner_ready and execution_ready and live_ready
+        connectivity = db.execute(
+            "SELECT consecutive_successes,last_success FROM live_connectivity WHERE user_id=? AND exchange_id=?",
+            (uid, row["exchange_id"]),
+        ).fetchone()
+        connectivity_fresh = bool(connectivity and connectivity["last_success"] and _verification_is_fresh(connectivity["last_success"]))
+        connectivity_ready = bool(connectivity_fresh and int(connectivity["consecutive_successes"]) >= 2)
+        activation_ready = (row["state"] == "LIVE_READY" and fresh and scanner_ready and execution_ready
+                            and live_ready and connectivity_ready)
         by_exchange[row["exchange_id"]] = {
             "state": row["state"],
             "fresh": fresh,
@@ -526,6 +538,11 @@ def live_activation_readiness(request: Request):
             "executionEligible": execution_ready,
             "liveEligible": live_ready,
             "permissionMode": evidence.get("livePermissionMode", "unverified"),
+            "connectivity": {
+                "ready": connectivity_ready,
+                "consecutiveSuccesses": int(connectivity["consecutive_successes"]) if connectivity else 0,
+                "lastSuccess": connectivity["last_success"] if connectivity else None,
+            },
             "activationReady": activation_ready,
         }
     unresolved = _unresolved_live_executions(uid)
@@ -615,6 +632,72 @@ def me(request: Request):
     finally:
         db.close()
 
+
+@app.post("/api/v1/live/connectivity-check", dependencies=[Depends(_proxy_auth)])
+async def live_connectivity_check(request: Request):
+    """Perform two consecutive authenticated, read-only connectivity probes and persist the result."""
+    db = _connect()
+    try:
+        uid = _current_user(request, db)
+        rows = db.execute(
+            "SELECT exchange_id,auth_mode,encrypted_credentials,state FROM exchange_credentials WHERE user_id=? AND state='LIVE_READY'",
+            (uid,),
+        ).fetchall()
+    finally:
+        db.close()
+    results = []
+    for row in rows:
+        exchange = None
+        successes = 0
+        last_error = None
+        try:
+            credentials = json.loads(_decrypt(row["encrypted_credentials"]).decode())
+            exchange = _make_exchange(row["exchange_id"], row["auth_mode"], credentials)
+            for _ in range(2):
+                probe, _, _ = await _probe_exchange(row["exchange_id"], exchange, "BTC/USDT")
+                if not (probe.get("authentication") and probe.get("account") and probe.get("balances")
+                        and probe.get("scannerEligible") and probe.get("executionEligible")
+                        and probe.get("liveEligible")):
+                    raise RuntimeError("authenticated live capability probe was incomplete")
+                if getattr(exchange, "has", {}).get("watchBalance") is True:
+                    private_balance = await asyncio.wait_for(exchange.watch_balance(), timeout=15)
+                    if not isinstance(private_balance, dict) or not all(
+                        key in private_balance for key in ("free", "used", "total")
+                    ):
+                        raise RuntimeError("private balance stream returned no complete snapshot")
+                successes += 1
+        except Exception as exc:
+            last_error = type(exc).__name__
+        finally:
+            if exchange is not None:
+                try:
+                    await exchange.close()
+                except Exception:
+                    pass
+        now = datetime.now(timezone.utc).isoformat()
+        db = _connect()
+        try:
+            if successes == 2:
+                db.execute(
+                    """INSERT INTO live_connectivity(user_id,exchange_id,consecutive_successes,last_success,last_failure,evidence_json)
+                       VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
+                       consecutive_successes=excluded.consecutive_successes,last_success=excluded.last_success,
+                       last_failure=excluded.last_failure""",
+                    (uid, row["exchange_id"], 2, now, None, json.dumps({"verifiedAt": now}, separators=(",", ":"))),
+                )
+            else:
+                db.execute(
+                    """INSERT INTO live_connectivity(user_id,exchange_id,consecutive_successes,last_success,last_failure,evidence_json)
+                       VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
+                       consecutive_successes=0,last_failure=excluded.last_failure""",
+                    (uid, row["exchange_id"], 0, None, now, json.dumps({"error": last_error}, separators=(",", ":"))),
+                )
+            db.commit()
+        finally:
+            db.close()
+        results.append({"exchangeId": row["exchange_id"], "success": successes == 2, "lastFailure": last_error})
+    return {"verified": bool(results) and all(item["success"] for item in results),
+            "minimumConsecutiveProbes": 2, "readOnly": True, "results": results}
 
 @app.get("/api/v1/exchanges", dependencies=[Depends(_proxy_auth)])
 async def exchanges(request: Request):
