@@ -73,3 +73,5 @@ The control plane persists state, last_verified, evidence, operatorAttestedLive,
 No verification mode authorizes a live order by itself. The intended progression remains P0-1 durable reservations -> P0-2 crash-recoverable execution -> P0-3 exchange-authoritative fill reconciliation -> P0-4 settlement/balance/PnL reconciliation -> target-aware ranking.
 
 CI proves the control logic; it does not certify a real exchange account.
+## Verification status
+This contract is software-level verification. Actual exchange certification occurs only when a real account is connected and fresh probes pass in the running control plane.
