@@ -1,6 +1,10 @@
+import pathlib
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "arb_bot"))
 
 from arbx.capital import CapitalDelta, CapitalEventType, classify_unreconciled_delta, target_profit_progress
 from arbx.journal import TradeJournal
