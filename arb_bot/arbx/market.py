@@ -15,6 +15,7 @@ class Book:
     recv: float   # time.monotonic() at receipt -> immune to exchange/local clock skew
     timestamp_exchange: int | None = None
     sequence: int | str | None = None
+    volatility_bps_s: float = 0.0
 
 
 def orderbook_limit(exchange_id: str, requested: int) -> int:
@@ -29,6 +30,7 @@ class MarketData:
     def __init__(self, ex, symbols, depth: int, log):
         self.ex, self.symbols, self.depth, self.log = ex, list(symbols), depth, log
         self.books: dict[str, Book] = {}
+        self._mid: dict[str, tuple[float, float]] = {}
         self.dirty: set[str] = set()
         self.event = asyncio.Event()
 
@@ -41,8 +43,20 @@ class MarketData:
             try:
                 limit = orderbook_limit(self.ex.id, self.depth)
                 ob = await self.ex.watch_order_book(sym, limit)
-                self.books[sym] = Book(ob["bids"][: self.depth], ob["asks"][: self.depth], time.monotonic(),
-                                        ob.get("timestamp"), ob.get("nonce"))
+                recv = time.monotonic()
+                bids, asks = ob["bids"][: self.depth], ob["asks"][: self.depth]
+                volatility_bps_s = 0.0
+                if bids and asks:
+                    mid = (float(bids[0][0]) + float(asks[0][0])) / 2.0
+                    previous = self._mid.get(sym)
+                    if previous is not None and previous[0] > 0 and recv > previous[1]:
+                        move_bps = abs(mid / previous[0] - 1.0) * 1e4
+                        volatility_bps_s = min(100000.0, move_bps / (recv - previous[1]))
+                    self._mid[sym] = (mid, recv)
+                previous_book = self.books.get(sym)
+                if previous_book is not None:
+                    volatility_bps_s = 0.7 * previous_book.volatility_bps_s + 0.3 * volatility_bps_s
+                self.books[sym] = Book(bids, asks, recv, ob.get("timestamp"), ob.get("nonce"), volatility_bps_s)
                 self.dirty.add(sym)
                 self.event.set()
                 backoff = 1.0
