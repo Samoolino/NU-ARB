@@ -14,7 +14,7 @@ from arbx.web_api import EngineStart
 
 
 class LivePilotLimitTests(unittest.TestCase):
-    def test_live_config_enforces_two_venues_and_three_dollar_loss_cap(self):
+    def test_live_config_enforces_three_dollar_starter_and_profit_dca(self):
         cfg = Config(
             mode="live",
             exchanges=[ExchangeCfg(id="binance", api_key="a", secret="b"),
@@ -23,12 +23,14 @@ class LivePilotLimitTests(unittest.TestCase):
             cross_live=True,
             target_profit_usd=200,
             max_loss_usd=3,
+            trade_size_usd=25,
         )
         cfg.validate()
-
-        cfg.max_loss_usd = 3.01
-        with self.assertRaisesRegex(ValueError, "no more than the \\$3"):
-            cfg.validate()
+        self.assertEqual(cfg.starter_capital_usd, 3.0)
+        self.assertEqual(cfg.trade_size_usd, 3.0)
+        self.assertEqual(cfg.max_loss_usd, 0.0)
+        self.assertIsNone(cfg.target_profit_usd)
+        self.assertEqual(cfg.strategy_mode, "profit_dca")
 
     def test_live_config_requires_explicit_cross_venue_opt_in(self):
         cfg = Config(
@@ -42,22 +44,24 @@ class LivePilotLimitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "BOT_CROSS_LIVE=1"):
             cfg.validate()
 
-    def test_live_api_rejects_loss_cap_above_three_dollars(self):
-        with self.assertRaises(ValueError):
-            EngineStart(mode="live", exchange_ids=["binance", "bybit"], trade_size_usd=5,
-                        max_loss_usd=3.01, target_profit_usd=200, cross_live=True)
-
     def test_live_api_requires_explicit_cross_exchange_execution(self):
         with self.assertRaises(ValueError):
             EngineStart(mode="live", exchange_ids=["binance", "bybit"], trade_size_usd=5,
                         max_loss_usd=3, target_profit_usd=200, cross_live=False)
 
-    def test_live_terminal_default_target_is_two_hundred_usd(self):
+    def test_live_terminal_defaults_are_three_dollar_profit_dca(self):
         with patch.dict(os.environ, {"BOT_MODE": "live", "BOT_TARGET_PROFIT_USD": "",
-                                    "BOT_MAX_LOSS_USD": ""}, clear=False):
+                                    "BOT_MAX_LOSS_USD": "", "BOT_STRATEGY_MODE": "profit_dca"}, clear=False):
             cfg = Config.from_env()
-        self.assertEqual(cfg.target_profit_usd, 200.0)
-        self.assertEqual(cfg.max_loss_usd, 3.0)
+        cfg.exchanges = [ExchangeCfg(id="binance", api_key="a", secret="b"),
+                         ExchangeCfg(id="bybit", api_key="c", secret="d")]
+        cfg.cross_enabled = True
+        cfg.cross_live = True
+        cfg.validate()
+        self.assertEqual(cfg.start_capital_usd, 3.0)
+        self.assertEqual(cfg.trade_size_usd, 3.0)
+        self.assertEqual(cfg.max_loss_usd, 0.0)
+        self.assertIsNone(cfg.target_profit_usd)
 
     def test_live_hub_never_starts_a_subset_when_a_selected_venue_fails(self):
         class FakeWorker:
@@ -74,10 +78,9 @@ class LivePilotLimitTests(unittest.TestCase):
                 exchanges=[ExchangeCfg(id="binance"), ExchangeCfg(id="bybit")],
                 cross_enabled=True,
                 cross_live=True,
-                target_profit_usd=200,
-                max_loss_usd=3,
                 journal_path=pathlib.Path(directory) / "trades.csv",
             )
+            cfg.validate = lambda: None
             first = FakeWorker("binance")
             second = FakeWorker("bybit", RuntimeError("permission unavailable"))
             hub = Hub(cfg, queue.Queue())
