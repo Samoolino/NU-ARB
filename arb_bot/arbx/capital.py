@@ -43,3 +43,13 @@ def target_profit_progress(realized_trade_pnl: float, target_profit: float | Non
     if target_profit is None or target_profit <= 0:
         return 0.0
     return min(100.0, max(0.0, realized_trade_pnl / target_profit * 100.0))
+
+
+def live_engagement_after_verified_pnl(net_pnl: float) -> str:
+    """Return the post-trade live engagement action.
+
+    A verified loss is never treated as acceptable progress: it ends the live
+    engagement session. Zero/profit remains subject to the normal target and
+    risk gates.
+    """
+    return "HALT_LOSS" if float(net_pnl) < 0.0 else "CONTINUE_GATED"
