@@ -264,3 +264,17 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(promoted.json()["balances"]["USDT"]["total"], 10.0)
         self.assertGreaterEqual(make_exchange.call_count, 2)
         self.assertGreaterEqual(probe.call_count, 2)
+    def test_live_activation_readiness_is_fail_closed(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "activation@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        response = self.client.get("/api/v1/live/activation-readiness", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["activationReady"])
+        self.assertEqual(payload["readyCount"], 0)
+        self.assertEqual(payload["registeredCount"], 18)
+        self.assertNotEqual(payload["action"], "ENABLE_OPERATOR_LIVE_FLAG")
+
