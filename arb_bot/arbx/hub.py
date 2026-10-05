@@ -82,6 +82,13 @@ class Hub:
     def equity(self) -> float:
         return self.cfg.start_capital_usd + self.risk.pnl
 
+    @staticmethod
+    def _latency_p95(lat) -> float:
+        stats = getattr(lat, "stats", None)
+        if callable(stats):
+            return float(stats().get("p95", 0.0) or 0.0)
+        return float(getattr(lat, "p95", 0.0) or 0.0)
+
     def trade_size(self) -> float:
         return self.cfg.trade_size_usd if self.cfg.mode == "live" else min(self.cfg.trade_size_usd, self.equity)
 
@@ -226,7 +233,7 @@ class Hub:
                                          candidate_size, self.cfg, now)
             if opportunity is None:
                 continue
-            predicted_ms = max(bw.lat.stats()["p95"], sw.lat.stats()["p95"]) * 2.0 + 20.0
+            predicted_ms = max(self._latency_p95(bw.lat), self._latency_p95(sw.lat)) * 2.0 + 20.0
             speed_margin_bps = (
                 opportunity.volatility_bps_s * predicted_ms / 1000.0
                 + self.cfg.speed_safety_buffer_bps
