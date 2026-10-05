@@ -350,6 +350,25 @@ class TradeJournal:
         )
         self.db.commit()
 
+    def reconcile_leg(self, execution_id: str, leg_index: int, order: dict, *, now: float | None = None) -> None:
+        """Persist the latest exchange-authoritative order snapshot without changing lifecycle state."""
+        import time
+        now = time.time() if now is None else now
+        row = self.db.execute(
+            "SELECT 1 FROM execution_legs WHERE execution_id=? AND leg_index=?",
+            (execution_id, leg_index),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown execution leg {execution_id}/{leg_index}")
+        fees = order.get("fees") or ([order["fee"]] if order.get("fee") else [])
+        fee = sum(float(f.get("cost") or 0.0) for f in fees if f)
+        self.db.execute(
+            "UPDATE execution_legs SET order_id=?, filled=?, cost=?, fee=?, updated_at=? WHERE execution_id=? AND leg_index=?",
+            (order.get("id"), float(order.get("filled") or 0.0), float(order.get("cost") or 0.0), fee,
+             now, execution_id, leg_index),
+        )
+        self.db.commit()
+
     def open_executions(self, *, mode: str | None = None) -> list[dict]:
         query = "SELECT * FROM execution_runs WHERE state NOT IN ('VERIFIED','RELEASED')"
         args: tuple = ()
