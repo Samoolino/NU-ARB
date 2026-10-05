@@ -209,6 +209,9 @@ class TradeJournal:
             PRIMARY KEY(execution_id, exchange_id)
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS execution_settlements_exec_idx ON execution_settlements(execution_id, observed_at)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS capital_baselines (session_id TEXT NOT NULL, exchange_id TEXT NOT NULL, balance_json TEXT NOT NULL, observed_at REAL NOT NULL, PRIMARY KEY(session_id, exchange_id))""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS capital_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, exchange_id TEXT NOT NULL, asset TEXT, event_type TEXT NOT NULL, amount REAL, reference TEXT, status TEXT NOT NULL, observed_at REAL NOT NULL, reconciled_at REAL, note TEXT)""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS capital_events_session_idx ON capital_events(session_id, observed_at)")
         self.db.commit()
         self.reservations = ReservationManager(self.db)
 
@@ -388,6 +391,31 @@ class TradeJournal:
             (execution_id, exchange_id, json.dumps(balances, separators=(",", ":"), allow_nan=False), now),
         )
         self.db.commit()
+
+    def record_capital_baseline(self, session_id: str, exchange_id: str, balances: dict, *, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        self.db.execute("INSERT OR REPLACE INTO capital_baselines(session_id,exchange_id,balance_json,observed_at) VALUES(?,?,?,?)", (session_id, exchange_id, json.dumps(balances, separators=(",", ":"), allow_nan=False), now))
+        self.db.commit()
+
+    def record_capital_event(self, *, event_id: str, session_id: str, exchange_id: str, event_type: str, amount: float | None = None, asset: str | None = None, reference: str | None = None, status: str = "PENDING", note: str | None = None, now: float | None = None) -> None:
+        import time
+        now = time.time() if now is None else now
+        allowed = {"EXTERNAL_INJECTION", "INTERNAL_TRANSFER", "EXTERNAL_WITHDRAWAL", "FUNDING_OR_YIELD", "ADJUSTMENT_OR_DUST", "UNKNOWN"}
+        if event_type not in allowed:
+            raise ValueError(f"invalid capital event type: {event_type}")
+        self.db.execute("INSERT OR REPLACE INTO capital_events(event_id,session_id,exchange_id,asset,event_type,amount,reference,status,observed_at,reconciled_at,note) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (event_id, session_id, exchange_id, asset, event_type, amount, reference, status, now, None, note))
+        self.db.commit()
+
+    def capital_events(self, session_id: str, *, status: str | None = None, limit: int = 100) -> list[dict]:
+        query = "SELECT * FROM capital_events WHERE session_id=?"
+        args: list = [session_id]
+        if status is not None:
+            query += " AND status=?"
+            args.append(status)
+        query += " ORDER BY observed_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.db.execute(query, args).fetchall()]
 
     def settlement_complete(self, execution_id: str, exchange_ids: list[str]) -> bool:
         if not exchange_ids:
