@@ -489,6 +489,46 @@ def healthz():
     return {"status": "ready"}
 
 
+@app.get("/api/v1/live/activation-readiness", dependencies=[Depends(_proxy_auth)])
+def live_activation_readiness(request: Request):
+    """Return a fail-closed activation plan; never enables trading."""
+    db = _connect()
+    try:
+        rows = db.execute(
+            "SELECT exchange_id,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
+            (_current_user(request, db)["id"],),
+        ).fetchall()
+    finally:
+        db.close()
+    by_exchange = {}
+    for row in rows:
+        evidence = json.loads(row["verification_json"] or "{}").get("evidence") or {}
+        fresh = bool(row["last_verified"]) and (time.time() - float(row["last_verified"]) <= VERIFICATION_TTL_SECONDS)
+        by_exchange[row["exchange_id"]] = {
+            "state": row["state"],
+            "fresh": fresh,
+            "scannerEligible": bool(evidence.get("scannerEligible")),
+            "executionEligible": bool(evidence.get("executionEligible")),
+            "liveEligible": bool(evidence.get("liveEligible")),
+            "permissionMode": evidence.get("livePermissionMode", "unverified"),
+            "activationReady": row["state"] == "LIVE_READY" and fresh and bool(evidence.get("liveEligible")),
+        }
+    venues = []
+    for exchange_id, name in VENUES.items():
+        item = by_exchange.get(exchange_id, {"state":"NOT_CONFIGURED","fresh":False,"scannerEligible":False,
+            "executionEligible":False,"liveEligible":False,"permissionMode":"unverified","activationReady":False})
+        venues.append({"id": exchange_id, "name": name, **item})
+    ready = [v for v in venues if v["activationReady"]]
+    return {
+        "liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
+        "activationReady": bool(ready),
+        "readyExchangeIds": [v["id"] for v in ready],
+        "readyCount": len(ready),
+        "registeredCount": len(VENUES),
+        "action": "ENABLE_OPERATOR_LIVE_FLAG_AFTER_PREFLIGHT" if ready else "VERIFY_AND_PROMOTE_SELECTED_ACCOUNTS",
+        "note": "This endpoint is read-only and never enables live trading."
+    }
+
 @app.get("/api/v1/runtime", dependencies=[Depends(_proxy_auth)])
 def runtime_config():
     return {"liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
