@@ -1014,11 +1014,14 @@ async def engine_start(payload: EngineStart, request: Request):
                 credentials = credentials_by_id[exchange_id]
                 if exchange_id == "binance" and auth_modes[exchange_id] in ("rsa", "ed25519"):
                     credentials = {**credentials, "secret": credentials.get("privateKey", "")}
+                saved_evidence = json.loads(rows[exchange_id]["verification_json"] or "{}").get("evidence") or {}
+                live_permission_mode = saved_evidence.get("livePermissionMode", "verified")
                 exchange_cfgs.append(ExchangeCfg(id=adapter_id, venue_id=exchange_id,
                                                  api_key=credentials.get("apiKey", ""),
                                                  secret=credentials.get("secret", ""),
                                                  password=credentials.get("password", ""),
-                                                 require_private_stream=True, auth_mode=auth_modes[exchange_id]))
+                                                 require_private_stream=True, auth_mode=auth_modes[exchange_id],
+                                                 live_permission_mode=live_permission_mode))
             cfg = Config(mode=payload.mode, exchanges=exchange_cfgs, trade_size_usd=payload.trade_size_usd,
                          max_loss_usd=payload.max_loss_usd, target_profit_usd=payload.target_profit_usd,
                          cross_enabled=payload.mode == "paper" or payload.cross_live,
