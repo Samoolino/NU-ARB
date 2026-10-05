@@ -14,6 +14,7 @@ from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
 from arbx.gate import ProfitGate, RiskManager
 from arbx.journal import TradeJournal
+from arbx.capital import live_engagement_after_verified_pnl
 from arbx.ranking import rank_target_progress
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
@@ -470,6 +471,11 @@ class Hub:
                     else:
                         self.journal_store.transition_execution(execution_id, "RELEASED")
                     self.settle(x.buy_ex + "/" + x.sell_ex, name, x.cost, res, x.worst_bps, (time.perf_counter() - t0) * 1000)
+                    if live_engagement_after_verified_pnl(float(res.pnl or 0.0)) == "HALT_LOSS":
+                        self.risk.halt(
+                            f"live engagement halted after verified loss: net PnL {float(res.pnl or 0.0):+.4f} USD"
+                        )
+                        return
             await asyncio.sleep(self.cfg.cooldown_s)
 
     # ---- main -----------------------------------------------------------------
