@@ -14,9 +14,23 @@ NU-ARB separates the global market universe from the real-time observation set.
 
 This means all pairs/tokens is a discovery requirement, not a requirement to hold thousands of WebSocket subscriptions open simultaneously.
 
+## Canonical runtime state contract
+
+See **[ARCHITECTURE_RUNTIME_STATE.md](ARCHITECTURE_RUNTIME_STATE.md)** for the authoritative point-by-point process map. It defines:
+
+- topology and runtime boundaries;
+- control, market, opportunity, and engine states;
+- required entry evidence and produced state at every process point;
+- regression/fail-closed conditions;
+- live activation invariants;
+- current implementation vs required upgrades;
+- truth hierarchy between exchange, stream, REST, market-data, and strategy state.
+
+The architecture contract is intentionally more precise than a feature list: a process point is not considered complete merely because its code path exists; it must produce the state/evidence required by the next point.
+
 ## Exchange validity states
 
-The control plane distinguishes NOT_CONFIGURED, FAILED, STALE, authenticated/account-connected, scanner eligible, execution eligible, and live eligible. A venue is never considered live because it exists in the registry. Live eligibility requires fresh authenticated REST/balance evidence, public and private WebSocket evidence, execution capability evidence, and an explicit venue permission probe. Evidence expires after the configured verification TTL.
+The control plane distinguishes NOT_CONFIGURED, FAILED, STALE, authenticated/account-connected, scanner eligible, execution eligible, and live eligible. A venue is never considered live because it exists in the registry. Live eligibility requires fresh authenticated REST/balance evidence, public and private WebSocket evidence, execution capability evidence, and an explicit venue permission probe or the documented operator-attested trade-only path. Evidence expires after the configured verification TTL.
 
 ## Live engagement
 
