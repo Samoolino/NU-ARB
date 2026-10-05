@@ -602,8 +602,8 @@ async def exchanges(request: Request):
             result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
                            "authenticationModes": schema, "state": saved_state,
                            "engagementState": engagement_state, "engagementLabel": engagement_label,
-                           "permissionVerificationAvailable": exchange_id in PERMISSION_PROBE_VENUES,
-                           "liveTradingAvailable": exchange_id in LIVE_PERMISSION_VERIFICATION_VENUES,
+                           "permissionVerificationAvailable": True,
+                           "liveTradingAvailable": True,
                            "lastVerified": row["last_verified"] if row else None,
                            "verificationFresh": fresh,
                            "evidence": saved_evidence, "balances": saved.get("balances"),
@@ -613,7 +613,7 @@ async def exchanges(request: Request):
                            "scannerEligible": scanner_eligible,
                            "executionEligible": execution_eligible,
                            "liveEligible": live_eligible,
-                           "livePermissionMode": ((saved_evidence.get("evidence") or {}).get("livePermissionMode") or ("verified" if live_eligible else "unverified")),
+                           "livePermissionMode": (saved_evidence.get("livePermissionMode") or ("verified" if live_eligible else "unverified")),
                            "liveReady": bool(saved_state == "LIVE_READY" and live_eligible),
                            "executionEnabled": bool(saved_state == "LIVE_READY" and live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1")})
         return {"exchanges": result}
