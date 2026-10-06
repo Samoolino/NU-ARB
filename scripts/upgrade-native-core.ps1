@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("audit","architecture","test","paper","venue-verify","live-preflight","all")]
+  [ValidateSet("audit","architecture","test","paper","venue-verify","live-preflight","live","all")]
   [string]$Stage = "all",
   [string[]]$Venues = @("binance","bybit","okx"),
   [string]$Symbol = "BTC/USDT",
@@ -86,7 +86,7 @@ if ($Stage -in @("venue-verify","all")) {
   }
 }
 
-if ($Stage -in @("live-preflight","all")) {
+if ($Stage -in @("live-preflight","live","all")) {
   Step "LIVE PREFLIGHT — NO ORDERS"
   Set-CommonEnv
   $env:BOT_MODE = "live"
@@ -105,6 +105,32 @@ if ($Stage -in @("live-preflight","all")) {
   Write-Host ""
   Write-Host "Preflight complete. This stage performs certification only; it does not place orders or move funds." -ForegroundColor Green
   Write-Host "Native adapter mode is fail-closed until a concrete native transport is implemented and independently certified." -ForegroundColor Yellow
+}
+
+if ($Stage -eq "live") {
+  Step "LIVE ENGINE — EXPLICIT ARMING REQUIRED"
+  Write-Host "This stage can submit real orders. Run only after every requested venue is independently LIVE_ELIGIBLE." -ForegroundColor Red
+  $arm = Read-Host "Type ARM-NU-ARB-LIVE to continue"
+  if ($arm -ne "ARM-NU-ARB-LIVE") { throw "Live engine not armed." }
+
+  Set-CommonEnv
+  $env:BOT_MODE = "live"
+  $env:BOT_HYBRID_LIVE = "1"
+  $env:BOT_HYBRID_VALIDATION_ONLY = "0"
+  $env:BOT_CROSS = "1"
+  $env:BOT_CROSS_LIVE = "1"
+  $env:BOT_STRATEGY_MODE = "profit_dca"
+  $env:BOT_COMPOUND_PROFITS = "1"
+  $env:BOT_HALT_ON_REALIZED_LOSS = "1"
+
+  foreach ($venue in $Venues) {
+    $envName = "BOT_" + $venue.ToUpperInvariant() + "_ADAPTER"
+    Set-Item -Path ("Env:" + $envName) -Value $Adapter
+  }
+
+  Write-Host "LIVE ARMING: $Notional USD starter allocation. Profit compounds; realized loss halts new engagements." -ForegroundColor Red
+  Write-Host "IMPORTANT: this is real trading and is not a no-loss guarantee." -ForegroundColor Red
+  Run "python" @("-m","arbx.cli","run")
 }
 
 Write-Host ""
