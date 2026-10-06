@@ -65,6 +65,18 @@ class TradeJournal:
             evidence TEXT NOT NULL DEFAULT '{}'
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS opportunities_session_idx ON opportunities(session_id, id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS venue_certifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            session_id TEXT,
+            venue TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            notional_usd REAL NOT NULL,
+            live_eligible INTEGER NOT NULL,
+            reasons TEXT NOT NULL DEFAULT '[]',
+            evidence TEXT NOT NULL DEFAULT '{}'
+        )""")
+        self.db.execute("CREATE INDEX IF NOT EXISTS venue_certifications_venue_idx ON venue_certifications(venue, id)")
         self.db.commit()
 
     def realized(self, session_id: str) -> float:
@@ -122,6 +134,32 @@ class TradeJournal:
             record["evidence"] = json.loads(record["evidence"])
             results.append(record)
         return results
+
+    def record_certification(self, *, session_id: str | None, venue: str, symbol: str,
+                             notional_usd: float, live_eligible: bool,
+                             reasons: list[str] | tuple[str, ...], evidence: dict[str, Any]) -> int:
+        cursor = self.db.execute(
+            """INSERT INTO venue_certifications
+               (session_id, venue, symbol, notional_usd, live_eligible, reasons, evidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, venue, symbol, notional_usd, int(live_eligible),
+             json.dumps(list(reasons), separators=(",", ":")),
+             json.dumps(evidence, separators=(",", ":"), allow_nan=False)),
+        )
+        self.db.commit()
+        return int(cursor.lastrowid)
+
+    def latest_certification(self, venue: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            """SELECT * FROM venue_certifications
+               WHERE venue=? ORDER BY id DESC LIMIT 1""", (venue,)
+        ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["reasons"] = json.loads(result["reasons"])
+        result["evidence"] = json.loads(result["evidence"])
+        return result
 
     def close(self) -> None:
         self.db.close()
