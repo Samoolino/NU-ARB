@@ -236,6 +236,7 @@ class PersistentOpportunityFinder:
         self.books: dict[tuple[str, str], BookSample] = {}
         self.history: dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=120))
         self.last_rest: dict[tuple[str, str], BookSample] = {}
+        self.balances: dict[str, dict[str, float]] = {}
         self.stop_event = asyncio.Event()
         self.tasks: list[asyncio.Task] = []
         self.scans = 0
@@ -259,6 +260,23 @@ class PersistentOpportunityFinder:
                 raise
             except Exception:
                 await asyncio.sleep(0.25)
+
+    async def _capture_balance(self, venue: str, adapter: Any) -> None:
+        while not self.stop_event.is_set():
+            try:
+                raw = await adapter.get_balances()
+                free = raw.get("free") if isinstance(raw, dict) else None
+                if isinstance(free, dict):
+                    self.balances[venue] = {
+                        str(asset): float(value)
+                        for asset, value in free.items()
+                        if isinstance(value, (int, float)) and float(value) >= 0
+                    }
+                await asyncio.sleep(max(1.0, float(getattr(self.cfg, "opportunity_balance_interval_s", 5.0))))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(2.0)
 
     async def _capture_rest(self, venue: str, symbol: str, adapter: Any) -> None:
         while not self.stop_event.is_set():
@@ -295,6 +313,13 @@ class PersistentOpportunityFinder:
             rest.rest_rtt_ms if rest else None,
         ) if isinstance(x, (int, float))]
         return sum(values) / len(values) if values else float(getattr(self.cfg, "max_rtt_ms", 100))
+
+    def _spread_velocity_bps(self, venue: str, symbol: str) -> float:
+        values = list(self.history[(venue, symbol)])
+        if len(values) < 4:
+            return 0.0
+        mids = values[-8:]
+        return (mids[-1] / mids[0] - 1.0) * 10_000 / max(1, len(mids) - 1)
 
     def _volatility_bps(self, venue: str, symbol: str) -> float:
         values = list(self.history[(venue, symbol)])
@@ -346,7 +371,12 @@ class PersistentOpportunityFinder:
                 imbalance = (_imbalance(b) - _imbalance(s)) / 2.0
                 micro = (_microprice(b) or buy_px) / max(_microprice(s) or sell_px, 1e-12) - 1.0
                 pressure_bps = micro * 10_000
-                score = mc.expected_net_usd * 100 + mc.probability_positive * 10 + max(0.0, pressure_bps) + imbalance * 5
+                spread_velocity_bps = self._spread_velocity_bps(buy, symbol) - self._spread_velocity_bps(sell, symbol)
+                available_quote = self._available_quote(buy, symbol)
+                if available_quote is not None and available_quote < notional:
+                    continue
+                score = (mc.expected_net_usd * 100 + mc.probability_positive * 10
+                         + max(0.0, pressure_bps) + imbalance * 5 + max(0.0, spread_velocity_bps))
                 model = PnLModel(
                     gross_usd=gross,
                     fees_usd=notional * fee_bps / 10_000,
@@ -382,6 +412,8 @@ class PersistentOpportunityFinder:
                         "bookImbalanceBuy": _imbalance(b),
                         "bookImbalanceSell": _imbalance(s),
                         "micropricePressureBps": pressure_bps,
+                        "spreadVelocityBps": spread_velocity_bps,
+                        "availableQuoteUsd": available_quote,
                         "mc": {
                             "trials": mc.trials,
                             "probabilityPositive": mc.probability_positive,
@@ -397,6 +429,11 @@ class PersistentOpportunityFinder:
                 if best is None or opp.score > best.score:
                     best = opp
         return best
+
+    def _available_quote(self, venue: str, symbol: str) -> float | None:
+        quote = symbol.split("/", 1)[1] if "/" in symbol else symbol
+        balance = self.balances.get(venue)
+        return float(balance.get(quote, 0.0)) if balance else None
 
     def _ws_rest_divergence(self, venue: str, symbol: str, ws_px: float) -> float:
         rest = self.last_rest.get((venue, symbol))
@@ -444,6 +481,7 @@ class PersistentOpportunityFinder:
         for venue, adapter in self.adapters.items():
             for symbol in self.symbols:
                 self.tasks.append(asyncio.create_task(self._capture_rest(venue, symbol, adapter)))
+            self.tasks.append(asyncio.create_task(self._capture_balance(venue, adapter)))
                 # CCXT Pro adapters expose the underlying authenticated WS connection.
                 if getattr(adapter, "ex", None) is not None and hasattr(adapter.ex, "watch_order_book"):
                     self.tasks.append(asyncio.create_task(self._capture_ws(venue, symbol, adapter)))
