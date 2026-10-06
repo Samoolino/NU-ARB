@@ -1,0 +1,36 @@
+name: Hybrid Core Tests
+
+on:
+  push:
+    branches:
+      - main
+      - hybrid-engine-multi-adapter
+      - architecture/native-adapter-core
+  pull_request:
+
+jobs:
+  hybrid-core:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest ccxt ccxtpro
+
+      - name: Compile hybrid core
+        env:
+          PYTHONPATH: arb_bot
+        run: python -m compileall -q arb_bot
+
+      - name: Run hybrid core tests
+        env:
+          PYTHONPATH: arb_bot
+        run: python -m pytest -q tests/test_hybrid_engine.py

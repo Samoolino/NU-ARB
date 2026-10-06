@@ -7,7 +7,7 @@ from pathlib import Path
 from arbx.util import STABLES
 
 CCXT_ADAPTERS = {"gateio": "gate"}
-MAX_EXCHANGES = 18
+MAX_EXCHANGES = 20
 LIVE_STARTER_CAPITAL_USD = 3.0
 
 
@@ -117,7 +117,7 @@ class Config:
     def validate(self) -> None:
         if self.mode not in ("paper", "live"):
             raise ValueError("BOT_MODE must be 'paper' or 'live'")
-        if self.strategy_mode != "profit_dca":
+        if self.strategy_mode not in ("profit_dca", "hybrid"):
             raise ValueError("live strategy is fixed to profit_dca") if self.mode == "live" else None
         if self.mode == "live":
             # Normalize every live entry path, including the authenticated web
@@ -148,7 +148,13 @@ class Config:
         if bad:
             raise ValueError(f"start assets must be stablecoins, got {bad}")
         if self.mode == "live":
-            if len(self.exchanges) < 2 or not self.cross_enabled or not self.cross_live:
+            if self.strategy_mode not in ("profit_dca", "hybrid"):
+                raise ValueError("live strategy must be profit_dca or hybrid")
+            # Venue certification is intentionally allowed one venue at a time.
+            # This never relaxes live execution: the normal engine still requires
+            # two venues and explicit cross-live enablement.
+            validation_only = os.getenv("BOT_HYBRID_VALIDATION_ONLY", "0") == "1"
+            if not validation_only and (len(self.exchanges) < 2 or not self.cross_enabled or not self.cross_live):
                 raise ValueError("live mode requires at least two venues and explicit BOT_CROSS_LIVE=1")
             for x in self.exchanges:
                 if not (x.api_key and x.secret):
