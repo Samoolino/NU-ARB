@@ -118,6 +118,62 @@ def main(argv=None) -> None:
         return
     if cmd == "hybrid-validate":
         cfg = Config.from_env()
+        live_validation = os.getenv("BOT_HYBRID_LIVE", "0") == "1"
+        cfg.mode = "live" if live_validation else "paper"
+        if live_validation:
+            os.environ["BOT_HYBRID_VALIDATION_ONLY"] = "1"
+        cfg.validate()
+        from arbx.hybrid.engine import HybridEngine
+        engine = HybridEngine.create(cfg)
+        requested = argv[1:] or [x.venue_id or x.id for x in cfg.exchanges]
+        symbol = os.getenv("BOT_PREFLIGHT_SYMBOL", "BTC/USDT")
+        notional = float(os.getenv("BOT_PREFLIGHT_NOTIONAL_USD", str(cfg.trade_size_usd)))
+
+        async def _hybrid_validate():
+            all_ok = True
+            try:
+                for venue in requested:
+                    if venue not in engine.adapters:
+                        print(f"[{venue}] ERROR not configured or not in venue catalog")
+                        all_ok = False
+                        continue
+                    ev = await engine.validate_venue(venue, symbol=symbol, notional_usd=notional)
+                    d = ev.evidence
+                    print(
+                        f"[{venue}] REST={str(ev.rest_ok).lower()} "
+                        f"WS_PUBLIC={str(ev.public_ws_ok).lower()} "
+                        f"WS_PRIVATE={str(ev.private_ws_ok).lower()} "
+                        f"BALANCE={str(ev.balance_ok).lower()} "
+                        f"PERMISSION={str(ev.permission_ok).lower()} "
+                        f"EXECUTION={str(ev.execution_ok).lower()} "
+                        f"DEPTH={str(ev.depth_ok).lower()} "
+                        f"LIVE_ELIGIBLE={str(ev.live_eligible).lower()}"
+                    )
+                    if d.get("rest", {}).get("rttMs") is not None:
+                        print(f"  REST RTT: {d['rest']['rttMs']} ms")
+                    if d.get("publicWS", {}).get("rttMs") is not None:
+                        print(f"  PUBLIC WS RTT: {d['publicWS']['rttMs']} ms")
+                    if d.get("depth", {}).get("bestBid") is not None:
+                        print(
+                            f"  book: bid={d['depth']['bestBid']} "
+                            f"ask={d['depth']['bestAsk']} "
+                            f"depthUsd={d['depth'].get('depthUsd')}"
+                        )
+                    if ev.reasons:
+                        print("  reasons:", ", ".join(ev.reasons))
+                    all_ok = all_ok and ev.live_eligible
+            finally:
+                for adapter in engine.adapters.values():
+                    try:
+                        await adapter.close()
+                    except Exception:
+                        pass
+            return all_ok
+
+        ok = asyncio.run(_hybrid_validate(), loop_factory=loop_factory())
+        if not ok:
+            sys.exit(1)
+        return
     if cmd == "preflight":
         cfg.mode = "paper"
     if cmd == "live-preflight":
