@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import json
 import math
+import os
 import random
 import time
 from collections import defaultdict, deque
@@ -381,7 +382,14 @@ class PersistentOpportunityFinder:
                         "bookImbalanceBuy": _imbalance(b),
                         "bookImbalanceSell": _imbalance(s),
                         "micropricePressureBps": pressure_bps,
-                        "mc": mc.__dict__,
+                        "mc": {
+                            "trials": mc.trials,
+                            "probabilityPositive": mc.probability_positive,
+                            "expectedNetUsd": mc.expected_net_usd,
+                            "p05NetUsd": mc.p05_net_usd,
+                            "p50NetUsd": mc.p50_net_usd,
+                            "p95NetUsd": mc.p95_net_usd,
+                        },
                         "wsRestDivergenceBps": self._ws_rest_divergence(buy, symbol, buy_px),
                         "webhooks": [x.source for x in self.webhooks.fresh()],
                     },
@@ -517,3 +525,42 @@ async def run_persistent_finder(
         webhook_server.close()
         await webhook_server.wait_closed()
         await finder.stop()
+
+
+async def _main() -> None:
+    from arbx.config import Config
+    from .engine import HybridEngine
+
+    cfg = Config.from_env()
+    cfg.validate()
+    engine = HybridEngine.create(cfg)
+    requested = [x.venue_id or x.id for x in cfg.exchanges]
+    connected: list[str] = []
+    try:
+        for venue in requested:
+            adapter = engine.adapters.get(venue)
+            if adapter is None:
+                continue
+            try:
+                await adapter.connect()
+                connected.append(venue)
+            except Exception as exc:
+                print(f"[opportunity-finder] {venue}: connect failed: {type(exc).__name__}")
+        if len(connected) < 2:
+            raise RuntimeError("persistent opportunity finder requires at least two connected venues")
+        symbols = [s.strip() for s in os.getenv("BOT_OPPORTUNITY_SYMBOLS", "BTC/USDT").split(",") if s.strip()]
+        print(
+            f"[opportunity-finder] persistent WS+REST depth scan venues={','.join(connected)} "
+            f"symbols={','.join(symbols)} webhook=127.0.0.1:8765"
+        )
+        await run_persistent_finder(cfg, {k: engine.adapters[k] for k in connected}, symbols)
+    finally:
+        for adapter in engine.adapters.values():
+            try:
+                await adapter.close()
+            except Exception:
+                pass
+
+
+if __name__ == "__main__":
+    asyncio.run(_main())
