@@ -610,9 +610,21 @@ class PersistentOpportunityFinder:
             for symbol in self.symbols:
                 self.tasks.append(asyncio.create_task(self._capture_rest(venue, symbol, adapter)))
             # CCXT Pro adapters expose the underlying authenticated WS connection.
-            if getattr(adapter, "ex", None) is not None and hasattr(adapter.ex, "watch_order_book"):
+            exchange = getattr(adapter, "ex", None)
+            has_ws = bool(
+                exchange is not None
+                and getattr(exchange, "has", {}).get("watchOrderBook") is True
+            )
+            if has_ws:
                 for symbol in self.symbols:
                     self.tasks.append(asyncio.create_task(self._capture_ws(venue, symbol, adapter)))
+            else:
+                print(
+                    f"[opportunity-finder] WS feed unavailable for {venue}; "
+                    "using REST feed only"
+                )
+        if not self.tasks:
+            raise RuntimeError("persistent opportunity finder started with no feed tasks")
         await asyncio.gather(*self.tasks)
 
     async def stop(self) -> None:
