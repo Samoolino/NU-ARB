@@ -119,6 +119,48 @@ def main(argv=None) -> None:
     if cmd == "hybrid-validate":
         cfg = Config.from_env()
         cfg.mode = "live" if os.getenv("BOT_HYBRID_LIVE", "0") == "1" else "paper"
+        if cfg.mode == "live":
+            os.environ["BOT_HYBRID_VALIDATION_ONLY"] = "1"
+        cfg.validate()
+        from arbx.hybrid.engine import HybridEngine
+        async def validate():
+            engine = HybridEngine.create(cfg)
+            requested = argv[1:] or [v for v in os.getenv("BOT_HYBRID_VENUES", "").split(",") if v]
+            venues = requested or list(engine.adapters)
+            missing = [v for v in venues if v not in engine.adapters]
+            if missing:
+                print("UNCONFIGURED/UNKNOWN VENUES:", ", ".join(missing))
+                return False
+            ok = True
+            print("VENUE-BY-VENUE READ-ONLY CERTIFICATION (NO ORDERS / NO TRANSFERS)")
+            for venue in venues:
+                ev = await engine.validate_venue(venue, os.getenv("BOT_PREFLIGHT_SYMBOL", "BTC/USDT"), cfg.trade_size_usd)
+                d = ev.evidence
+                rest = d.get("rest", {})
+                pub = d.get("publicWS", {})
+                priv = d.get("privateWS", {})
+                ex = d.get("execution", {})
+                dep = d.get("depth", {})
+                print(f"[{venue}] REST={'OK' if ev.rest_ok else 'FAIL'} "
+                      f"WS_PUBLIC={'LIVE' if ev.public_ws_ok else 'FAIL'} "
+                      f"WS_PRIVATE={'LIVE' if ev.private_ws_ok else 'FAIL'} "
+                      f"BALANCE={'OK' if ev.balance_ok else 'FAIL'} "
+                      f"PERMISSION={'OK' if ev.permission_ok else 'FAIL'} "
+                      f"EXECUTION={'OK' if ev.execution_ok else 'FAIL'} "
+                      f"DEPTH={'OK' if ev.depth_ok else 'FAIL'} "
+                      f"LIVE_ELIGIBLE={'YES' if ev.live_eligible else 'NO'}")
+                print(f"  rest_rtt_ms={rest.get('rttMs')} public_ws_rtt_ms={pub.get('rttMs')} "
+                      f"private_state={priv.get('ok')} ioc={ex.get('iocLimit')} "
+                      f"best_bid={dep.get('bestBid')} best_ask={dep.get('bestAsk')} "
+                      f"depth_usd={dep.get('depthUsd')} reasons={','.join(ev.reasons) or 'none'}")
+                ok = ok and (ev.live_eligible if cfg.mode == "live" else ev.depth_ok)
+            return ok
+        try:
+            sys.exit(0 if asyncio.run(validate(), loop_factory=loop_factory()) else 1)
+        finally:
+            os.environ.pop("BOT_HYBRID_VALIDATION_ONLY", None)
+    cfg = Config.from_env()
+        cfg.mode = "live" if os.getenv("BOT_HYBRID_LIVE", "0") == "1" else "paper"
         cfg.validate()
         from arbx.hybrid.engine import HybridEngine
         async def validate():
