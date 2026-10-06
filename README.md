@@ -32,7 +32,7 @@ Set these Railway service variables:
 
 In Vercel Production, set `ARBX_CONTROL_API_URL` to the Railway HTTPS origin (for example `https://arb-control-production.up.railway.app`) and set `ENGINE_PROXY_TOKEN` to the same sensitive secret used in Railway. Redeploy after setting these variables. Keep Preview disconnected from production secrets; use a separate test service and token if account flows need Preview testing.
 
-For Binance live eligibility, configure stable Railway outbound IPs and allowlist each one on the exchange API key. The service verifies spot permission, disabled withdrawals/transfers, IP restrictions, and fresh private/public WebSocket health before enabling live mode. The panel still requires the operator to enable live mode and the user to type `I ACCEPT REAL ORDERS`; order size is capped at $25, the loss stop at $5, and a profit target is required. The engine does not auto-resume a live session after restart. No credentials belong in GitHub.
+For Binance live eligibility, configure stable Railway outbound IPs and allowlist each one on the exchange API key. The service verifies spot permission, disabled withdrawals/transfers, IP restrictions, and fresh private/public WebSocket health before enabling live mode. The panel still requires the operator to enable live mode and the user to type `I ACCEPT REAL ORDERS`; order size is capped at $25, the session-loss stop at $3, and a profit target is required. The engine does not auto-resume a live session after restart. No credentials belong in GitHub.
 
 The control API supports all 18 registered venues in one selected session; live execution requires at least two venues and explicit `cross_live` selection. Seven venues now have permission-evidence probes, and Binance, Bybit, and KuCoin can potentially meet strict live scope checks. Every selected venue must still pass fresh balance, permission, and stream checks. Cross-venue candidates are compared by depth-aware modeled dollar floor, expected net, and available capital. The $3 session-loss stop and $200 realized-profit target remain configured; neither is a guarantee against losses.
 
@@ -68,3 +68,6 @@ python run.py --headless
 ```
 
 The bot defaults to paper mode. Live mode can place real exchange orders; it requires exchange credentials, and cross-exchange live orders require the separate `BOT_CROSS_LIVE=1` opt-in. Arbitrage is risky and profits are not guaranteed. Read the full [operations guide](ARBX_README.md) before configuring exchanges. Never commit API keys.
+## Live mode / CCXT clarity
+
+See [LIVE_MODE_CLARITY.md](LIVE_MODE_CLARITY.md) for the authoritative separation between the Vercel public scanner and the Python CCXT Pro live engine, the per-exchange live-engagement contract, and the modeled-profit-floor / bounded-risk structure. A public CCXT snapshot is never a live-trading authorization, and a modeled positive floor is not a no-loss guarantee.
