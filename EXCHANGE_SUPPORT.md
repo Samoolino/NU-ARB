@@ -1,6 +1,6 @@
 # Exchange support and verification limits
 
-The dashboard lists 18 venues as candidates. A registry entry is not proof that a live adapter, a permission check, or order execution works for that venue. The control API reports CCXT Pro adapter availability and per-account verification results at runtime. A venue becomes eligible for the authenticated scanner only after current REST/account/balance checks and real public and private WebSocket messages have all passed. Verification expires after five minutes; an expired venue is shown as `STALE` and is removed from engine choices until it is checked again.
+The hybrid engine maintains a 20-venue candidate catalog. A registry entry is not proof that a live adapter, a permission check, or order execution works for that venue. The control API reports CCXT Pro adapter availability and per-account verification results at runtime. A venue becomes eligible for the authenticated scanner only after current REST/account/balance checks and real public and private WebSocket messages have all passed. Verification expires after five minutes; an expired venue is shown as `STALE` and is removed from engine choices until it is checked again.
 
 | Venue | Credential fields shown | Permission verification | Live trading |
 | --- | --- | --- | --- |
@@ -13,9 +13,9 @@ The dashboard lists 18 venues as candidates. A registry entry is not proof that 
 | Bitfinex | API key + secret | Signed [current key-permissions endpoint](https://docs.bitfinex.com/reference/key-permissions); reports current key read/write scopes | Disabled: `orders` is not spot-specific and this endpoint does not prove IP restriction |
 | Gate.io, LBank, Bitget, Kraken, Coinbase Exchange, Bitstamp, Gemini, Crypto.com Exchange, CoinEx, BingX, WhiteBIT | API key + secret (some venues also require a passphrase) | Authenticated REST/balance/stream checks; no supported scope probe | Disabled until a venue-specific probe proves safe spot scope, disabled withdrawals/transfers, and IP restriction |
 
-All 18 registry venues can be selected together (when their adapters and credentials are available), but are not auto-enabled. The API key and private material stay in the encrypted control-service database and are never returned to the browser. Binance RSA and Ed25519 PEM material is passed to CCXT's signing implementation as bytes. Permission probes report evidence; only the strict Binance, Bybit, and KuCoin checks can potentially permit live execution. If the installed adapter does not advertise `fetchTime`, `watchOrderBook`, or `watchBalance`, or if a real message does not arrive, verification fails and the venue does not enter the authenticated scanner.
+All 20 catalog venues can be selected together (when their adapters and credentials are available), but are not auto-enabled. The API key and private material stay in the encrypted control-service database and are never returned to the browser. Binance RSA and Ed25519 PEM material is passed to CCXT's signing implementation as bytes. Permission probes report evidence; only the strict Binance, Bybit, and KuCoin checks can potentially permit live execution. If the installed adapter does not advertise `fetchTime`, `watchOrderBook`, or `watchBalance`, or if a real message does not arrive, verification fails and the venue does not enter the authenticated scanner.
 
-`FULLY_VERIFIED` describes a fresh successful authenticated connectivity check, including both WebSocket message checks. It does **not** mean that an exchange has verified trading permission. The UI reports `liveEligible` separately. The registry has 18 venues; seven have a permission-evidence probe, while the rest remain permission-unverified and ineligible for live mode. Binance's API combines spot and margin into one flag. Paper sessions use real market and private-balance streams with virtual execution. The public Vercel scanner is a separate read-only view.
+`FULLY_VERIFIED` describes a fresh successful authenticated connectivity check, including both WebSocket message checks. It does **not** mean that an exchange has verified trading permission. The UI reports `liveEligible` separately. The hybrid registry has 20 venues; the strict have a permission-evidence probe, while the rest remain permission-unverified and ineligible for live mode. Binance's API combines spot and margin into one flag. Paper sessions use real market and private-balance streams with virtual execution. The public Vercel scanner is a separate read-only view.
 
 Venue acceptance has distinct levels:
 
@@ -40,8 +40,29 @@ For cross-venue comparison, the engine tests visible depth breakpoints, caps siz
 - While an engine session runs, the status panel exposes actual recent book messages, sequence/timestamp data where CCXT supplies them, private-stream message age, REST latency, clock drift, and degraded state. The engine stops a protected session if its authenticated stream goes stale, and live mode also stops on stale public market data or latency above its pause threshold.
 - The profit target is a numeric USD net-realized target for the current engine session. The engine halts new opportunities once its journaled realized PnL reaches that target. The journal endpoint also reports completed realized PnL across durable saved sessions; this lifetime total does not change the current-session stop threshold.
 - No funds are transferred by the starter-capital view. It displays only the latest authenticated balance data and does not estimate USD valuation without a price source.
-- Live trading is operator-disabled by default and remains bounded by a $25 per-trade request limit and a $3 maximum pilot session-loss setting. Engine requests can name up to all 18 registered venues; each selected venue must pass fresh account, private/public stream, latency, execution, balance, and permission checks. A single venue failure blocks the entire selected live set. Live cross-exchange execution also requires at least two eligible venues, explicit `cross_live` opt-in, and the separate operator flag. Transfer planning is read-only; transfers are never automatically submitted.
+- Live trading is operator-disabled by default and remains bounded by a $25 per-trade request limit and a $3 maximum pilot session-loss setting. Engine requests can name up to all 20 catalog venues; each selected venue must pass fresh account, private/public stream, latency, execution, balance, and permission checks. A single venue failure blocks the entire selected live set. Live cross-exchange execution also requires at least two eligible venues, explicit `cross_live` opt-in, and the separate operator flag. Transfer planning is read-only; transfers are never automatically submitted.
 
 ## Required deployment resources
 
 The control API, its SQLite database, and the persistent WebSocket engine run on Railway. Vercel serves the static dashboard and Node API proxy. The Railway volume, public HTTPS domain, control-service token, encryption key, and Vercel environment variables must be configured in their respective hosting accounts; they are not repository files.
+
+
+## Hybrid adapter policy
+
+The production core now separates transport adapters from strategy adapters. CCXT Pro is
+the canonical CEX transport. Freqtrade and Hummingbot are optional strategy/process
+bridges and cannot grant venue live eligibility.
+
+The twenty-venue candidate catalog is:
+Binance, Bybit, OKX, KuCoin, Gate.io, Bitget, Kraken, Coinbase, MEXC, HTX,
+Bitfinex, Crypto.com, CoinEx, Bitstamp, Gemini, BingX, LBank, WhiteBIT,
+BitMart and Upbit.
+
+Candidate status is not an assurance of live trading. Each selected venue must pass
+fresh REST, public WebSocket, private WebSocket, balance, permission, execution and
+depth validation. A symbol is also rejected if visible book depth cannot support the
+requested notional or if the book is stale/invalid.
+
+Use scripts/restructure-hybrid.ps1 for the production progression:
+audit -> scaffold -> validate -> paper -> live-preflight.
+live-preflight is read-only and submits no orders or transfers.
