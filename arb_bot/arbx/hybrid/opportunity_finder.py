@@ -275,11 +275,26 @@ class PersistentOpportunityFinder:
                 )
                 self.books[(venue, symbol)] = sample
                 self._remember(sample)
+                key = (venue, symbol, "ws")
+                self._feed_successes[key] += 1
+                if self._feed_successes[key] == 1 or self._feed_successes[key] % 20 == 0:
+                    print(
+                        f"[opportunity-finder] WS feed {venue} {symbol} "
+                        f"levels={min(len(book.bids), len(book.asks))} "
+                        f"rtt_ms={sample.rest_rtt_ms:.1f}"
+                    )
                 await self._scan_symbol(symbol)
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                await asyncio.sleep(0.25)
+            except Exception as exc:
+                key = (venue, symbol, "ws")
+                self._feed_failures[key] += 1
+                if self._feed_failures[key] == 1 or self._feed_failures[key] % 20 == 0:
+                    print(
+                        f"[opportunity-finder] WS feed {venue} {symbol} "
+                        f"error={type(exc).__name__}"
+                    )
+                await asyncio.sleep(0.5)
 
     async def _capture_balance(self, venue: str, adapter: Any) -> None:
         while not self.stop_event.is_set():
