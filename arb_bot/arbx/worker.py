@@ -3,6 +3,7 @@ exchange never blocks streaming or evaluation on another."""
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from contextlib import suppress
 
@@ -124,6 +125,24 @@ class ExchangeWorker:
             for l in t.legs:
                 self.by_symbol.setdefault(l.symbol, []).append(t)
         self._index(self.symbols)
+        if self.live:
+            # Re-certify from the live execution path; a stale/manual
+            # preflight must never be the only protection.
+            from arbx.hybrid.engine import HybridEngine
+            cert_symbol = os.getenv("BOT_PREFLIGHT_SYMBOL") or next(iter(self.symbols))
+            hybrid = HybridEngine.create(self.cfg)
+            venue_id = self.x.venue_id or self.id
+            if venue_id not in hybrid.adapters:
+                raise RuntimeError(f"live venue {venue_id} is not present in the hybrid certification catalog")
+            evidence = await hybrid.validate_venue(
+                venue_id, symbol=cert_symbol, notional_usd=self.cfg.trade_size_usd
+            )
+            if not evidence.live_eligible:
+                raise RuntimeError(
+                    f"live venue certification failed for {venue_id}: "
+                    + ", ".join(evidence.reasons)
+                )
+            self.hub.log("info", f"[{self.id}] hybrid live certification passed for {cert_symbol}")
         self.executor = LiveExecutor(self.ex, self.cfg) if self.live else PaperExecutor(self.cfg)
         if self.live:
             missing = [name for name in ("createOrder", "createMarketOrder", "fetchOrder")
