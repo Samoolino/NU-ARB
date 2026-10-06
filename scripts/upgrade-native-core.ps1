@@ -2,7 +2,11 @@
 param(
   [ValidateSet("audit","architecture","test","paper","venue-verify","live-preflight","live","all")]
   [string]$Stage = "all",
-  [string[]]$Venues = @("binance","bybit","okx"),
+  [string[]]$Venues = @(
+    "binance","bybit","okx","kucoin","gateio","bitget","kraken",
+    "coinbase","mexc","htx","bitfinex","cryptocom","coinex","bitstamp",
+    "gemini","bingx","lbank","whitebit","bitmart","upbit"
+  ),
   [string]$Symbol = "BTC/USDT",
   [double]$Notional = 3.00,
   [ValidateSet("ccxt_pro","ccxt","native")]
@@ -30,6 +34,7 @@ function Set-CommonEnv {
   $env:BOT_MODE = "paper"
   $env:BOT_HYBRID_LIVE = "0"
   $env:BOT_HYBRID_VALIDATION_ONLY = "1"
+  $env:BOT_STARTER_CAPITAL_USD = "$Notional"
   $env:BOT_STRATEGY_MODE = "profit_dca"
   $env:BOT_COMPOUND_PROFITS = "1"
   $env:BOT_HALT_ON_REALIZED_LOSS = "1"
@@ -55,7 +60,7 @@ if ($Stage -in @("architecture","all")) {
   Step "ARCHITECTURE"
   Set-CommonEnv
   Run "python" @("-m","pytest","-q","tests/test_hybrid_engine.py")
-  Run "python" @("-c","from arbx.hybrid.requirements import validate_capabilities; from arbx.hybrid.router import validate_route; print('native VenueAdapter contract: import OK; route gate: import OK')")
+  Run "python" @("-c","from arbx.hybrid.requirements import validate_capabilities; from arbx.hybrid.router import validate_route; from arbx.hybrid.pnl import PnLModel, gate_profit; from arbx.hybrid.execution import ExecutionCoordinator; print('native VenueAdapter contract: import OK; route gate: import OK; PnL gate: import OK; execution coordinator: import OK')")
 }
 
 if ($Stage -in @("test","all")) {
@@ -72,7 +77,7 @@ if ($Stage -in @("paper","all")) {
 }
 
 if ($Stage -in @("venue-verify","all")) {
-  Step "VENUE CERTIFICATION"
+  Step "VENUE CERTIFICATION — ALL 20 CANDIDATE VENUES"
   foreach ($venue in $Venues) {
     $env:BOT_MODE = "paper"
     $env:BOT_HYBRID_LIVE = "0"
@@ -103,13 +108,16 @@ if ($Stage -in @("live-preflight","live","all")) {
   }
 
   Write-Host ""
-  Write-Host "Preflight complete. This stage performs certification only; it does not place orders or move funds." -ForegroundColor Green
-  Write-Host "Native adapter mode is fail-closed until a concrete native transport is implemented and independently certified." -ForegroundColor Yellow
+  Write-Host "Preflight complete. Certification performs no orders or transfers." -ForegroundColor Green
+  Write-Host "Every venue must independently report LIVE_ELIGIBLE before it can be used." -ForegroundColor Green
+  Write-Host "Native adapter mode remains fail-closed until a concrete native transport is implemented and certified." -ForegroundColor Yellow
 }
 
 if ($Stage -eq "live") {
   Step "LIVE ENGINE — EXPLICIT ARMING REQUIRED"
-  Write-Host "This stage can submit real orders. Run only after every requested venue is independently LIVE_ELIGIBLE." -ForegroundColor Red
+  Write-Host "This stage can submit real orders." -ForegroundColor Red
+  Write-Host "Run only after every requested venue is independently LIVE_ELIGIBLE." -ForegroundColor Red
+  Write-Host "Live CEX execution is non-atomic; this system does not guarantee no-loss execution." -ForegroundColor Red
   $arm = Read-Host "Type ARM-NU-ARB-LIVE to continue"
   if ($arm -ne "ARM-NU-ARB-LIVE") { throw "Live engine not armed." }
 
@@ -128,8 +136,7 @@ if ($Stage -eq "live") {
     Set-Item -Path ("Env:" + $envName) -Value $Adapter
   }
 
-  Write-Host "LIVE ARMING: $Notional USD starter allocation. Profit compounds; realized loss halts new engagements." -ForegroundColor Red
-  Write-Host "IMPORTANT: this is real trading and is not a no-loss guarantee." -ForegroundColor Red
+  Write-Host "LIVE ARMING: $Notional USD starter allocation. Realized profit compounds; realized loss halts new engagements; no averaging down/martingale." -ForegroundColor Red
   Run "python" @("-m","arbx.cli","run")
 }
 
