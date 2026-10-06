@@ -108,6 +108,31 @@ def main(argv=None) -> None:
     if cmd == "selftest":
         from arbx.selftest import run_selftest
         sys.exit(0 if run_selftest() else 1)
+    if cmd == "hybrid-catalog":
+        from arbx.hybrid.registry import VENUE_CATALOG
+        from arbx.hybrid.strategies import strategy_catalog
+        print("Hybrid venue catalog:", len(VENUE_CATALOG))
+        for v in VENUE_CATALOG:
+            print(f"  {v.id:<12} ccxt={v.ccxt_id:<12} adapter={v.adapter}")
+        print("Strategies:", ", ".join(strategy_catalog()))
+        return
+    if cmd == "hybrid-validate":
+        cfg = Config.from_env()
+        cfg.mode = "live" if os.getenv("BOT_HYBRID_LIVE", "0") == "1" else "paper"
+        cfg.validate()
+        from arbx.hybrid.engine import HybridEngine
+        async def validate():
+            engine = HybridEngine.create(cfg)
+            ok = True
+            for venue in engine.adapters:
+                ev = await engine.validate_venue(venue, os.getenv("BOT_PREFLIGHT_SYMBOL", "BTC/USDT"), cfg.trade_size_usd)
+                print(f"[{venue}] liveEligible={str(ev.live_eligible).lower()} "
+                      f"rest={ev.rest_ok} publicWS={ev.public_ws_ok} privateWS={ev.private_ws_ok} "
+                      f"balance={ev.balance_ok} permissions={ev.permission_ok} execution={ev.execution_ok} depth={ev.depth_ok} "
+                      f"reasons={','.join(ev.reasons) or 'none'}")
+                ok = ok and (ev.live_eligible if cfg.mode == "live" else ev.depth_ok)
+            return ok
+        sys.exit(0 if asyncio.run(validate(), loop_factory=loop_factory()) else 1)
     cfg = Config.from_env()
     if cmd == "preflight":
         cfg.mode = "paper"
@@ -164,7 +189,7 @@ def main(argv=None) -> None:
             from arbx.ui import run_dashboard
             run_dashboard(cfg)
     else:
-        print(__doc__ or "usage: run.py [run|preflight|probe|selftest|transfer-plan] [--headless]")
+        print(__doc__ or "usage: run.py [run|preflight|probe|selftest|hybrid-catalog|hybrid-validate|transfer-plan] [--headless]")
 
 
 if __name__ == "__main__":
