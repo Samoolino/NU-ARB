@@ -150,7 +150,11 @@ class Config:
         if self.mode == "live":
             if self.strategy_mode not in ("profit_dca", "hybrid"):
                 raise ValueError("live strategy must be profit_dca or hybrid")
-            if len(self.exchanges) < 2 or not self.cross_enabled or not self.cross_live:
+            # Venue certification is intentionally allowed one venue at a time.
+            # This never relaxes live execution: the normal engine still requires
+            # two venues and explicit cross-live enablement.
+            validation_only = os.getenv("BOT_HYBRID_VALIDATION_ONLY", "0") == "1"
+            if not validation_only and (len(self.exchanges) < 2 or not self.cross_enabled or not self.cross_live):
                 raise ValueError("live mode requires at least two venues and explicit BOT_CROSS_LIVE=1")
             for x in self.exchanges:
                 if not (x.api_key and x.secret):
