@@ -74,11 +74,9 @@ class HybridEngine:
                 detail["rest"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
             try:
+                capability_obj = await a.get_capabilities()
                 detail["capabilities"] = {
-                    key: value
-                    for key, value in (await a.get_capabilities()).__dict__.items()
-                } if hasattr((await a.get_capabilities()), "__dict__") else {
-                    name: getattr(await a.get_capabilities(), name)
+                    name: getattr(capability_obj, name)
                     for name in VenueCapabilities.__dataclass_fields__
                 }
                 caps = VenueCapabilities(**detail["capabilities"])
