@@ -54,3 +54,34 @@ Catalog membership is not live approval. Runtime evidence decides eligibility.
 
 A venue can remain ineligible because its adapter, permissions, private stream,
 execution semantics or depth is not currently verifiable.
+
+
+## Adapter verification contract
+
+Each configured venue is certified independently. The CCXT Pro adapter reports fresh evidence for:
+
+1. **REST** — market load plus exchange server-time request when supported, including measured REST RTT.
+2. **Public WebSocket** — live order-book event with bid/ask data, sequence/timestamp when supplied by the venue.
+3. **Private WebSocket** — authenticated balance stream with a unified free/used/total snapshot. If `watchBalance` is unavailable, private WS remains unverified; no live approval is inferred.
+4. **Authenticated balance** — REST balance snapshot with free/used/total maps.
+5. **Permissions** — delegated to `arbx.permissions.inspect_permissions`; an adapter capability flag alone never proves key scopes.
+6. **Execution** — spot market, create/fetch order, public book support, and IOC limit support are required for live certification.
+7. **Depth** — normalized live order book is walked and checked for freshness, spread and visible quote liquidity for the configured notional.
+
+The resulting evidence is a per-venue certification record. A venue is **LIVE_ELIGIBLE only when every required live check passes**. A failed or unavailable check is retained as a reason and the venue remains disabled.
+
+### Venue-by-venue certification
+
+The read-only PowerShell stage is:
+
+`.scriptsestructure-hybrid.ps1 -Stage venue-verify -Venues binance,bybit,okx -Symbol "BTC/USDT" -Notional 3`
+
+The script tests one venue at a time. It does not submit orders or transfers. This is deliberately separate from production live startup, which still requires the normal multi-venue cross-arbitrage gates.
+
+A single-venue validation uses `BOT_HYBRID_VALIDATION_ONLY=1` only to permit isolated certification. It does **not** relax the production requirement for at least two live venues and explicit cross-live enablement.
+
+### Evidence states
+
+`CATALOGED -> ADAPTER_AVAILABLE -> REST_OK -> PUBLIC_WS_OK -> PRIVATE_WS_OK -> BALANCE_OK -> PERMISSION_OK -> EXECUTION_OK -> DEPTH_OK -> LIVE_ELIGIBLE`
+
+A venue may be cataloged while remaining ineligible. The engine never treats the 20-venue catalog as proof of connectivity, permission, liquidity, or trading readiness.
