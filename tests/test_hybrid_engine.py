@@ -33,3 +33,44 @@ def test_live_evidence_requires_every_gate():
     from arbx.hybrid.contracts import VenueEvidence
     evidence = VenueEvidence("x", "ccxt_pro", True, True, True, True, True, True, False, False, ("depth",), {})
     assert not evidence.live_eligible
+
+def test_realized_loss_halts_live_and_profit_compounds():
+    from types import SimpleNamespace
+    from arbx.gate import RiskManager
+
+    cfg = SimpleNamespace(
+        mode="live",
+        starter_capital_usd=3.0,
+        trade_size_usd=3.0,
+        compound_profits=True,
+        halt_on_realized_loss=True,
+        max_trades_per_min=30,
+        max_consecutive_failures=3,
+    )
+    risk = RiskManager(cfg)
+    risk.record(0.25, True)
+    assert cfg.trade_size_usd == 3.25
+    assert not risk.halted
+    risk.record(-0.10, True)
+    assert risk.halted
+    assert cfg.trade_size_usd == 3.15
+
+
+def test_certification_journal_round_trip(tmp_path):
+    from arbx.journal import TradeJournal
+
+    journal = TradeJournal(tmp_path / "journal.sqlite3")
+    journal.record_certification(
+        session_id="test",
+        venue="binance",
+        symbol="BTC/USDT",
+        notional_usd=3.0,
+        live_eligible=True,
+        reasons=(),
+        evidence={"rest": {"ok": True}},
+    )
+    latest = journal.latest_certification("binance")
+    journal.close()
+    assert latest is not None
+    assert latest["live_eligible"] == 1
+    assert latest["symbol"] == "BTC/USDT"
