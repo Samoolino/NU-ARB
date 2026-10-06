@@ -348,6 +348,28 @@ class PersistentOpportunityFinder:
         var = sum((x - mean) ** 2 for x in returns) / max(1, len(returns) - 1)
         return math.sqrt(var)
 
+    def _network_evidence(self, venue: str, symbol: str) -> dict[str, Any]:
+        base = symbol.split("/", 1)[0] if "/" in symbol else symbol
+        adapter = self.adapters.get(venue)
+        currencies = getattr(getattr(adapter, "ex", None), "currencies", {}) or {}
+        currency = currencies.get(base) or {}
+        networks = currency.get("networks") or {}
+        recognized = {}
+        for name, meta in networks.items():
+            nid = network_id(str(name))
+            if nid:
+                recognized[nid] = {
+                    "deposit": bool((meta or {}).get("deposit", False)),
+                    "withdraw": bool((meta or {}).get("withdraw", False)),
+                    "fee": (meta or {}).get("fee"),
+                    "precision": (meta or {}).get("precision"),
+                }
+        return {
+            "asset": base,
+            "recognizedNetworks": recognized,
+            "catalogSize": len(MAJOR_NETWORKS),
+        }
+
     def _fees_bps(self, venue: str, symbol: str) -> float:
         try:
             # Fee query is intentionally best-effort; live execution still re-checks fees.
@@ -475,6 +497,8 @@ class PersistentOpportunityFinder:
                         "networksScanned": len(MAJOR_NETWORKS),
                         "networks": [network.id for network in MAJOR_NETWORKS],
                         "networkHints": sorted({network_id(asset) for asset in (symbol.split("/") if "/" in symbol else [symbol]) if network_id(asset)}),
+                        "buyNetworkEvidence": self._network_evidence(buy, symbol),
+                        "sellNetworkEvidence": self._network_evidence(sell, symbol),
                     },
                 )
                 if best is None or opp.score > best.score:
