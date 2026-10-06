@@ -84,7 +84,6 @@ class MonteCarloResult:
 
 
 @dataclass(slots=True)
-@dataclass(slots=True)
 class DepthComparison:
     buy_vwap_bps_from_top: float
     sell_vwap_bps_from_top: float
