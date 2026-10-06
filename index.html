@@ -100,8 +100,8 @@
           <p class="account-note">The engine streams spot markets and runs the existing paper or live strategy. Paper mode uses virtual execution. Live orders remain operator-disabled by default and require fresh account, permission, private-stream, market-data, and latency checks before activation.</p>
           <form class="account-form" id="engineForm">
             <label class="field"><span>Mode</span><select id="engineMode"><option value="paper">Paper scan</option><option value="live">Live orders</option></select></label>
-            <label class="field"><span>Exchange</span><select id="engineVenue"></select></label>
-            <label class="field"><span>Trade allocation · USD (starter $3)</span><input id="engineTradeSize" type="number" min="0.01" max="25" step="0.01" value="5" required></label>
+            <label class="field"><span>Execution venues · select 2+ for live</span><select id="engineVenue" multiple size="4"></select></label>
+            <label class="field"><span>Trade allocation · USD (starter $3)</span><input id="engineTradeSize" type="number" min="0.01" max="3" step="0.01" value="3" required></label>
             <label class="field"><span>Realized-loss circuit breaker · USD</span><input id="engineMaxLoss" type="number" min="0.01" max="3" step="0.01" value="3" required></label>
             <label class="field"><span>Realized profit stop · USD (per ignition)</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="200" required></label>
             <div class="disabled-note">Paper and live paths require fresh verification, private stream evidence, depth, permissions, and profitability gates. Live remains operator-controlled.</div>
@@ -126,7 +126,7 @@
         </section>
       </div>
     </details>
-    <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>18 configured public spot adapters · credentials remain server-side</span></footer>
+    <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>20 candidate venue adapters · credentials remain server-side</span></footer>
   </main>
   <script type="module">
     const EXCHANGES = [{"id":"binance","name":"Binance"},{"id":"bybit","name":"Bybit"},{"id":"okx","name":"OKX"},{"id":"kucoin","name":"KuCoin"},{"id":"gateio","name":"Gate.io"},{"id":"mexc","name":"MEXC"},{"id":"htx","name":"HTX"},{"id":"lbank","name":"LBank"},{"id":"bitget","name":"Bitget"},{"id":"kraken","name":"Kraken"},{"id":"coinbaseexchange","name":"Coinbase Exchange"},{"id":"bitfinex","name":"Bitfinex"},{"id":"bitstamp","name":"Bitstamp"},{"id":"gemini","name":"Gemini"},{"id":"cryptocom","name":"Crypto.com Exchange"},{"id":"coinex","name":"CoinEx"},{"id":"bingx","name":"BingX"},{"id":"whitebit","name":"WhiteBIT"}];
@@ -363,12 +363,13 @@
       const eligible = venueDefinitions.filter((venue) => venue.adapterAvailable && venue.verificationFresh &&
         venue.scannerEligible && (mode !== "live" || (runtimeSettings.liveTradingEnabled && venue.liveEligible)));
       const select = $("engineVenue");
-      const previous = select.value;
+      const previous = [...select.selectedOptions].map((option) => option.value);
       select.replaceChildren();
       for (const venue of eligible) {
         const option = document.createElement("option");
         option.value = venue.id;
         option.textContent = venue.name + (mode === "live" ? " · live permission verified" : " · verified");
+        option.selected = previous.includes(venue.id) || (!previous.length && eligible.indexOf(venue) < (mode === "live" ? 2 : 1));
         select.append(option);
       }
       if (!eligible.length) {
@@ -377,13 +378,13 @@
         option.textContent = mode === "live" ? "No fresh live-verified venue available" : "No fresh fully verified venue available";
         select.append(option);
       }
-      select.value = eligible.some((venue) => venue.id === previous) ? previous : eligible[0]?.id || "";
       $("liveConfirmField").hidden = mode !== "live";
-      $("engineStart").disabled = !eligible.length;
+      const enough = mode === "live" ? eligible.length >= 2 : eligible.length >= 1;
+      $("engineStart").disabled = !enough;
       $("engineStart").textContent = mode === "live" ? "Start live orders" : "Start paper scanner";
-      if (mode === "live" && !eligible.length) {
+      if (mode === "live" && !enough) {
         $("engineStatus").textContent = runtimeSettings.liveTradingEnabled
-          ? "Live preflight is not verified for any connected exchange."
+          ? "Live preflight is not verified for two connected venues."
           : "Live execution is disabled by the control-service operator.";
       }
     }
@@ -483,7 +484,7 @@
       $("engineStatus").textContent = mode === "live" ? "Rechecking private stream, permissions, and live preflight…" : "Starting paper scanner…";
       try {
         const data = await control("/api/v1/engine/start", {method: "POST", body: {
-          mode, exchange_ids: [$("engineVenue").value], trade_size_usd: Number($("engineTradeSize").value),
+          mode, exchange_ids: [...$("engineVenue").selectedOptions].map((option) => option.value), trade_size_usd: Number($("engineTradeSize").value),
           max_loss_usd: Number($("engineMaxLoss").value), target_profit_usd: Number($("engineTarget").value),
           require_private_stream: true,
           live_confirmation: $("liveConfirmation").value
