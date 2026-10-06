@@ -27,3 +27,9 @@ def test_strategy_catalog():
     assert "triangular_intra_exchange" in strategy_catalog()
     assert "triangular_multi_exchange" in strategy_catalog()
     assert "stablecoin_arbitrage" in strategy_catalog()
+
+
+def test_live_evidence_requires_every_gate():
+    from arbx.hybrid.contracts import VenueEvidence
+    evidence = VenueEvidence("x", "ccxt_pro", True, True, True, True, True, True, False, False, ("depth",), {})
+    assert not evidence.live_eligible
