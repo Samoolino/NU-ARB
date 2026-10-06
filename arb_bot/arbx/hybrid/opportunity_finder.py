@@ -243,12 +243,14 @@ class PersistentOpportunityFinder:
         symbols: list[str] | None = None,
         webhook_registry: WebhookLatencyRegistry | None = None,
         on_opportunity: Callable[[Opportunity], Awaitable[None] | None] | None = None,
+        live_route_validator: Callable[[str, str, str, float], Awaitable[dict[str, Any]] | dict[str, Any]] | None = None,
     ):
         self.cfg = cfg
         self.adapters = adapters
         self.symbols = symbols or [getattr(cfg, "preflight_symbol", None) or "BTC/USDT"]
         self.webhooks = webhook_registry or WebhookLatencyRegistry()
         self.on_opportunity = on_opportunity
+        self.live_route_validator = live_route_validator
         self.books: dict[tuple[str, str], BookSample] = {}
         self.history: dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=120))
         self.last_rest: dict[tuple[str, str], BookSample] = {}
@@ -519,7 +521,17 @@ class PersistentOpportunityFinder:
         finally:
             journal.close()
         if opp.expected_net_usd > 0 and opp.worst_case_net_usd > 0 and opp.probability_positive >= 0.65:
-            if self.on_opportunity:
+            if self.live_route_validator:
+                try:
+                    verification = self.live_route_validator(opp.buy_venue, opp.sell_venue, opp.symbol, opp.notional_usd)
+                    if asyncio.iscoroutine(verification):
+                        verification = await verification
+                    opp.evidence['liveRouteVerification'] = verification
+                    opp.verified_for_live = bool(verification.get('verified'))
+                except Exception as exc:
+                    opp.evidence['liveRouteVerification'] = {'verified': False, 'error': type(exc).__name__}
+                    opp.verified_for_live = False
+            if self.on_opportunity and opp.verified_for_live:
                 result = self.on_opportunity(opp)
                 if asyncio.iscoroutine(result):
                     await result
