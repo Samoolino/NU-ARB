@@ -259,6 +259,8 @@ class PersistentOpportunityFinder:
         self.tasks: list[asyncio.Task] = []
         self.scans = 0
         self.opportunities = 0
+        self._feed_successes: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._feed_failures: dict[tuple[str, str, str], int] = defaultdict(int)
 
     async def _capture_ws(self, venue: str, symbol: str, adapter: Any) -> None:
         while not self.stop_event.is_set():
