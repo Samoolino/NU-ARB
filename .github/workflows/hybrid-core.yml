@@ -6,6 +6,7 @@ on:
       - main
       - hybrid-engine-multi-adapter
       - architecture/native-adapter-core
+      - opportunity/multichain-depth-live-verification
       - opportunity/persistent-depth-finder
   pull_request:
 
@@ -34,4 +35,4 @@ jobs:
       - name: Run hybrid core tests
         env:
           PYTHONPATH: arb_bot
-        run: python -m pytest -q tests/test_hybrid_engine.py tests/test_opportunity_finder.py
+        run: python -m pytest -q tests/test_hybrid_engine.py tests/test_opportunity_finder.py tests/test_network_scope.py

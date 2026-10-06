@@ -75,3 +75,28 @@ The finder does not:
 - replace final live depth/latency/balance checks immediately before an order.
 
 A live order must still pass the native VenueAdapter capability/evidence gates, expected and worst-case PnL gates, route validation, and realized-loss circuit breaker.
+
+
+## Multi-network scope
+
+The scanner now carries a 20-network settlement catalog covering Ethereum, Bitcoin,
+BNB Smart Chain, Solana, Polygon, Arbitrum, Optimism, Avalanche C-Chain, Base,
+Tron, XRP Ledger, Cardano, Sui, Aptos, NEAR, Cosmos/IBC, Polkadot, Litecoin,
+Dogecoin and TON.
+
+These are **settlement-network candidates**, not claims of direct on-chain
+connectivity. For each connected exchange key, the scanner inspects the exchange's
+currency/network metadata and records recognized deposit/withdrawal availability.
+A network becomes actionable only when the connected exchange/API key exposes it.
+
+## Live route verification
+
+A positive scanner candidate is not emitted to the live opportunity callback until
+Nu-Arb re-runs the VenueAdapter certification for both sides of the route. The
+verification includes REST, public WS, private WS, balance, permission, execution
+and depth evidence. This creates the chain:
+
+scanner -> depth candidate -> fresh REST/WS certification -> live-eligible route -> execution coordinator.
+
+The verification is performed immediately before the callback and therefore remains
+subject to the existing execution PnL/risk gates.

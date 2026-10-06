@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
 from .depth import normalize_depth
+from .networks import MAJOR_NETWORKS, network_id
 from .pnl import PnLModel, gate_profit
 from arbx.journal import TradeJournal
 
@@ -80,6 +81,21 @@ class MonteCarloResult:
     p05_net_usd: float
     p50_net_usd: float
     p95_net_usd: float
+
+
+@dataclass(slots=True)
+@dataclass(slots=True)
+class DepthComparison:
+    buy_vwap_bps_from_top: float
+    sell_vwap_bps_from_top: float
+    buy_depth_usd: float
+    sell_depth_usd: float
+    common_depth_usd: float
+    depth_ratio: float
+    top_spread_bps: float
+    executable_spread_bps: float
+    concentration_bps: float
+    resilience_score: float
 
 
 @dataclass(slots=True)
@@ -227,12 +243,14 @@ class PersistentOpportunityFinder:
         symbols: list[str] | None = None,
         webhook_registry: WebhookLatencyRegistry | None = None,
         on_opportunity: Callable[[Opportunity], Awaitable[None] | None] | None = None,
+        live_route_validator: Callable[[str, str, str, float], Awaitable[dict[str, Any]] | dict[str, Any]] | None = None,
     ):
         self.cfg = cfg
         self.adapters = adapters
         self.symbols = symbols or [getattr(cfg, "preflight_symbol", None) or "BTC/USDT"]
         self.webhooks = webhook_registry or WebhookLatencyRegistry()
         self.on_opportunity = on_opportunity
+        self.live_route_validator = live_route_validator
         self.books: dict[tuple[str, str], BookSample] = {}
         self.history: dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=120))
         self.last_rest: dict[tuple[str, str], BookSample] = {}
@@ -330,12 +348,51 @@ class PersistentOpportunityFinder:
         var = sum((x - mean) ** 2 for x in returns) / max(1, len(returns) - 1)
         return math.sqrt(var)
 
+    def _network_evidence(self, venue: str, symbol: str) -> dict[str, Any]:
+        base = symbol.split("/", 1)[0] if "/" in symbol else symbol
+        adapter = self.adapters.get(venue)
+        currencies = getattr(getattr(adapter, "ex", None), "currencies", {}) or {}
+        currency = currencies.get(base) or {}
+        networks = currency.get("networks") or {}
+        recognized = {}
+        for name, meta in networks.items():
+            nid = network_id(str(name))
+            if nid:
+                recognized[nid] = {
+                    "deposit": bool((meta or {}).get("deposit", False)),
+                    "withdraw": bool((meta or {}).get("withdraw", False)),
+                    "fee": (meta or {}).get("fee"),
+                    "precision": (meta or {}).get("precision"),
+                }
+        return {
+            "asset": base,
+            "recognizedNetworks": recognized,
+            "catalogSize": len(MAJOR_NETWORKS),
+        }
+
     def _fees_bps(self, venue: str, symbol: str) -> float:
         try:
             # Fee query is intentionally best-effort; live execution still re-checks fees.
             return float((self.adapters[venue].ex.markets.get(symbol) or {}).get("taker") or 0.001) * 20_000
         except Exception:
             return 20.0
+
+    def _depth_comparison(self, buy: BookSample, sell: BookSample, notional: float) -> DepthComparison:
+        buy_top = buy.top()[2] or 0.0
+        sell_top = sell.top()[0] or 0.0
+        buy_vwap, _ = _vwap(buy, 'buy', notional)
+        sell_vwap, _ = _vwap(sell, 'sell', notional)
+        buy_depth = sum(p * q for p, q in buy.asks[:20])
+        sell_depth = sum(p * q for p, q in sell.bids[:20])
+        common = min(buy_depth, sell_depth)
+        top_spread = ((sell_top / buy_top) - 1.0) * 10000 if buy_top and sell_top else 0.0
+        executable = ((sell_vwap / buy_vwap) - 1.0) * 10000 if buy_vwap and sell_vwap else 0.0
+        buy_slip = ((buy_vwap / buy_top) - 1.0) * 10000 if buy_vwap and buy_top else 0.0
+        sell_slip = ((sell_top / sell_vwap) - 1.0) * 10000 if sell_vwap and sell_top else 0.0
+        concentration = max(0.0, (buy_slip + sell_slip) / 2.0)
+        ratio = common / max(min(buy_depth, sell_depth), 1e-12)
+        resilience = max(0.0, min(1.0, (common / max(notional, 1e-12)) / (1.0 + concentration / 10.0)))
+        return DepthComparison(buy_slip, sell_slip, buy_depth, sell_depth, common, ratio, top_spread, executable, concentration, resilience)
 
     def _best_route(self, symbol: str) -> Opportunity | None:
         venues = [v for v in self.adapters if (v, symbol) in self.books]
@@ -360,6 +417,7 @@ class PersistentOpportunityFinder:
                 if not sell_px or sell_base <= 0:
                     continue
                 executable_base = min(buy_base, sell_base)
+                depth_cmp = self._depth_comparison(b, s, notional)
                 gross = (sell_px - buy_px) * executable_base
                 gross_bps = gross / notional * 10_000
                 fee_bps = self._fees_bps(buy, symbol) + self._fees_bps(sell, symbol)
@@ -402,6 +460,18 @@ class PersistentOpportunityFinder:
                     {
                         "decision": decision,
                         "grossDepthUsd": gross,
+                        "depthComparison": {
+                            "buyVwapSlippageBps": depth_cmp.buy_vwap_bps_from_top,
+                            "sellVwapSlippageBps": depth_cmp.sell_vwap_bps_from_top,
+                            "buyDepthUsd": depth_cmp.buy_depth_usd,
+                            "sellDepthUsd": depth_cmp.sell_depth_usd,
+                            "commonDepthUsd": depth_cmp.common_depth_usd,
+                            "depthRatio": depth_cmp.depth_ratio,
+                            "topSpreadBps": depth_cmp.top_spread_bps,
+                            "executableSpreadBps": depth_cmp.executable_spread_bps,
+                            "concentrationBps": depth_cmp.concentration_bps,
+                            "resilienceScore": depth_cmp.resilience_score,
+                        },
                         "buyVwap": buy_px,
                         "sellVwap": sell_px,
                         "executableBase": executable_base,
@@ -424,6 +494,11 @@ class PersistentOpportunityFinder:
                         },
                         "wsRestDivergenceBps": self._ws_rest_divergence(buy, symbol, buy_px),
                         "webhooks": [x.source for x in self.webhooks.fresh()],
+                        "networksScanned": len(MAJOR_NETWORKS),
+                        "networks": [network.id for network in MAJOR_NETWORKS],
+                        "networkHints": sorted({network_id(asset) for asset in (symbol.split("/") if "/" in symbol else [symbol]) if network_id(asset)}),
+                        "buyNetworkEvidence": self._network_evidence(buy, symbol),
+                        "sellNetworkEvidence": self._network_evidence(sell, symbol),
                     },
                 )
                 if best is None or opp.score > best.score:
@@ -470,7 +545,17 @@ class PersistentOpportunityFinder:
         finally:
             journal.close()
         if opp.expected_net_usd > 0 and opp.worst_case_net_usd > 0 and opp.probability_positive >= 0.65:
-            if self.on_opportunity:
+            if self.live_route_validator:
+                try:
+                    verification = self.live_route_validator(opp.buy_venue, opp.sell_venue, opp.symbol, opp.notional_usd)
+                    if asyncio.iscoroutine(verification):
+                        verification = await verification
+                    opp.evidence['liveRouteVerification'] = verification
+                    opp.verified_for_live = bool(verification.get('verified'))
+                except Exception as exc:
+                    opp.evidence['liveRouteVerification'] = {'verified': False, 'error': type(exc).__name__}
+                    opp.verified_for_live = False
+            if self.on_opportunity and opp.verified_for_live:
                 result = self.on_opportunity(opp)
                 if asyncio.iscoroutine(result):
                     await result
@@ -553,9 +638,16 @@ async def run_persistent_finder(
     *,
     webhook_host: str = "127.0.0.1",
     webhook_port: int = 8765,
+    live_route_validator: Callable[[str, str, str, float], Awaitable[dict[str, Any]] | dict[str, Any]] | None = None,
 ) -> None:
     registry = WebhookLatencyRegistry()
-    finder = PersistentOpportunityFinder(cfg, adapters, symbols=symbols, webhook_registry=registry)
+    finder = PersistentOpportunityFinder(
+        cfg,
+        adapters,
+        symbols=symbols,
+        webhook_registry=registry,
+        live_route_validator=live_route_validator,
+    )
     webhook_server = await serve_webhooks(registry, webhook_host, webhook_port)
     try:
         await finder.run()
@@ -591,12 +683,34 @@ async def _main() -> None:
             f"[opportunity-finder] persistent WS+REST depth scan venues={','.join(connected)} "
             f"symbols={','.join(symbols)} webhook=127.0.0.1:8765"
         )
+        async def verify_route(buy: str, sell: str, symbol: str, notional: float) -> dict[str, Any]:
+            results = {}
+            for venue in (buy, sell):
+                evidence = await engine.validate_venue(venue, symbol=symbol, notional_usd=notional)
+                results[venue] = {
+                    "liveEligible": evidence.live_eligible,
+                    "rest": evidence.rest_ok,
+                    "publicWS": evidence.public_ws_ok,
+                    "privateWS": evidence.private_ws_ok,
+                    "balance": evidence.balance_ok,
+                    "permission": evidence.permission_ok,
+                    "execution": evidence.execution_ok,
+                    "depth": evidence.depth_ok,
+                    "reasons": evidence.reasons,
+                }
+            return {
+                "verified": all(row["liveEligible"] for row in results.values()),
+                "venues": results,
+                "verifiedAtMs": int(time.time() * 1000),
+            }
+
         await run_persistent_finder(
             cfg,
             {k: engine.adapters[k] for k in connected},
             symbols,
             webhook_host=os.getenv("BOT_OPPORTUNITY_WEBHOOK_HOST", "127.0.0.1"),
             webhook_port=int(os.getenv("BOT_OPPORTUNITY_WEBHOOK_PORT", "8765")),
+            live_route_validator=verify_route,
         )
     finally:
         for adapter in engine.adapters.values():
