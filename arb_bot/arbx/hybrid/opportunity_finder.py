@@ -314,11 +314,19 @@ class PersistentOpportunityFinder:
                 await asyncio.sleep(2.0)
 
     async def _capture_rest(self, venue: str, symbol: str, adapter: Any) -> None:
+        timeout_s = max(2.0, float(os.getenv("BOT_OPPORTUNITY_REST_TIMEOUT_S", "8")))
+        configured_depth = max(50, int(self.cfg.depth))
+        # Keep the scanner responsive when a venue/API stalls on a large depth request.
+        # Execution performs its own final depth verification before any order.
+        depth = min(configured_depth, 200)
         while not self.stop_event.is_set():
             started = time.perf_counter()
             try:
-                raw = await adapter.get_order_book(symbol, max(50, int(self.cfg.depth)))
-                book = normalize_depth(venue, symbol, raw, limit=max(50, int(self.cfg.depth)))
+                raw = await asyncio.wait_for(
+                    adapter.get_order_book(symbol, depth),
+                    timeout=timeout_s,
+                )
+                book = normalize_depth(venue, symbol, raw, limit=depth)
                 sample = BookSample(
                     venue, symbol, time.monotonic_ns(), raw.get("timestamp"),
                     raw.get("nonce"), list(book.bids), list(book.asks), "rest",
@@ -329,10 +337,28 @@ class PersistentOpportunityFinder:
                 ws = self.books.get((venue, symbol))
                 if ws is None or sample.received_ns > ws.received_ns:
                     self.books[(venue, symbol)] = sample
-                await asyncio.sleep(max(0.2, float(getattr(self.cfg, "opportunity_rest_interval_s", 1.0))))
+                key = (venue, symbol, "rest")
+                self._feed_successes[key] += 1
+                if self._feed_successes[key] == 1 or self._feed_successes[key] % 10 == 0:
+                    print(
+                        f"[opportunity-finder] REST feed {venue} {symbol} "
+                        f"levels={min(len(book.bids), len(book.asks))} "
+                        f"rtt_ms={sample.rest_rtt_ms:.1f}"
+                    )
+                await self._scan_symbol(symbol)
+                await asyncio.sleep(
+                    max(0.5, float(getattr(self.cfg, "opportunity_rest_interval_s", 1.0)))
+                )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                key = (venue, symbol, "rest")
+                self._feed_failures[key] += 1
+                if self._feed_failures[key] == 1 or self._feed_failures[key] % 10 == 0:
+                    print(
+                        f"[opportunity-finder] REST feed {venue} {symbol} "
+                        f"error={type(exc).__name__} timeout_s={timeout_s:g}"
+                    )
                 await asyncio.sleep(1.0)
 
     def _remember(self, sample: BookSample) -> None:
