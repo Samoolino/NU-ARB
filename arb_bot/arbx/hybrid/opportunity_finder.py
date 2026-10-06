@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
 from .depth import normalize_depth
+from .networks import MAJOR_NETWORKS, network_id
 from .pnl import PnLModel, gate_profit
 from arbx.journal import TradeJournal
 
@@ -80,6 +81,21 @@ class MonteCarloResult:
     p05_net_usd: float
     p50_net_usd: float
     p95_net_usd: float
+
+
+@dataclass(slots=True)
+@dataclass(slots=True)
+class DepthComparison:
+    buy_vwap_bps_from_top: float
+    sell_vwap_bps_from_top: float
+    buy_depth_usd: float
+    sell_depth_usd: float
+    common_depth_usd: float
+    depth_ratio: float
+    top_spread_bps: float
+    executable_spread_bps: float
+    concentration_bps: float
+    resilience_score: float
 
 
 @dataclass(slots=True)
@@ -337,6 +353,23 @@ class PersistentOpportunityFinder:
         except Exception:
             return 20.0
 
+    def _depth_comparison(self, buy: BookSample, sell: BookSample, notional: float) -> DepthComparison:
+        buy_top = buy.top()[2] or 0.0
+        sell_top = sell.top()[0] or 0.0
+        buy_vwap, _ = _vwap(buy, 'buy', notional)
+        sell_vwap, _ = _vwap(sell, 'sell', notional)
+        buy_depth = sum(p * q for p, q in buy.asks[:20])
+        sell_depth = sum(p * q for p, q in sell.bids[:20])
+        common = min(buy_depth, sell_depth)
+        top_spread = ((sell_top / buy_top) - 1.0) * 10000 if buy_top and sell_top else 0.0
+        executable = ((sell_vwap / buy_vwap) - 1.0) * 10000 if buy_vwap and sell_vwap else 0.0
+        buy_slip = ((buy_vwap / buy_top) - 1.0) * 10000 if buy_vwap and buy_top else 0.0
+        sell_slip = ((sell_top / sell_vwap) - 1.0) * 10000 if sell_vwap and sell_top else 0.0
+        concentration = max(0.0, (buy_slip + sell_slip) / 2.0)
+        ratio = common / max(min(buy_depth, sell_depth), 1e-12)
+        resilience = max(0.0, min(1.0, (common / max(notional, 1e-12)) / (1.0 + concentration / 10.0)))
+        return DepthComparison(buy_slip, sell_slip, buy_depth, sell_depth, common, ratio, top_spread, executable, concentration, resilience)
+
     def _best_route(self, symbol: str) -> Opportunity | None:
         venues = [v for v in self.adapters if (v, symbol) in self.books]
         if len(venues) < 2:
@@ -360,6 +393,7 @@ class PersistentOpportunityFinder:
                 if not sell_px or sell_base <= 0:
                     continue
                 executable_base = min(buy_base, sell_base)
+                depth_cmp = self._depth_comparison(b, s, notional)
                 gross = (sell_px - buy_px) * executable_base
                 gross_bps = gross / notional * 10_000
                 fee_bps = self._fees_bps(buy, symbol) + self._fees_bps(sell, symbol)
@@ -402,6 +436,18 @@ class PersistentOpportunityFinder:
                     {
                         "decision": decision,
                         "grossDepthUsd": gross,
+                        "depthComparison": {
+                            "buyVwapSlippageBps": depth_cmp.buy_vwap_bps_from_top,
+                            "sellVwapSlippageBps": depth_cmp.sell_vwap_bps_from_top,
+                            "buyDepthUsd": depth_cmp.buy_depth_usd,
+                            "sellDepthUsd": depth_cmp.sell_depth_usd,
+                            "commonDepthUsd": depth_cmp.common_depth_usd,
+                            "depthRatio": depth_cmp.depth_ratio,
+                            "topSpreadBps": depth_cmp.top_spread_bps,
+                            "executableSpreadBps": depth_cmp.executable_spread_bps,
+                            "concentrationBps": depth_cmp.concentration_bps,
+                            "resilienceScore": depth_cmp.resilience_score,
+                        },
                         "buyVwap": buy_px,
                         "sellVwap": sell_px,
                         "executableBase": executable_base,
@@ -424,6 +470,9 @@ class PersistentOpportunityFinder:
                         },
                         "wsRestDivergenceBps": self._ws_rest_divergence(buy, symbol, buy_px),
                         "webhooks": [x.source for x in self.webhooks.fresh()],
+                        "networksScanned": len(MAJOR_NETWORKS),
+                        "networks": [network.id for network in MAJOR_NETWORKS],
+                        "networkHints": sorted({network_id(asset) for asset in (symbol.split("/") if "/" in symbol else [symbol]) if network_id(asset)}),
                     },
                 )
                 if best is None or opp.score > best.score:
