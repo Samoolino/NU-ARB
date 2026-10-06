@@ -481,9 +481,9 @@ class PersistentOpportunityFinder:
         for venue, adapter in self.adapters.items():
             for symbol in self.symbols:
                 self.tasks.append(asyncio.create_task(self._capture_rest(venue, symbol, adapter)))
-            self.tasks.append(asyncio.create_task(self._capture_balance(venue, adapter)))
-                # CCXT Pro adapters expose the underlying authenticated WS connection.
-                if getattr(adapter, "ex", None) is not None and hasattr(adapter.ex, "watch_order_book"):
+            # CCXT Pro adapters expose the underlying authenticated WS connection.
+            if getattr(adapter, "ex", None) is not None and hasattr(adapter.ex, "watch_order_book"):
+                for symbol in self.symbols:
                     self.tasks.append(asyncio.create_task(self._capture_ws(venue, symbol, adapter)))
         await asyncio.gather(*self.tasks)
 
