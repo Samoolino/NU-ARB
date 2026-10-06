@@ -9,6 +9,7 @@ from contextlib import suppress
 
 from arbx.config import CCXT_ADAPTERS
 from arbx.execute import LegFailure, LiveExecutor, PaperExecutor
+from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
 from arbx.graph import discover
 from arbx.market import LatencyGuard, MarketData
 from arbx.permissions import inspect_permissions
@@ -311,14 +312,31 @@ class ExchangeWorker:
                 hub.stats.rejects[d.reason] += 1
                 return
             t0 = time.perf_counter()
+            coordinator = ExecutionCoordinator()
+            if not coordinator.gate(expected_net_usd=o.expected_final - o.start, worst_case_net_usd=o.worst_final - o.start, min_profit_usd=max(0.0, getattr(cfg, 'min_profit_usd', 0.0)), min_worst_profit_usd=max(0.0, getattr(cfg, 'min_worst_profit_usd', 0.0))):
+                hub.stats.rejects['execution_profitability_gate'] += 1
+                return
+            coordinator.on_submission()
             try:
                 res = await self.executor.execute_tri(o)
             except Exception as e:
-                hub.risk.halt(f"[{self.id}] {o.name}: {e}" if isinstance(e, LegFailure)
-                              else f"[{self.id}] execution error {e!r}")
+                coordinator.fail(str(e))
+                coordinator.require_reconciliation()
+                hub.risk.halt(f"[{self.id}] {o.name}: {e}" if isinstance(e, LegFailure) else f"[{self.id}] execution error {e!r}")
                 hub.journal(self.id, o.name, o.start, 0.0, o.worst_bps, False)
                 return
+            if not res.ok:
+                coordinator.fail('executor returned unsuccessful result')
+                hub.stats.rejects['execution_unsuccessful'] += 1
+                return
+            coordinator.on_fill(o.start, o.start + res.pnl)
+            coordinator.require_reconciliation()
+            coordinator.on_realized_pnl(res.pnl)
             hub.settle(self.id, o.name, o.start, res, o.worst_bps, (time.perf_counter() - t0) * 1000.0)
+            if coordinator.halted:
+                hub.risk.halt(f"[{self.id}] realized loss halted new engagements")
+            elif coordinator.state != ExecutionState.HALTED:
+                coordinator.complete()
             if self.live:
                 asyncio.create_task(self.refresh_balance())
             await asyncio.sleep(self.cfg.cooldown_s)

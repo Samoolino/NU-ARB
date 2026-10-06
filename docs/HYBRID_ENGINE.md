@@ -117,3 +117,32 @@ cd C:\path\to\Nu-Arb
 ```
 
 The venue-verification stage performs no orders or transfers. Live execution remains blocked unless the actual worker's fresh certification passes.
+
+
+## Native adapter architecture
+
+The core no longer treats CCXT/CCXT Pro as the domain abstraction. The Nu-Arb-native `VenueAdapter` contract is the authority. CCXT Pro, CCXT REST, native SDKs, Hummingbot and Freqtrade are transport/integration implementations behind that boundary.
+
+### Adapter selection
+
+`BOT_ADAPTER=ccxt_pro` is the default transport.
+
+`BOT_ADAPTER=ccxt` selects the REST fallback and is not sufficient for production live certification because the live requirements include public/private streaming.
+
+`BOT_ADAPTER=native` selects the fail-closed native SDK boundary. A concrete native implementation must exist before it can connect or become live eligible.
+
+A venue-specific override is supported:
+
+`BOT_BINANCE_ADAPTER=native`
+
+The route validator evaluates capabilities and requirements before a route is eligible.
+
+### Canonical flow
+
+`Strategy -> Opportunity -> CEX Route Optimizer -> PnL/Risk -> Route Validator -> Execution Coordinator -> VenueAdapter -> Transport`
+
+The PnL model exposes expected and worst-case net PnL. Fees, slippage, latency, partial-fill reserve, rebalancing and safety reserve are explicit costs.
+
+The execution coordinator has explicit states for partial fills, hedging and reconciliation. It is currently a safety boundary; end-to-end live submission remains behind the existing worker until coordinator reconciliation is wired into the production order path.
+
+See `docs/NATIVE_ADAPTER_ARCHITECTURE.md` for the migration policy.
