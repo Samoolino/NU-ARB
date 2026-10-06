@@ -7,7 +7,7 @@ from pathlib import Path
 from arbx.util import STABLES
 
 CCXT_ADAPTERS = {"gateio": "gate"}
-MAX_EXCHANGES = 18
+MAX_EXCHANGES = 20
 LIVE_STARTER_CAPITAL_USD = 3.0
 
 
@@ -148,6 +148,8 @@ class Config:
         if bad:
             raise ValueError(f"start assets must be stablecoins, got {bad}")
         if self.mode == "live":
+            if self.strategy_mode not in ("profit_dca", "hybrid"):
+                raise ValueError("live strategy must be profit_dca or hybrid")
             if len(self.exchanges) < 2 or not self.cross_enabled or not self.cross_live:
                 raise ValueError("live mode requires at least two venues and explicit BOT_CROSS_LIVE=1")
             for x in self.exchanges:
