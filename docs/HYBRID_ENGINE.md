@@ -85,3 +85,35 @@ A single-venue validation uses `BOT_HYBRID_VALIDATION_ONLY=1` only to permit iso
 `CATALOGED -> ADAPTER_AVAILABLE -> REST_OK -> PUBLIC_WS_OK -> PRIVATE_WS_OK -> BALANCE_OK -> PERMISSION_OK -> EXECUTION_OK -> DEPTH_OK -> LIVE_ELIGIBLE`
 
 A venue may be cataloged while remaining ineligible. The engine never treats the 20-venue catalog as proof of connectivity, permission, liquidity, or trading readiness.
+
+
+## Live execution enforcement
+
+The hybrid certification layer is enforced twice in live mode:
+
+1. `hybrid-validate` provides explicit, read-only venue certification.
+2. `ExchangeWorker.prepare()` re-certifies the actual venue immediately before constructing the live executor.
+
+A stale or manually asserted certification therefore cannot authorize live trading.
+
+Certification evidence is persisted in the SQLite journal under `venue_certifications`. The record contains venue, symbol, notional, eligibility, failure reasons, and the verification evidence.
+
+## Capital policy
+
+Live trading starts at exactly $3.00. After a completed profitable trade, the realized profit is added to the next allocation. A realized loss immediately halts new engagements. Unfilled IOC attempts do not count as realized losses, but repeated failures still trigger the consecutive-failure halt.
+
+There is no fixed $25 order ceiling and no retired $3 session-loss ceiling.
+
+## Production PowerShell sequence
+
+```powershell
+cd C:\path\to\Nu-Arb
+.\scripts\restructure-hybrid.ps1 -Stage audit
+.\scripts\restructure-hybrid.ps1 -Stage scaffold
+.\scripts\restructure-hybrid.ps1 -Stage validate
+.\scripts\restructure-hybrid.ps1 -Stage paper -Symbol "BTC/USDT" -Notional 3
+.\scripts\restructure-hybrid.ps1 -Stage venue-verify -Venues binance,bybit,okx -Symbol "BTC/USDT" -Notional 3
+.\scripts\restructure-hybrid.ps1 -Stage live-preflight -Symbol "BTC/USDT" -Notional 3
+```
+
+The venue-verification stage performs no orders or transfers. Live execution remains blocked unless the actual worker's fresh certification passes.
