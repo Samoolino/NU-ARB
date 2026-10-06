@@ -2,9 +2,11 @@ from arbx.hybrid.registry import VENUE_CATALOG
 from arbx.hybrid.depth import normalize_depth, validate_depth
 from arbx.hybrid.strategies import profit_compounding_capital, strategy_catalog
 
+
 def test_catalog_has_twenty_venues():
     assert len(VENUE_CATALOG) == 20
     assert len({v.id for v in VENUE_CATALOG}) == 20
+
 
 def test_depth_walk_validation():
     book = normalize_depth("x", "BTC/USDT", {
@@ -18,10 +20,12 @@ def test_depth_walk_validation():
     assert result.top_bid == 100.0
     assert result.top_ask == 100.1
 
+
 def test_profit_compounding_never_adds_losses():
     assert profit_compounding_capital(3.0, 0.0) == 3.0
     assert profit_compounding_capital(3.0, 0.25) == 3.25
     assert profit_compounding_capital(3.0, -0.25) == 3.0
+
 
 def test_strategy_catalog():
     assert "triangular_intra_exchange" in strategy_catalog()
@@ -33,6 +37,7 @@ def test_live_evidence_requires_every_gate():
     from arbx.hybrid.contracts import VenueEvidence
     evidence = VenueEvidence("x", "ccxt_pro", True, True, True, True, True, True, False, False, ("depth",), {})
     assert not evidence.live_eligible
+
 
 def test_realized_loss_halts_live_and_profit_compounds():
     from types import SimpleNamespace
@@ -119,3 +124,13 @@ def test_execution_coordinator_tracks_partial_fill():
     coordinator = ExecutionCoordinator()
     assert coordinator.on_fill(1.0, 0.6) == ExecutionState.PARTIALLY_FILLED
     assert coordinator.events[-1]["filled"] == 0.6
+
+
+def test_execution_coordinator_halts_on_negative_pnl():
+    from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
+
+    coordinator = ExecutionCoordinator()
+    assert coordinator.gate(expected_net_usd=0.10, worst_case_net_usd=0.02, min_profit_usd=0.01, min_worst_profit_usd=0.01)
+    coordinator.on_realized_pnl(-0.01)
+    assert coordinator.halted
+    assert coordinator.state == ExecutionState.HALTED
