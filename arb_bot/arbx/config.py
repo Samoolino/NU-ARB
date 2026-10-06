@@ -117,7 +117,7 @@ class Config:
     def validate(self) -> None:
         if self.mode not in ("paper", "live"):
             raise ValueError("BOT_MODE must be 'paper' or 'live'")
-        if self.strategy_mode != "profit_dca":
+        if self.strategy_mode not in ("profit_dca", "hybrid"):
             raise ValueError("live strategy is fixed to profit_dca") if self.mode == "live" else None
         if self.mode == "live":
             # Normalize every live entry path, including the authenticated web
