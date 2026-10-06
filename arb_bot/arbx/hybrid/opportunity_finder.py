@@ -591,7 +591,13 @@ async def _main() -> None:
             f"[opportunity-finder] persistent WS+REST depth scan venues={','.join(connected)} "
             f"symbols={','.join(symbols)} webhook=127.0.0.1:8765"
         )
-        await run_persistent_finder(cfg, {k: engine.adapters[k] for k in connected}, symbols)
+        await run_persistent_finder(
+            cfg,
+            {k: engine.adapters[k] for k in connected},
+            symbols,
+            webhook_host=os.getenv("BOT_OPPORTUNITY_WEBHOOK_HOST", "127.0.0.1"),
+            webhook_port=int(os.getenv("BOT_OPPORTUNITY_WEBHOOK_PORT", "8765")),
+        )
     finally:
         for adapter in engine.adapters.values():
             try:
