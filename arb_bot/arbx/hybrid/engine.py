@@ -5,6 +5,7 @@ from .registry import VENUE_CATALOG
 from .adapters import CCXTProAdapter
 from .depth import validate_depth
 from .strategies import strategy_catalog
+from arbx.journal import TradeJournal
 
 @dataclass
 class HybridEngine:
@@ -61,6 +62,19 @@ class HybridEngine:
         except Exception as exc:
             ev=VenueEvidence(venue_id,a.adapter_name,False,False,False,False,False,False,False,False,(type(exc).__name__,str(exc)),detail)
         self.evidence[venue_id]=ev
+        journal = TradeJournal(self.cfg.journal_path.with_suffix(".sqlite3"))
+        try:
+            journal.record_certification(
+                session_id=getattr(self.cfg, "session_id", None),
+                venue=venue_id,
+                symbol=symbol,
+                notional_usd=float(notional_usd or self.cfg.trade_size_usd),
+                live_eligible=ev.live_eligible,
+                reasons=ev.reasons,
+                evidence=ev.evidence,
+            )
+        finally:
+            journal.close()
         return ev
         
     def eligible_venues(self): return [v for v,e in self.evidence.items() if e.live_eligible]
