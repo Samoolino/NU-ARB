@@ -74,3 +74,48 @@ def test_certification_journal_round_trip(tmp_path):
     assert latest is not None
     assert latest["live_eligible"] == 1
     assert latest["symbol"] == "BTC/USDT"
+
+
+def test_capability_route_rejects_missing_ioc():
+    from arbx.hybrid.contracts import ExecutionRequirements, VenueCapabilities
+    from arbx.hybrid.router import validate_route
+
+    caps = {
+        "a": VenueCapabilities(
+            spot=True, websocket=True, user_stream=True,
+            limit_orders=True, ioc=True,
+        ),
+        "b": VenueCapabilities(
+            spot=True, websocket=True, user_stream=True,
+            limit_orders=True, ioc=False,
+        ),
+    }
+    req = ExecutionRequirements(require_ioc=True)
+    result = validate_route(caps, ("a", "b"), req)
+    assert not result.ok
+    assert "b:ioc_required" in result.reasons
+
+
+def test_pnl_has_expected_and_worst_case_gates():
+    from arbx.hybrid.pnl import PnLModel, gate_profit
+
+    model = PnLModel(
+        gross_usd=0.20,
+        fees_usd=0.04,
+        slippage_usd=0.03,
+        partial_fill_reserve_usd=0.05,
+        safety_reserve_usd=0.02,
+    )
+    assert round(model.expected_net_usd, 8) == 0.13
+    assert round(model.worst_case_net_usd, 8) == 0.06
+    ok, reasons = gate_profit(model, 0.01, 0.05)
+    assert ok
+    assert not reasons
+
+
+def test_execution_coordinator_tracks_partial_fill():
+    from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
+
+    coordinator = ExecutionCoordinator()
+    assert coordinator.on_fill(1.0, 0.6) == ExecutionState.PARTIALLY_FILLED
+    assert coordinator.events[-1]["filled"] == 0.6
