@@ -614,9 +614,16 @@ async def run_persistent_finder(
     *,
     webhook_host: str = "127.0.0.1",
     webhook_port: int = 8765,
+    live_route_validator: Callable[[str, str, str, float], Awaitable[dict[str, Any]] | dict[str, Any]] | None = None,
 ) -> None:
     registry = WebhookLatencyRegistry()
-    finder = PersistentOpportunityFinder(cfg, adapters, symbols=symbols, webhook_registry=registry)
+    finder = PersistentOpportunityFinder(
+        cfg,
+        adapters,
+        symbols=symbols,
+        webhook_registry=registry,
+        live_route_validator=live_route_validator,
+    )
     webhook_server = await serve_webhooks(registry, webhook_host, webhook_port)
     try:
         await finder.run()
@@ -652,12 +659,34 @@ async def _main() -> None:
             f"[opportunity-finder] persistent WS+REST depth scan venues={','.join(connected)} "
             f"symbols={','.join(symbols)} webhook=127.0.0.1:8765"
         )
+        async def verify_route(buy: str, sell: str, symbol: str, notional: float) -> dict[str, Any]:
+            results = {}
+            for venue in (buy, sell):
+                evidence = await engine.validate_venue(venue, symbol=symbol, notional_usd=notional)
+                results[venue] = {
+                    "liveEligible": evidence.live_eligible,
+                    "rest": evidence.rest_ok,
+                    "publicWS": evidence.public_ws_ok,
+                    "privateWS": evidence.private_ws_ok,
+                    "balance": evidence.balance_ok,
+                    "permission": evidence.permission_ok,
+                    "execution": evidence.execution_ok,
+                    "depth": evidence.depth_ok,
+                    "reasons": evidence.reasons,
+                }
+            return {
+                "verified": all(row["liveEligible"] for row in results.values()),
+                "venues": results,
+                "verifiedAtMs": int(time.time() * 1000),
+            }
+
         await run_persistent_finder(
             cfg,
             {k: engine.adapters[k] for k in connected},
             symbols,
             webhook_host=os.getenv("BOT_OPPORTUNITY_WEBHOOK_HOST", "127.0.0.1"),
             webhook_port=int(os.getenv("BOT_OPPORTUNITY_WEBHOOK_PORT", "8765")),
+            live_route_validator=verify_route,
         )
     finally:
         for adapter in engine.adapters.values():
