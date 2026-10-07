@@ -18,6 +18,7 @@ from arbx.cli import (
     _random_pair_venue_check,
     _randomized_venue_feed_audit,
     _required_live_venue_audit,
+    _sample_orderbook_updates,
 )
 
 
@@ -48,6 +49,14 @@ class FakePublicAdapter:
                 "nonce": 42,
             },
         }
+
+    async def subscribe_order_book(self, symbol, limit):
+        for sequence, price in ((43, 100.0), (44, 100.1), (45, 100.2)):
+            yield {
+                "bids": [[price, 1.0], [price - 0.1, 2.0], [price - 0.2, 3.0]],
+                "asks": [[price + 1, 1.0], [price + 1.1, 2.0], [price + 1.2, 3.0]],
+                "nonce": sequence,
+            }
 
     async def close(self):
         self.closed = True
@@ -125,6 +134,41 @@ class PublicFeedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["authenticated"])
         self.assertFalse(result["ordersSubmitted"])
 
+    async def test_async_book_update_sampler_validates_sequence_and_latency(self):
+        result = await _sample_orderbook_updates(
+            FakePublicAdapter("binance", {}),
+            "BTC/USDT",
+            5,
+            sample_count=3,
+        )
+
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["receivedUpdates"], 3)
+        self.assertTrue(result["sequenceAvailableForAllUpdates"])
+        self.assertTrue(result["sequenceMonotonic"])
+        self.assertGreaterEqual(result["distinctUpdateEvents"], 2)
+        self.assertIsNotNone(result["deliveryCallLatencyMs"]["p95"])
+
+    async def test_async_book_update_sampler_rejects_nonmonotonic_sequence(self):
+        class RepeatedSequenceAdapter(FakePublicAdapter):
+            async def subscribe_order_book(self, symbol, limit):
+                for _ in range(3):
+                    yield {
+                        "bids": [[100, 1], [99, 2], [98, 3]],
+                        "asks": [[101, 1], [102, 2], [103, 3]],
+                        "nonce": 9,
+                    }
+
+        result = await _sample_orderbook_updates(
+            RepeatedSequenceAdapter("binance", {}),
+            "BTC/USDT",
+            5,
+            sample_count=3,
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertFalse(result["sequenceMonotonic"])
+
     def test_depth_pilot_validates_depth_and_reports_fee_excluded_round_trip(self):
         result = _depth_pilot_metrics("binance", "BTC/USDT", {
             "bids": [[100.0, 1.0], [99.9, 1.0], [99.8, 1.0]],
@@ -136,6 +180,16 @@ class PublicFeedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["simulatedImmediateRoundTrip"]["completed"])
         self.assertLess(result["simulatedImmediateRoundTrip"]["grossPnlQuote"], 0)
         self.assertFalse(result["simulatedImmediateRoundTrip"]["includesFees"])
+
+    def test_depth_pilot_rejects_unsorted_book_side(self):
+        result = _depth_pilot_metrics("binance", "BTC/USDT", {
+            "bids": [[100.0, 1.0], [100.1, 1.0], [99.8, 1.0]],
+            "asks": [[101.0, 1.0], [101.1, 1.0], [101.2, 1.0]],
+        })
+
+        self.assertFalse(result["depthValidated"])
+        self.assertFalse(result["bookStructureValid"])
+        self.assertEqual(result["reason"], "invalid_book_structure")
 
     async def test_random_pair_probe_records_redacted_transport_failures_and_closes(self):
         from arbx.hybrid.registry import VenueSpec
@@ -162,6 +216,31 @@ class PublicFeedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("TimeoutError", result["reason"])
         self.assertNotIn("public-audit-test-secret", result["reason"])
         self.assertTrue(instances[0].closed)
+
+    async def test_late_depth_update_failure_does_not_erase_verified_public_books(self):
+        from arbx.hybrid.registry import VenueSpec
+
+        with (
+            patch("arbx.hybrid.adapters.CCXTProAdapter", FakeRandomPairAdapter),
+            patch(
+                "arbx.cli._sample_orderbook_updates",
+                new=AsyncMock(side_effect=RuntimeError("stream update failed")),
+            ),
+        ):
+            result = await _random_pair_venue_check(
+                VenueSpec("binance", "binance"),
+                random.Random(7),
+                asyncio.Semaphore(1),
+            )
+
+        self.assertTrue(result["restOk"])
+        self.assertTrue(result["websocketOk"])
+        self.assertTrue(result["verified"])
+        self.assertIn(
+            "RuntimeError",
+            result["depthPilot"]["websocketDepthUpdates"]["reason"],
+        )
+        self.assertFalse(result["depthPilot"]["passed"])
 
     async def test_engagement_audit_persists_fail_closed_evidence(self):
         from arbx.hybrid.registry import VenueSpec
@@ -253,7 +332,10 @@ class PublicFeedCheckTests(unittest.IsolatedAsyncioTestCase):
                 "verified": True,
                 "authenticated": False,
                 "ordersSubmitted": False,
-                "depthPilot": {"passed": True},
+                "depthPilot": {
+                    "passed": True,
+                    "websocketDepthUpdates": {"verified": True},
+                },
             }
 
         with tempfile.TemporaryDirectory() as directory:

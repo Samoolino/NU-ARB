@@ -159,6 +159,57 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
             public_row,
             ("restOk", "websocketOk", "verified"),
         )
+        if public["status"] != "FRESH":
+            latency_state = {
+                "status": public["status"],
+                "marketDiscoveryMs": None,
+                "restRttMs": None,
+                "websocketFirstBookMs": None,
+                "websocketUpdateIntervalMs": None,
+                "websocketDeliveryCallLatencyMs": None,
+                "restRttSampleCount": 0,
+                "liveLatencyGatePassed": False,
+            }
+        elif not isinstance(public_row, dict):
+            latency_state = {
+                "status": "NOT_RECORDED",
+                "marketDiscoveryMs": None,
+                "restRttMs": None,
+                "websocketFirstBookMs": None,
+                "websocketUpdateIntervalMs": None,
+                "websocketDeliveryCallLatencyMs": None,
+                "restRttSampleCount": 0,
+                "liveLatencyGatePassed": False,
+            }
+        else:
+            raw_pilot = public_row.get("depthPilot")
+            pilot_updates = (
+                raw_pilot.get("websocketDepthUpdates")
+                if isinstance(raw_pilot, dict)
+                else None
+            )
+            latency_state = {
+                "status": "OBSERVED_ONLY",
+                "marketDiscoveryMs": public_row.get("marketLoadMs"),
+                "restRttMs": public_row.get("restRttMs"),
+                "websocketFirstBookMs": public_row.get("websocketFirstBookMs"),
+                "websocketUpdateIntervalMs": (
+                    pilot_updates.get("updateIntervalMs")
+                    if isinstance(pilot_updates, dict)
+                    else None
+                ),
+                "websocketDeliveryCallLatencyMs": (
+                    pilot_updates.get("deliveryCallLatencyMs")
+                    if isinstance(pilot_updates, dict)
+                    else None
+                ),
+                "restRttSampleCount": (
+                    1
+                    if isinstance(public_row.get("restRttMs"), (int, float))
+                    else 0
+                ),
+                "liveLatencyGatePassed": False,
+            }
         public_depth_row = (
             public_row.get("depthPilot") if isinstance(public_row, dict) else None
         )
@@ -172,16 +223,21 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
         else:
             rest_depth = public_depth_row.get("rest")
             websocket_depth = public_depth_row.get("websocket")
+            websocket_updates = public_depth_row.get("websocketDepthUpdates")
             depth_verified = (
                 public_depth_row.get("passed") is True
                 and isinstance(rest_depth, dict)
                 and rest_depth.get("depthValidated") is True
+                and rest_depth.get("bookStructureValid") is True
                 and isinstance(rest_depth.get("simulatedImmediateRoundTrip"), dict)
                 and rest_depth["simulatedImmediateRoundTrip"].get("completed") is True
                 and isinstance(websocket_depth, dict)
                 and websocket_depth.get("depthValidated") is True
+                and websocket_depth.get("bookStructureValid") is True
                 and isinstance(websocket_depth.get("simulatedImmediateRoundTrip"), dict)
                 and websocket_depth["simulatedImmediateRoundTrip"].get("completed") is True
+                and isinstance(websocket_updates, dict)
+                and websocket_updates.get("verified") is True
             )
             public_depth_state = {
                 "status": (
@@ -195,10 +251,35 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
                     if isinstance(rest_depth, dict)
                     else False
                 ),
+                "restBookStructureValid": (
+                    rest_depth.get("bookStructureValid") is True
+                    if isinstance(rest_depth, dict)
+                    else False
+                ),
                 "websocketDepthValidated": (
                     websocket_depth.get("depthValidated") is True
                     if isinstance(websocket_depth, dict)
                     else False
+                ),
+                "websocketBookStructureValid": (
+                    websocket_depth.get("bookStructureValid") is True
+                    if isinstance(websocket_depth, dict)
+                    else False
+                ),
+                "asynchronousWebsocketUpdatesVerified": (
+                    websocket_updates.get("verified") is True
+                    if isinstance(websocket_updates, dict)
+                    else False
+                ),
+                "websocketUpdateIntervalMs": (
+                    websocket_updates.get("updateIntervalMs")
+                    if isinstance(websocket_updates, dict)
+                    else None
+                ),
+                "websocketDeliveryCallLatencyMs": (
+                    websocket_updates.get("deliveryCallLatencyMs")
+                    if isinstance(websocket_updates, dict)
+                    else None
                 ),
                 "notionalQuote": public_depth_row.get("notionalQuote"),
                 "quoteCurrency": public_depth_row.get("quoteCurrency"),
@@ -219,6 +300,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
             blockers.append(f"fresh_public_rest_and_websocket_books_{public_state['status'].lower()}")
         if not public_depth_state["verified"]:
             blockers.append(f"fresh_public_orderbook_depth_{public_depth_state['status'].lower()}")
+        blockers.append("multi_sample_runtime_live_latency_gate_not_verified")
         if not permission_state["verified"]:
             blockers.append(f"fresh_account_permission_evidence_{permission_state['status'].lower()}")
         if permission_state["verified"] and not permission_state["liveEligible"]:
@@ -236,6 +318,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
             "livePermissionCandidate": is_live_candidate,
             "publicFeed": public_state,
             "publicOrderbookDepth": public_depth_state,
+            "latencyEvidence": latency_state,
             "permissionEvidence": permission_state,
             "authenticatedSamePairFeeds": strict_state,
             "accountBalancesVerified": False,
@@ -280,6 +363,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
         row for row in live_venues
         if row["publicFeed"]["verified"]
         and row["publicOrderbookDepth"]["verified"]
+        and row["latencyEvidence"]["liveLatencyGatePassed"]
         and row["permissionEvidence"]["verified"]
         and row["permissionEvidence"]["liveEligible"]
         and row["authenticatedSamePairFeeds"]["verified"]
@@ -312,6 +396,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
         "requiredEvidence": [
             "fresh_public_rest_and_websocket_books",
             "fresh_public_orderbook_depth_and_simulation",
+            "multi_sample_runtime_live_latency_gate",
             "fresh_account_permission_revalidation",
             "authenticated_same_pair_rest_and_websocket_books",
             "available_balances_and_order_reservations",

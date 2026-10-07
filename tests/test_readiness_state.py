@@ -29,17 +29,26 @@ def _fresh_reports(directory, generated_at):
                 "restOk": True,
                 "websocketOk": True,
                 "verified": True,
+                "restRttMs": 12.5,
+                "websocketFirstBookMs": 22.0,
                 "depthPilot": {
                     "passed": True,
                     "notionalQuote": 25.0,
                     "quoteCurrency": "USDT",
                     "rest": {
                         "depthValidated": True,
+                        "bookStructureValid": True,
                         "simulatedImmediateRoundTrip": {"completed": True},
                     },
                     "websocket": {
                         "depthValidated": True,
+                        "bookStructureValid": True,
                         "simulatedImmediateRoundTrip": {"completed": True},
+                    },
+                    "websocketDepthUpdates": {
+                        "verified": True,
+                        "updateIntervalMs": {"p50": 5.0, "p95": 7.0},
+                        "deliveryCallLatencyMs": {"p50": 1.0, "p95": 2.0},
                     },
                 },
             }
@@ -100,6 +109,12 @@ def test_readiness_is_always_fail_closed_without_live_connection_evidence(tmp_pa
     for venue in report["venues"]:
         if venue["livePermissionCandidate"]:
             assert venue["publicOrderbookDepth"]["verified"] is True
+            assert venue["publicOrderbookDepth"]["restBookStructureValid"] is True
+            assert venue["publicOrderbookDepth"]["websocketBookStructureValid"] is True
+            assert venue["latencyEvidence"]["status"] == "OBSERVED_ONLY"
+            assert venue["latencyEvidence"]["restRttMs"] == 12.5
+            assert venue["latencyEvidence"]["restRttSampleCount"] == 1
+            assert venue["latencyEvidence"]["liveLatencyGatePassed"] is False
             assert venue["permissionEvidence"]["liveEligible"] is True
             assert venue["accountBalancesVerified"] is False
             assert venue["privateStreamVerified"] is False
@@ -140,6 +155,21 @@ def test_readiness_rejects_depth_pilot_without_both_book_walks(tmp_path):
 
     assert binance["publicOrderbookDepth"]["status"] == "FAILED"
     assert binance["publicOrderbookDepth"]["verified"] is False
+
+
+def test_readiness_rejects_missing_asynchronous_websocket_updates(tmp_path):
+    now = datetime.now(timezone.utc)
+    _fresh_reports(tmp_path, now)
+    public_path = tmp_path / "randomized-venue-feed-audit-latest.json"
+    public_report = json.loads(public_path.read_text(encoding="utf-8"))
+    public_report["venues"][0]["depthPilot"].pop("websocketDepthUpdates")
+    public_path.write_text(json.dumps(public_report), encoding="utf-8")
+
+    report = build_readiness_state(tmp_path, now=now)
+    binance = next(row for row in report["venues"] if row["venue"] == "binance")
+
+    assert binance["publicOrderbookDepth"]["status"] == "FAILED"
+    assert binance["publicOrderbookDepth"]["asynchronousWebsocketUpdatesVerified"] is False
 
 
 def test_readiness_marks_expired_and_malformed_evidence_unusable(tmp_path):

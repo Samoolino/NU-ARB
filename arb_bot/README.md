@@ -236,13 +236,23 @@ CCXT Pro adapter, and persists timestamped and latest JSON reports under
 `diagnostics\`. Failures identify the stage and reason. One random pair per
 venue is a connectivity smoke test, not full market/route coverage. Each
 sample also runs a read-only depth pilot on both books: it requires three
-visible levels per side, checks a 25-unit quote-depth threshold, and simulates
-an immediate buy/sell walk inside that single venue's book. The simulated
-round trip excludes fees and is not an arbitrage or profit claim. The sampled
+visible levels per side, finite positive sorted levels, a 25-unit quote-depth
+threshold, and simulates an immediate buy/sell walk inside that single venue's
+book. The simulated round trip excludes fees and is not an arbitrage or profit claim. The sampled
 symbols are spot markets, not blockchain settlement routes. Reports explicitly
 keep live engagement blocked because authentication, balances, permissions,
 private streams, fees, order constraints, risk, and settlement are not tested.
-No orders, withdrawals, or transfers are made.
+For venues with a working public stream, the audit also samples three
+asynchronous CCXT-normalized order-book updates (not raw exchange delta
+frames), records whether sequence values remain monotonic when supplied, and
+persists local inter-update and delivery-call p50/p95 latency. These are local
+observations, not exchange-side latency certification or a live latency-gate
+pass. The production gate uses repeated runtime measurements (default
+`BOT_MAX_RTT_MS=80`; live pause threshold `pause_rtt_ms=150` for p95). The
+randomized audit takes one REST book RTT per sampled pair, so it cannot pass
+that gate; readiness keeps `liveLatencyGatePassed=false` until runtime
+preflight evidence is independently produced. No orders, withdrawals, or
+transfers are made.
 
 To persist one fail-closed summary of the latest public, permission, and strict
 same-pair feed evidence after running those audits:

@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import os
 import random
 import secrets
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +33,7 @@ async def _check_public_feed(venue_id: str, symbol: str, ccxt_id: str | None = N
         "ordersSubmitted": False,
         "restOk": False,
         "websocketOk": False,
+        "verified": False,
     }
     stage = "market_discovery"
     try:
@@ -475,6 +478,26 @@ async def _random_pair_venue_check(spec, rng: random.Random, semaphore: asyncio.
             }
             result["exchangeTimestampMs"] = ws_book.get("timestamp")
             result["sequence"] = ws_book.get("nonce")
+            result["verified"] = result["restOk"] and result["websocketOk"]
+            stage = "websocket_depth_updates"
+            try:
+                websocket_depth_updates = await _sample_orderbook_updates(
+                    adapter,
+                    symbol,
+                    ws_limit,
+                    sample_count=3,
+                    timeout_seconds=8,
+                )
+            except Exception as exc:
+                websocket_depth_updates = {
+                    "verified": False,
+                    "reason": safe_ccxt_error(exc, adapter.ex, adapter.credentials),
+                    "requestedUpdates": 3,
+                    "receivedUpdates": 0,
+                    "events": [],
+                    "updateIntervalMs": {"p50": None, "p95": None},
+                    "deliveryCallLatencyMs": {"p50": None, "p95": None},
+                }
             rest_depth = _depth_pilot_metrics(spec.id, symbol, rest_book)
             websocket_depth = _depth_pilot_metrics(spec.id, symbol, ws_book)
             result["depthPilot"] = {
@@ -486,7 +509,9 @@ async def _random_pair_venue_check(spec, rng: random.Random, semaphore: asyncio.
                     source["depthValidated"]
                     and source["simulatedImmediateRoundTrip"]["completed"]
                     for source in (rest_depth, websocket_depth)
-                ),
+                )
+                and websocket_depth_updates.get("verified") is True,
+                "websocketDepthUpdates": websocket_depth_updates,
                 "profitAssurance": False,
                 "chainSettlementVerified": False,
                 "ordersSubmitted": False,
@@ -506,9 +531,160 @@ async def _random_pair_venue_check(spec, rng: random.Random, semaphore: asyncio.
     return result
 
 
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, int(percentile * len(ordered) + 0.999999) - 1))
+    return round(ordered[index], 3)
+
+
+async def _sample_orderbook_updates(
+    adapter,
+    symbol: str,
+    limit: int,
+    *,
+    sample_count: int = 3,
+    timeout_seconds: float = 8.0,
+) -> dict:
+    iterator = adapter.subscribe_order_book(symbol, limit)
+    events = []
+    intervals_ms = []
+    call_latencies_ms = []
+    previous_received = None
+    previous_sequence = None
+    previous_fingerprint = None
+    sequence_monotonic = True
+    distinct_updates = 0
+    started = time.perf_counter()
+    try:
+        for _ in range(sample_count):
+            call_started = time.perf_counter()
+            book = await asyncio.wait_for(
+                iterator.__anext__(),
+                timeout=timeout_seconds,
+            )
+            received = time.perf_counter()
+            call_latencies_ms.append((received - call_started) * 1000)
+            if previous_received is not None:
+                intervals_ms.append((received - previous_received) * 1000)
+            previous_received = received
+
+            bids = book.get("bids") or []
+            asks = book.get("asks") or []
+            fingerprint = (
+                tuple((str(level[0]), str(level[1])) for level in bids[:5]),
+                tuple((str(level[0]), str(level[1])) for level in asks[:5]),
+            )
+            raw_sequence = book.get("nonce")
+            try:
+                sequence = int(raw_sequence) if raw_sequence is not None else None
+            except (TypeError, ValueError, OverflowError):
+                sequence = None
+            if (
+                sequence is not None
+                and previous_sequence is not None
+                and sequence <= previous_sequence
+            ):
+                sequence_monotonic = False
+            update_is_distinct = (
+                sequence != previous_sequence
+                if sequence is not None and previous_sequence is not None
+                else fingerprint != previous_fingerprint
+            )
+            if update_is_distinct:
+                distinct_updates += 1
+            event = {
+                "elapsedMs": round((received - started) * 1000, 3),
+                "sequence": str(raw_sequence) if raw_sequence is not None else None,
+                "bidLevels": len(bids),
+                "askLevels": len(asks),
+                "bestBid": bids[0][0] if bids else None,
+                "bestAsk": asks[0][0] if asks else None,
+            }
+            events.append(event)
+            previous_sequence = sequence
+            previous_fingerprint = fingerprint
+    except StopAsyncIteration:
+        pass
+    except Exception as exc:
+        return {
+            "verified": False,
+            "reason": type(exc).__name__,
+            "requestedUpdates": sample_count,
+            "receivedUpdates": len(events),
+            "events": events,
+            "sequenceMonotonic": sequence_monotonic,
+            "distinctUpdateEvents": distinct_updates,
+            "updateIntervalMs": {
+                "p50": _percentile(intervals_ms, 0.50),
+                "p95": _percentile(intervals_ms, 0.95),
+            },
+            "deliveryCallLatencyMs": {
+                "p50": _percentile(call_latencies_ms, 0.50),
+                "p95": _percentile(call_latencies_ms, 0.95),
+            },
+        }
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if callable(close):
+            await close()
+
+    sequence_values = [
+        event["sequence"] for event in events if event["sequence"] is not None
+    ]
+    has_sequence = len(sequence_values) == len(events) and bool(events)
+    verified = (
+        len(events) == sample_count
+        and distinct_updates >= 2
+        and (not has_sequence or sequence_monotonic)
+    )
+    return {
+        "verified": verified,
+        "reason": None if verified else "insufficient_distinct_or_monotonic_depth_updates",
+        "requestedUpdates": sample_count,
+        "receivedUpdates": len(events),
+        "events": events,
+        "sequenceAvailableForAllUpdates": has_sequence,
+        "sequenceMonotonic": sequence_monotonic if has_sequence else None,
+        "distinctUpdateEvents": distinct_updates,
+        "updateIntervalMs": {
+            "p50": _percentile(intervals_ms, 0.50),
+            "p95": _percentile(intervals_ms, 0.95),
+        },
+        "deliveryCallLatencyMs": {
+            "p50": _percentile(call_latencies_ms, 0.50),
+            "p95": _percentile(call_latencies_ms, 0.95),
+        },
+    }
+
+
 def _depth_pilot_metrics(venue_id: str, symbol: str, book: dict, notional_quote: float = 25.0) -> dict:
     from arbx.hybrid.depth import normalize_depth, validate_depth, walk_asks, walk_bids
 
+    def valid_side(levels, *, bids: bool) -> bool:
+        if not isinstance(levels, (list, tuple)) or not levels:
+            return False
+        prices = []
+        for level in levels[:50]:
+            if not isinstance(level, (list, tuple)) or len(level) < 2:
+                return False
+            try:
+                price, amount = float(level[0]), float(level[1])
+            except (TypeError, ValueError, OverflowError):
+                return False
+            if not math.isfinite(price) or not math.isfinite(amount) or price <= 0 or amount <= 0:
+                return False
+            prices.append(price)
+        return all(
+            left >= right if bids else left <= right
+            for left, right in zip(prices, prices[1:])
+        )
+
+    book_structure_valid = (
+        valid_side(book.get("bids"), bids=True)
+        and valid_side(book.get("asks"), bids=False)
+    )
     normalized = normalize_depth(venue_id, symbol, book, limit=50)
     validation = validate_depth(
         normalized,
@@ -531,8 +707,13 @@ def _depth_pilot_metrics(venue_id: str, symbol: str, book: dict, notional_quote:
             "grossPnlBps": round(gross_pnl / buy.quote_cost * 10_000, 4),
         })
     return {
-        "depthValidated": validation.ok,
-        "reason": validation.reason,
+        "depthValidated": validation.ok and book_structure_valid,
+        "bookStructureValid": book_structure_valid,
+        "reason": (
+            "invalid_book_structure"
+            if not book_structure_valid and validation.reason == "depth_validated"
+            else validation.reason
+        ),
         "visibleDepthQuote": round(validation.depth_usd, 12),
         "levelsPerSide": validation.levels,
         "bestBid": validation.top_bid,
@@ -576,7 +757,7 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
             blockers.insert(0, "random_pair_public_rest_orderbook_not_verified")
         if result.get("websocketOk") is not True:
             blockers.insert(0, "random_pair_public_websocket_orderbook_not_verified")
-        if result.get("reason"):
+        if result.get("reason") and result.get("failedStage") != "websocket_depth_updates":
             blockers.insert(
                 0,
                 f"feed_failure:{result.get('failedStage', 'unknown')}:{result['reason']}",
@@ -584,6 +765,12 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
         depth_pilot = result.get("depthPilot")
         if not isinstance(depth_pilot, dict) or depth_pilot.get("passed") is not True:
             blockers.insert(0, "public_depth_strategy_pilot_not_validated")
+        if (
+            not isinstance(depth_pilot, dict)
+            or not isinstance(depth_pilot.get("websocketDepthUpdates"), dict)
+            or depth_pilot["websocketDepthUpdates"].get("verified") is not True
+        ):
+            blockers.insert(0, "asynchronous_websocket_depth_updates_not_verified")
         result.update({
             "authenticatedAccountVerified": False,
             "balancesVerified": False,
@@ -608,11 +795,29 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
         "depthPilot": {
             "notionalQuote": 25.0,
             "minimumLevelsPerSide": 3,
+            "requiresFinitePositiveSortedLevels": True,
             "sources": ["rest", "websocket"],
+            "websocketUpdateSampleCount": 3,
+            "websocketUpdateTimeoutSeconds": 8,
+            "websocketUpdateSemantics": "ccxt_normalized_watch_order_book_updates_not_raw_exchange_delta_frames",
             "scope": "single-venue-book-depth-and-immediate-round-trip-simulation",
             "chainSettlementVerified": False,
             "profitAssurance": False,
             "ordersSubmitted": False,
+        },
+        "latencyMeasurement": {
+            "clock": "local_monotonic",
+            "fields": [
+                "marketLoadMs",
+                "restRttMs",
+                "websocketFirstBookMs",
+                "depthPilot.websocketDepthUpdates.updateIntervalMs.p50",
+                "depthPilot.websocketDepthUpdates.updateIntervalMs.p95",
+                "depthPilot.websocketDepthUpdates.deliveryCallLatencyMs.p50",
+                "depthPilot.websocketDepthUpdates.deliveryCallLatencyMs.p95",
+            ],
+            "exchangeLatencyCertified": False,
+            "liveLatencyGatePassed": False,
         },
         "scope": "unauthenticated_public_spot_market_data_only",
         "authenticated": False,
@@ -625,8 +830,12 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
             "This audit samples one current listed spot pair per venue and tests an actual "
             "REST order-book snapshot and WebSocket order-book event on that same pair. "
             "Its depth pilot validates visible levels and simulates a fixed 25-unit quote "
-            "round trip within each individual book; it is not cross-venue execution, "
-            "chain-settlement verification, or profit assurance. "
+            "round trip within each individual book and samples three asynchronous "
+            "CCXT-normalized WebSocket book updates (not raw exchange delta frames) for cadence "
+            "and sequence monotonicity where available. "
+            "Local delivery latency is observational and is not exchange-side latency "
+            "certification. This is not cross-venue execution, chain-settlement verification, "
+            "or profit assurance. "
             "It does not establish account authorization, available balances, private stream "
             "health, fee tier, executable cross-venue depth, matched asset identity, settlement "
             "routes, execution success, or guaranteed profit."
@@ -686,22 +895,51 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
         and result["depthPilot"].get("passed") is True
         for result in results
     )
+    delta_pass_count = sum(
+        isinstance(result.get("depthPilot"), dict)
+        and isinstance(result["depthPilot"].get("websocketDepthUpdates"), dict)
+        and result["depthPilot"]["websocketDepthUpdates"].get("verified") is True
+        for result in results
+    )
     for result in results:
         depth_pilot = result.get("depthPilot")
+        updates = depth_pilot.get("websocketDepthUpdates") if isinstance(depth_pilot, dict) else None
         print(
             f"[{result['venue']}] adapter={result['adapter']} "
             f"pair={result.get('symbol', 'unavailable')} "
             f"REST={str(result['restOk']).lower()} WS={str(result['websocketOk']).lower()} "
             f"DEPTH_PILOT={str(isinstance(depth_pilot, dict) and depth_pilot.get('passed') is True).lower()} "
+            f"ASYNC_UPDATES={str(isinstance(updates, dict) and updates.get('verified') is True).lower()} "
             f"LIVE_ENGAGEABLE=false"
         )
+        if isinstance(updates, dict) and updates.get("updateIntervalMs", {}).get("p95") is not None:
+            print(
+                f"  WS update interval p50/p95="
+                f"{updates['updateIntervalMs']['p50']}/{updates['updateIntervalMs']['p95']} ms; "
+                f"delivery-call p50/p95="
+                f"{updates['deliveryCallLatencyMs']['p50']}/"
+                f"{updates['deliveryCallLatencyMs']['p95']} ms"
+            )
+        if isinstance(updates, dict) and updates.get("reason"):
+            print(f"  WS asynchronous update failure={updates['reason']}")
+        if isinstance(depth_pilot, dict) and not depth_pilot.get("passed"):
+            print(
+                "  depth validation REST/WS="
+                f"{depth_pilot.get('rest', {}).get('reason') if isinstance(depth_pilot.get('rest'), dict) else 'unavailable'}/"
+                f"{depth_pilot.get('websocket', {}).get('reason') if isinstance(depth_pilot.get('websocket'), dict) else 'unavailable'}"
+            )
         if result.get("reason"):
             print(f"  failed {result.get('failedStage')}: {result['reason']}")
     print(f"Random-pair REST+WebSocket checks passed: {verified_count}/{len(results)}")
     print(f"Random-pair REST+WebSocket depth pilot passed: {depth_pass_count}/{len(results)}")
+    print(f"Random-pair asynchronous WebSocket update checks passed: {delta_pass_count}/{len(results)}")
     print(f"Persistent random-pair audit validated: {latest}")
     print("Live engagement remains blocked; no authenticated checks or orders were performed.")
-    return verified_count == len(results) and depth_pass_count == len(results)
+    return (
+        verified_count == len(results)
+        and depth_pass_count == len(results)
+        and delta_pass_count == len(results)
+    )
 
 
 async def _probe(cfg: Config) -> None:
@@ -1137,9 +1375,19 @@ def main(argv=None) -> None:
             )
         for venue in report["venues"]:
             if venue["livePermissionCandidate"]:
+                latency = venue["latencyEvidence"]
+                updates_p95 = (
+                    latency["websocketUpdateIntervalMs"].get("p95")
+                    if isinstance(latency["websocketUpdateIntervalMs"], dict)
+                    else None
+                )
                 print(
                     f"  [{venue['venue']}] public={venue['publicFeed']['status']} "
                     f"depth={venue['publicOrderbookDepth']['status']} "
+                    f"REST_ms={latency['restRttMs']} "
+                    f"WS_first_ms={latency['websocketFirstBookMs']} "
+                    f"WS_update_p95_ms={updates_p95} "
+                    f"latency_gate={str(latency['liveLatencyGatePassed']).lower()} "
                     f"permissions={venue['permissionEvidence']['status']} "
                     f"same_pair={venue['authenticatedSamePairFeeds']['status']} "
                     "live_eligible=false"
