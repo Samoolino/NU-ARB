@@ -13,6 +13,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "arb_bot"))
 from arbx.cli import (
     REQUIRED_LIVE_VENUES,
     _check_public_feed,
+    _depth_pilot_metrics,
     _live_engagement_audit,
     _random_pair_venue_check,
     _randomized_venue_feed_audit,
@@ -123,6 +124,18 @@ class PublicFeedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["verified"])
         self.assertFalse(result["authenticated"])
         self.assertFalse(result["ordersSubmitted"])
+
+    def test_depth_pilot_validates_depth_and_reports_fee_excluded_round_trip(self):
+        result = _depth_pilot_metrics("binance", "BTC/USDT", {
+            "bids": [[100.0, 1.0], [99.9, 1.0], [99.8, 1.0]],
+            "asks": [[101.0, 1.0], [101.1, 1.0], [101.2, 1.0]],
+        })
+
+        self.assertTrue(result["depthValidated"])
+        self.assertEqual(result["levelsPerSide"], 3)
+        self.assertTrue(result["simulatedImmediateRoundTrip"]["completed"])
+        self.assertLess(result["simulatedImmediateRoundTrip"]["grossPnlQuote"], 0)
+        self.assertFalse(result["simulatedImmediateRoundTrip"]["includesFees"])
 
     async def test_random_pair_probe_records_redacted_transport_failures_and_closes(self):
         from arbx.hybrid.registry import VenueSpec
@@ -240,6 +253,7 @@ class PublicFeedCheckTests(unittest.IsolatedAsyncioTestCase):
                 "verified": True,
                 "authenticated": False,
                 "ordersSubmitted": False,
+                "depthPilot": {"passed": True},
             }
 
         with tempfile.TemporaryDirectory() as directory:
@@ -260,6 +274,8 @@ class PublicFeedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         self.assertTrue(report["persistenceValidation"]["validated"])
         self.assertEqual(report["selection"]["onePairPerVenue"], True)
+        self.assertFalse(report["depthPilot"]["profitAssurance"])
+        self.assertFalse(report["depthPilot"]["chainSettlementVerified"])
         self.assertEqual(set(report["selection"]["venueSeeds"]), {"binance", "mexc"})
         self.assertEqual([item["venue"] for item in report["venues"]], ["binance", "mexc"])
         self.assertEqual([item["symbol"] for item in report["venues"]], ["BINANCE/USDT", "MEXC/USDT"])

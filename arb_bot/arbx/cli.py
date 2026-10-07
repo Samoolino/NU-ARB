@@ -475,6 +475,22 @@ async def _random_pair_venue_check(spec, rng: random.Random, semaphore: asyncio.
             }
             result["exchangeTimestampMs"] = ws_book.get("timestamp")
             result["sequence"] = ws_book.get("nonce")
+            rest_depth = _depth_pilot_metrics(spec.id, symbol, rest_book)
+            websocket_depth = _depth_pilot_metrics(spec.id, symbol, ws_book)
+            result["depthPilot"] = {
+                "notionalQuote": 25.0,
+                "quoteCurrency": market.get("quote"),
+                "rest": rest_depth,
+                "websocket": websocket_depth,
+                "passed": all(
+                    source["depthValidated"]
+                    and source["simulatedImmediateRoundTrip"]["completed"]
+                    for source in (rest_depth, websocket_depth)
+                ),
+                "profitAssurance": False,
+                "chainSettlementVerified": False,
+                "ordersSubmitted": False,
+            }
             result["verified"] = result["restOk"] and result["websocketOk"]
             if not result["verified"]:
                 result["failedStage"] = "book_validation"
@@ -488,6 +504,42 @@ async def _random_pair_venue_check(spec, rng: random.Random, semaphore: asyncio.
         except Exception:
             pass
     return result
+
+
+def _depth_pilot_metrics(venue_id: str, symbol: str, book: dict, notional_quote: float = 25.0) -> dict:
+    from arbx.hybrid.depth import normalize_depth, validate_depth, walk_asks, walk_bids
+
+    normalized = normalize_depth(venue_id, symbol, book, limit=50)
+    validation = validate_depth(
+        normalized,
+        notional_quote,
+        max_age_ms=5_000,
+        min_levels=3,
+    )
+    buy = walk_asks(normalized, notional_quote)
+    sell = walk_bids(normalized, buy.quantity) if buy is not None else None
+    round_trip = {
+        "completed": buy is not None and sell is not None,
+        "grossPnlQuote": None,
+        "grossPnlBps": None,
+        "includesFees": False,
+    }
+    if buy is not None and sell is not None:
+        gross_pnl = sell.quote_cost - buy.quote_cost
+        round_trip.update({
+            "grossPnlQuote": round(gross_pnl, 12),
+            "grossPnlBps": round(gross_pnl / buy.quote_cost * 10_000, 4),
+        })
+    return {
+        "depthValidated": validation.ok,
+        "reason": validation.reason,
+        "visibleDepthQuote": round(validation.depth_usd, 12),
+        "levelsPerSide": validation.levels,
+        "bestBid": validation.top_bid,
+        "bestAsk": validation.top_ask,
+        "spreadBps": round(validation.spread_bps, 4),
+        "simulatedImmediateRoundTrip": round_trip,
+    }
 
 
 async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
@@ -529,6 +581,9 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
                 0,
                 f"feed_failure:{result.get('failedStage', 'unknown')}:{result['reason']}",
             )
+        depth_pilot = result.get("depthPilot")
+        if not isinstance(depth_pilot, dict) or depth_pilot.get("passed") is not True:
+            blockers.insert(0, "public_depth_strategy_pilot_not_validated")
         result.update({
             "authenticatedAccountVerified": False,
             "balancesVerified": False,
@@ -550,6 +605,15 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
             "venueSeeds": venue_seeds,
             "onePairPerVenue": True,
         },
+        "depthPilot": {
+            "notionalQuote": 25.0,
+            "minimumLevelsPerSide": 3,
+            "sources": ["rest", "websocket"],
+            "scope": "single-venue-book-depth-and-immediate-round-trip-simulation",
+            "chainSettlementVerified": False,
+            "profitAssurance": False,
+            "ordersSubmitted": False,
+        },
         "scope": "unauthenticated_public_spot_market_data_only",
         "authenticated": False,
         "ordersSubmitted": False,
@@ -560,6 +624,9 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
         "clarification": (
             "This audit samples one current listed spot pair per venue and tests an actual "
             "REST order-book snapshot and WebSocket order-book event on that same pair. "
+            "Its depth pilot validates visible levels and simulates a fixed 25-unit quote "
+            "round trip within each individual book; it is not cross-venue execution, "
+            "chain-settlement verification, or profit assurance. "
             "It does not establish account authorization, available balances, private stream "
             "health, fee tier, executable cross-venue depth, matched asset identity, settlement "
             "routes, execution success, or guaranteed profit."
@@ -606,25 +673,35 @@ async def _randomized_venue_feed_audit(report_dir: Path) -> bool:
             or persisted.get("generatedAtUtc") != generated_at
             or persisted.get("selection", {}).get("seed") != sample_seed
             or persisted.get("selection", {}).get("venueSeeds") != venue_seeds
+            or persisted.get("depthPilot") != report["depthPilot"]
             or persisted.get("persistenceValidation", {}).get("validated") is not True
             or [venue.get("venue") for venue in persisted.get("venues", [])] != expected_venues
+            or persisted.get("venues") != results
         ):
             raise RuntimeError(f"persisted randomized venue audit failed validation: {artifact}")
 
     verified_count = sum(result.get("verified") is True for result in results)
+    depth_pass_count = sum(
+        isinstance(result.get("depthPilot"), dict)
+        and result["depthPilot"].get("passed") is True
+        for result in results
+    )
     for result in results:
+        depth_pilot = result.get("depthPilot")
         print(
             f"[{result['venue']}] adapter={result['adapter']} "
             f"pair={result.get('symbol', 'unavailable')} "
             f"REST={str(result['restOk']).lower()} WS={str(result['websocketOk']).lower()} "
+            f"DEPTH_PILOT={str(isinstance(depth_pilot, dict) and depth_pilot.get('passed') is True).lower()} "
             f"LIVE_ENGAGEABLE=false"
         )
         if result.get("reason"):
             print(f"  failed {result.get('failedStage')}: {result['reason']}")
     print(f"Random-pair REST+WebSocket checks passed: {verified_count}/{len(results)}")
+    print(f"Random-pair REST+WebSocket depth pilot passed: {depth_pass_count}/{len(results)}")
     print(f"Persistent random-pair audit validated: {latest}")
     print("Live engagement remains blocked; no authenticated checks or orders were performed.")
-    return verified_count == len(results)
+    return verified_count == len(results) and depth_pass_count == len(results)
 
 
 async def _probe(cfg: Config) -> None:

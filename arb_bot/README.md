@@ -234,10 +234,15 @@ REST and WebSocket order books for the same pair:
 The command records the random seed and sampled pair, checks the configured
 CCXT Pro adapter, and persists timestamped and latest JSON reports under
 `diagnostics\`. Failures identify the stage and reason. One random pair per
-venue is a connectivity smoke test, not full market/route coverage; reports
-explicitly keep live engagement blocked because authentication, balances,
-permissions, private streams, fees, order constraints, risk, and settlement
-are not tested. No orders, withdrawals, or transfers are made.
+venue is a connectivity smoke test, not full market/route coverage. Each
+sample also runs a read-only depth pilot on both books: it requires three
+visible levels per side, checks a 25-unit quote-depth threshold, and simulates
+an immediate buy/sell walk inside that single venue's book. The simulated
+round trip excludes fees and is not an arbitrage or profit claim. The sampled
+symbols are spot markets, not blockchain settlement routes. Reports explicitly
+keep live engagement blocked because authentication, balances, permissions,
+private streams, fees, order constraints, risk, and settlement are not tested.
+No orders, withdrawals, or transfers are made.
 
 To persist one fail-closed summary of the latest public, permission, and strict
 same-pair feed evidence after running those audits:
