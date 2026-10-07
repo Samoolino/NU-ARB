@@ -172,6 +172,7 @@ async def validate_authenticated_feeds_until_resolved(
     }
     report = {
         "schemaVersion": 1,
+        "auditType": "authenticated_feed_validation",
         "startedAtUtc": _now(),
         "updatedAtUtc": _now(),
         "runStatus": "RUNNING",

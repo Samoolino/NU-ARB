@@ -35,3 +35,70 @@ def profit_compounding_capital(starter,realized_profit):
 
 def strategy_catalog():
     return ("dca_profit_compounding","cross_exchange","triangular_intra_exchange","triangular_multi_exchange","stablecoin_arbitrage","spot")
+
+
+def strategy_execution_catalog():
+    """Describe implementation and live-path boundaries; cataloging is not verification."""
+    return (
+        {
+            "id": "cross_exchange",
+            "kind": "execution_strategy",
+            "implementation": "implemented",
+            "executionGateStrategy": "cross",
+            "livePath": "implemented_fail_closed",
+            "connectionRequirements": (
+                "two_distinct_fresh_live_eligible_venues",
+                "prefunded_quote_and_base_inventory",
+                "private_and_public_streams",
+                "certified_ioc_route",
+                "BOT_CROSS_LIVE=1",
+            ),
+        },
+        {
+            "id": "triangular_intra_exchange",
+            "kind": "execution_strategy",
+            "implementation": "implemented",
+            "executionGateStrategy": "triangular",
+            "livePath": "implemented_fail_closed",
+            "connectionRequirements": (
+                "one_fresh_live_eligible_venue",
+                "three_active_spot_markets",
+                "prefunded_cycle_inventory",
+                "private_and_public_streams",
+                "certified_ioc_route",
+                "BOT_TRIANGULAR_LIVE=1",
+            ),
+        },
+        {
+            "id": "dca_profit_compounding",
+            "kind": "capital_policy",
+            "implementation": "implemented_policy_not_strategy",
+            "executionGateStrategy": None,
+            "livePath": "policy_only",
+            "connectionRequirements": ("known_realized_pnl", "risk_gate_approval"),
+        },
+        {
+            "id": "stablecoin_arbitrage",
+            "kind": "opportunity_calculation",
+            "implementation": "helper_only",
+            "executionGateStrategy": "cross",
+            "livePath": "no_dedicated_route",
+            "connectionRequirements": ("cross_exchange_route_must_be_independently_certified",),
+        },
+        {
+            "id": "triangular_multi_exchange",
+            "kind": "catalog_label",
+            "implementation": "no_distinct_execution_path",
+            "executionGateStrategy": None,
+            "livePath": "unsupported",
+            "connectionRequirements": (),
+        },
+        {
+            "id": "spot",
+            "kind": "market_type",
+            "implementation": "market_type_not_strategy",
+            "executionGateStrategy": None,
+            "livePath": "not_applicable",
+            "connectionRequirements": (),
+        },
+    )

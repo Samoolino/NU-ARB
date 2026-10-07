@@ -1032,6 +1032,44 @@ def main(argv=None) -> None:
         if not ok:
             sys.exit(1)
         return
+    if cmd == "readiness-state":
+        from arbx.readiness_state import write_readiness_state
+
+        report_dir = Path(os.getenv(
+            "ARBX_ENGAGEMENT_AUDIT_DIR",
+            str(Path(__file__).resolve().parents[2] / "diagnostics"),
+        ))
+        report = write_readiness_state(report_dir)
+        print(
+            f"READINESS={report['readinessState']} "
+            f"LIVE_ENGAGEABLE={str(report['liveEngageable']).lower()} "
+            f"FRESH_LIVE_VENUES={report['qualifiedLiveVenueCount']}"
+        )
+        for source_name, evidence in report["evidenceSources"].items():
+            print(
+                f"  {source_name}: {evidence['status']} "
+                f"age_seconds={evidence['ageSeconds']}"
+            )
+        for venue in report["venues"]:
+            if venue["livePermissionCandidate"]:
+                print(
+                    f"  [{venue['venue']}] public={venue['publicFeed']['status']} "
+                    f"permissions={venue['permissionEvidence']['status']} "
+                    f"same_pair={venue['authenticatedSamePairFeeds']['status']} "
+                    "live_eligible=false"
+                )
+        print("Strategies:")
+        for strategy in report["strategies"]:
+            print(
+                f"  {strategy['id']}: {strategy['connectionState']} "
+                f"(live_engagement_verified=false)"
+            )
+        print(
+            "Persisted read-only readiness state: "
+            + str(report["persistenceValidation"]["artifactPaths"][-1])
+        )
+        print("No credentials, balances, orders, or transfers were read or submitted.")
+        return
     if cmd == "permission-revalidate":
         from arbx.permissions import PERMISSION_PROBE_VENUES
 
@@ -1126,7 +1164,7 @@ def main(argv=None) -> None:
         print("Hybrid venue catalog:", len(VENUE_CATALOG))
         for v in VENUE_CATALOG:
             print(f"  {v.id:<12} ccxt={v.ccxt_id:<12} adapter={v.adapter}")
-        print("Strategies:", ", ".join(strategy_catalog()))
+        print("Strategy catalog (not a live-readiness claim):", ", ".join(strategy_catalog()))
         return
     if cmd == "hybrid-validate":
         cfg = Config.from_env()

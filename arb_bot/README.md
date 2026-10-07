@@ -239,6 +239,28 @@ explicitly keep live engagement blocked because authentication, balances,
 permissions, private streams, fees, order constraints, risk, and settlement
 are not tested. No orders, withdrawals, or transfers are made.
 
+To persist one fail-closed summary of the latest public, permission, and strict
+same-pair feed evidence after running those audits:
+```powershell
+& ..\.venv\Scripts\python.exe run.py readiness-state
+```
+This writes timestamped and `diagnostics\live-readiness-state-latest.json`
+reports. It accepts only schema/scope-matching read-back-validated reports and
+marks evidence older than 15 minutes stale. It does not read credential stores,
+balances, live environment switches, or private streams, and therefore never
+marks a venue or strategy live eligible. The three current permission-policy
+candidates are Binance, Bybit, and KuCoin; at least two fresh, independently
+certified venue connections are required for cross-venue live execution.
+
+Only two catalog entries are distinct order execution paths today:
+`cross_exchange` (two eligible venues) and `triangular_intra_exchange` (one
+eligible venue with a three-spot-market cycle). Both remain fail-closed and
+require explicit, separate live opt-ins. `dca_profit_compounding` is a capital
+policy, `stablecoin_arbitrage` is a helper calculation without its own route,
+`triangular_multi_exchange` has no distinct executor, and `spot` is a market
+type rather than an arbitrage strategy. Catalog membership or public feed
+connectivity is not strategy or account certification.
+
 For authenticated permission-policy revalidation of all seven permission-probed
 venues, first
 run the masked local PowerShell helper from the repository root:

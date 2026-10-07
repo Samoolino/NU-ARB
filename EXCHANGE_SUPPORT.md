@@ -43,6 +43,39 @@ For repeated authenticated permission checks, `python run.py permission-revalida
 
 `FULLY_VERIFIED` describes a fresh successful authenticated connectivity check, including both WebSocket message checks. It does **not** mean that an exchange has verified trading permission. The UI reports `liveEligible` separately. Seven venues currently have permission probes; only Binance, Bybit, and KuCoin can potentially pass the strict live-permission policy. MEXC and HTX can have validated scope evidence yet remain live-ineligible because the evidence cannot prove every required restriction. Binance's API combines spot and margin into one flag. Paper sessions use real market and private-balance streams with virtual execution. The public Vercel scanner is a separate read-only view.
 
+### Persistent readiness state and strategy scope
+
+Run `python run.py readiness-state` from `arb_bot` after the public randomized
+feed audit, `permission-revalidate`, and (using fresh, locally rotated
+credentials) `authenticated-feed-validation`. It writes timestamped and
+`live-readiness-state-latest.json` reports under `diagnostics`. The report
+accepts only read-back-validated artifacts with the expected schema/scope and
+marks evidence older than 15 minutes stale. It never reads credentials, account
+databases, balances, engine switches, or submits orders. Therefore, this report
+always remains observational and cannot itself declare a venue live eligible;
+live account balance, private stream, IOC route, and current risk/capital
+evidence remain separately required. Public-feed success, a saved permission
+response, or a strategy catalog entry alone never qualifies a venue.
+
+The six historic strategy catalog labels do not all represent independent live
+execution routes:
+
+| Catalog entry | Actual engine meaning | Live connection state |
+| --- | --- | --- |
+| `cross_exchange` | Implemented cross-venue IOC execution route | Fail-closed; needs two separately verified eligible venues, pre-funded inventory, streams, route and risk evidence, plus explicit cross-live switches |
+| `triangular_intra_exchange` | Implemented same-venue triangular IOC route | Fail-closed; needs one eligible venue, all three active spot markets, inventory, streams, route and risk evidence, plus explicit triangular-live switches |
+| `dca_profit_compounding` | Capital-allocation policy, not an order route | Policy only; relies on known realized PnL and risk approval |
+| `stablecoin_arbitrage` | Helper calculation that reuses cross-exchange math | No separately certified execution route |
+| `triangular_multi_exchange` | Catalog label | No distinct multi-venue triangular executor |
+| `spot` | Market type | Not an arbitrage strategy |
+
+The strategy catalog and the runtime execution gate are different layers.
+Only the cross-exchange and same-venue triangular route names map to order
+authorization; even those routes have **not** been live-verified merely by
+being implemented or listed. The readiness artifact emits per-venue source
+freshness and explicit strategy route status so stale/missing evidence is not
+mistaken for a connected live engagement.
+
 Venue acceptance has distinct levels:
 
 - `adapterAvailable`: the installed CCXT Pro package exposes an adapter. This does not prove the venue is reachable or that an account is connected.

@@ -134,6 +134,7 @@ async def revalidate_permissions_until_resolved(
     }
     report = {
         "schemaVersion": 1,
+        "auditType": "authenticated_permission_revalidation",
         "startedAtUtc": started_at,
         "updatedAtUtc": started_at,
         "runStatus": "RUNNING",
