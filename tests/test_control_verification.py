@@ -169,6 +169,10 @@ class ControlVerificationTests(unittest.TestCase):
         self.assertFalse(web_api._verification_is_fresh(timestamp, now=now))
         self.assertTrue(web_api._verification_is_fresh(
             datetime.fromtimestamp(now - 30, timezone.utc).isoformat(), now=now))
+        self.assertFalse(web_api._verification_is_fresh(
+            datetime.fromtimestamp(now + 1, timezone.utc).isoformat(), now=now))
+        self.assertFalse(web_api._verification_is_fresh("not-a-timestamp", now=now))
+        self.assertFalse(web_api._verification_is_fresh("2026-10-07T12:00:00", now=now))
 
     def test_exchange_diagnostics_redact_credentials_and_signature(self):
         class CredentialExchange:

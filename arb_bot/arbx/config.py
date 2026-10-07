@@ -17,11 +17,19 @@ class ExchangeCfg:
     venue_id: str | None = None
     api_key: str = ""
     secret: str = ""
+    private_key: str = ""
     password: str = ""
     max_symbols: int = 120
     default_taker_bps: float = 10.0
     require_private_stream: bool = False
     auth_mode: str = "hmac"
+
+    @property
+    def signing_key(self) -> str:
+        """Credential material selected by profile, without converting its field name."""
+        if self.auth_mode in ("rsa", "ed25519"):
+            return self.private_key
+        return self.secret
 
 
 @dataclass
@@ -70,6 +78,8 @@ class Config:
     # ---- Cross-exchange (pre-funded inventory on both sides; no on-chain hop in the loop) ----
     cross_enabled: bool = True
     cross_live: bool = False
+    # Live triangular execution is deliberately separate from cross_live.
+    triangular_live: bool = False
     cross_top_n: int = 30
     rebalance_haircut_bps: float = 2.0
 
@@ -90,7 +100,10 @@ class Config:
         mx = int(f("BOT_MAX_SYMBOLS", 120))
         xs = [ExchangeCfg(id=CCXT_ADAPTERS.get(i, i), venue_id=i,
                           api_key=os.getenv(f"BOT_{i.upper()}_KEY", ""),
-                          secret=os.getenv(f"BOT_{i.upper()}_SECRET", ""),
+                          secret=(os.getenv(f"BOT_{i.upper()}_SECRET", "")
+                                  if os.getenv(f"BOT_{i.upper()}_AUTH_MODE", "hmac").lower() == "hmac" else ""),
+                          private_key=(os.getenv(f"BOT_{i.upper()}_PRIVATE_KEY", "")
+                                       if os.getenv(f"BOT_{i.upper()}_AUTH_MODE", "hmac").lower() in ("rsa", "ed25519") else ""),
                           password=os.getenv(f"BOT_{i.upper()}_PASSWORD", ""),
                           auth_mode=os.getenv(f"BOT_{i.upper()}_AUTH_MODE", "hmac").lower(),
                           max_symbols=mx, default_taker_bps=f("BOT_DEFAULT_TAKER_BPS", 10.0)) for i in ids]
@@ -111,6 +124,7 @@ class Config:
             limit_tol_bps=f("BOT_LIMIT_TOL_BPS", 1.0), max_rtt_ms=f("BOT_MAX_RTT_MS", 80.0),
             fee_discount_pct=f("BOT_FEE_DISCOUNT_PCT", 0.0),
             cross_enabled=b("BOT_CROSS", True), cross_live=b("BOT_CROSS_LIVE", False),
+            triangular_live=b("BOT_TRIANGULAR_LIVE", False),
             journal_path=Path(os.getenv("BOT_JOURNAL_PATH", "trade_journal.csv")),
         )
 
@@ -134,6 +148,14 @@ class Config:
         venue_ids = [x.venue_id or x.id for x in self.exchanges]
         if len(self.exchanges) > MAX_EXCHANGES or len(set(venue_ids)) != len(venue_ids):
             raise ValueError(f"configure between one and {MAX_EXCHANGES} unique exchange venues")
+        for x in self.exchanges:
+            venue_id = x.venue_id or x.id
+            if x.auth_mode in ("rsa", "ed25519") and venue_id != "binance":
+                raise ValueError("RSA and Ed25519 authentication profiles are supported only for Binance")
+            if x.private_key and (
+                venue_id != "binance" or x.auth_mode not in ("rsa", "ed25519")
+            ):
+                raise ValueError("Private-key authentication profile is unsupported for this venue or mode")
         if self.target_profit_usd is not None and self.target_profit_usd <= 0:
             raise ValueError("BOT_TARGET_PROFIT_USD must be greater than zero")
         if self.starter_capital_usd <= 0:
@@ -157,6 +179,10 @@ class Config:
             if not validation_only and (len(self.exchanges) < 2 or not self.cross_enabled or not self.cross_live):
                 raise ValueError("live mode requires at least two venues and explicit BOT_CROSS_LIVE=1")
             for x in self.exchanges:
-                if not (x.api_key and x.secret):
+                if not (x.api_key and x.signing_key):
                     venue_id = x.venue_id or x.id
-                    raise ValueError(f"live mode needs BOT_{venue_id.upper()}_KEY and BOT_{venue_id.upper()}_SECRET")
+                    signing_name = "PRIVATE_KEY" if x.auth_mode in ("rsa", "ed25519") else "SECRET"
+                    raise ValueError(
+                        f"live mode needs BOT_{venue_id.upper()}_KEY and "
+                        f"BOT_{venue_id.upper()}_{signing_name}"
+                    )

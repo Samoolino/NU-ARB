@@ -1,12 +1,52 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isValidSymbol, readFiniteNumber, scanBooks } from "../lib/scanner.js";
-import { EXCHANGES, EXCHANGE_BY_ID } from "../lib/exchange-registry.js";
+import {
+  EXCHANGES,
+  EXCHANGE_BY_ID,
+  VENUE_CATALOG,
+  VENUE_STATES,
+  VENUE_BY_ID,
+} from "../lib/exchange-registry.js";
+
+const CATALOG_IDS = [
+  "binance", "bybit", "okx", "kucoin", "gateio", "bitget", "kraken", "coinbase",
+  "mexc", "htx", "bitfinex", "cryptocom", "coinex", "bitstamp", "gemini", "bingx",
+  "lbank", "whitebit", "bitmart", "upbit",
+];
 
 test("registers the 18 requested public spot venues without duplicate ids", () => {
   assert.equal(EXCHANGES.length, 18);
   assert.equal(new Set(EXCHANGES.map((exchange) => exchange.id)).size, 18);
   assert.equal(EXCHANGE_BY_ID.cryptocom.name, "Crypto.com Exchange");
+});
+
+test("catalogs all 20 canonical identities with unverified, unavailable defaults", () => {
+  assert.deepEqual(VENUE_CATALOG.map((exchange) => exchange.id), CATALOG_IDS);
+  assert.deepEqual(VENUE_STATES, [
+    "CATALOGUED", "PUBLIC_MARKET_VERIFIED", "PUBLIC_WS_VERIFIED", "AUTHENTICATED",
+    "BALANCE_VERIFIED", "PRIVATE_STREAM_VERIFIED", "PERMISSIONS_VERIFIED",
+    "EXECUTION_ROUTE_VERIFIED", "LIVE_ELIGIBLE",
+  ]);
+  for (const exchange of VENUE_CATALOG) {
+    assert.equal(exchange.catalogState, "CATALOGUED");
+    assert.equal(exchange.lifecycleState, "CATALOGUED");
+    assert.deepEqual(exchange.verificationStates, Object.fromEntries(
+      VENUE_STATES.slice(1).map((state) => [state, false]),
+    ));
+    assert.equal(exchange.engineSelectionAvailable, false);
+    assert.equal(exchange.engineSelectionStatus, "UNAVAILABLE");
+  }
+  assert.equal(VENUE_BY_ID.coinbase.controlId, "coinbaseexchange");
+});
+
+test("catalog-only venues do not enter public scanner or control-engine selection sets", () => {
+  for (const id of ["bitmart", "upbit"]) {
+    assert.equal(VENUE_BY_ID[id].engineSelectionSupported, false);
+    assert.equal(VENUE_CATALOG.some((exchange) => exchange.controlId === id && exchange.engineSelectionSupported), false);
+    assert.equal(EXCHANGES.some((exchange) => exchange.id === id), false);
+  }
+  assert.equal(EXCHANGES.length, 18);
 });
 
 test("accepts spot market pairs quoted in supported stablecoins", () => {

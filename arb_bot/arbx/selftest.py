@@ -146,7 +146,10 @@ def run_selftest(seconds: float = 6.0) -> bool:
                  journal_path=journal, cooldown_s=0.05, max_loss_usd=50.0, cross_top_n=5)
     cfg.validate()
     original = worker_mod.build_exchange
-    worker_mod.build_exchange = lambda x, live: FakeExchange(bias=1.004 if x.id == "fake_b" else 1.0,
+    # The paper starter notional is $3; a 0.4% venue shift is still below the
+    # configured $0.01 minimum after fees at that size. Keep the fake edge large
+    # enough to exercise successful paper settlement without weakening any gate.
+    worker_mod.build_exchange = lambda x, live: FakeExchange(bias=1.01 if x.id == "fake_b" else 1.0,
                                                              seed=1 if x.id == "fake_a" else 2)
 
     async def go():

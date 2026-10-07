@@ -1,7 +1,9 @@
 import asyncio
+import os
 import pathlib
 import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -90,14 +92,17 @@ class CrossRankingTests(unittest.TestCase):
                 workers.append(worker)
             hub.workers = workers
             hub.cross_syms = {"BTC/USDT", "ETH/USDT"}
-            with patch.object(hub, "_fire_cross", new=AsyncMock()) as fire:
-                await hub.scan_cross(workers[0], {"BTC/USDT", "ETH/USDT"})
-                await hub.scan_cross(workers[0], {"BTC/USDT", "ETH/USDT"})
-                self.assertEqual(fire.await_count, 1)
-                selected = fire.await_args.args[0]
-                self.assertEqual(selected.symbol, "ETH/USDT")
-                self.assertEqual(selected.sell_ex, "venue_c")
-            hub.journal_store.close()
+            try:
+                with patch("arbx.hub.time.monotonic", return_value=now), \
+                        patch.object(hub, "_fire_cross", new=AsyncMock()) as fire:
+                    await hub.scan_cross(workers[0], {"BTC/USDT", "ETH/USDT"})
+                    await hub.scan_cross(workers[0], {"BTC/USDT", "ETH/USDT"})
+                    self.assertEqual(fire.await_count, 1)
+                    selected = fire.await_args.args[0]
+                    self.assertEqual(selected.symbol, "ETH/USDT")
+                    self.assertEqual(selected.sell_ex, "venue_c")
+            finally:
+                hub.journal_store.close()
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(pathlib.Path(directory) / "journal.csv"))
@@ -161,10 +166,49 @@ class CrossRankingTests(unittest.TestCase):
             limit_sell=102.0, cost=100.0, expected_usd=2.0, worst_usd=1.0,
             net_bps=200.0, worst_bps=100.0, age_ms=1.0, base_ccy="BTC", quote_ccy="USDT",
         )
-        executor = CrossExecutor({"buy": FakeExchange(1.0), "sell": FakeExchange(0.99)})
+        cfg = SimpleNamespace(mode="live", cross_live=True)
+        exchanges = {"buy": FakeExchange(1.0), "sell": FakeExchange(0.99)}
 
-        with self.assertRaisesRegex(LegFailure, "inventory imbalance"):
-            asyncio.run(executor.execute(opportunity))
+        live_switches = {
+            "BOT_MODE": "live",
+            "BOT_CROSS_LIVE": "1",
+            "BOT_ALLOW_ORDERS": "1",
+            "ARBX_LIVE_TRADING_ENABLED": "1",
+        }
+        with patch.dict(os.environ, live_switches, clear=False):
+            from arbx.execution_gate import (
+                ExecutionEvidence,
+                ExecutionGate,
+                OrderScope,
+                opportunity_fingerprint,
+            )
+            gate = ExecutionGate(cfg)
+            permit = gate.authorize(
+                "cross",
+                venue_ids=("buy", "sell"),
+                route_id="cross:buy>sell",
+                opportunity_id=opportunity_fingerprint("cross", opportunity),
+                evidence=ExecutionEvidence(
+                    authenticated_credentials=True, venue_live_eligible=True,
+                    execution_eligible=True, active_market=True, fresh_orderbook=True,
+                    sufficient_depth=True, sufficient_balance=True, sufficient_capital=True,
+                    known_fees=True, latency_acceptable=True, risk_approved=True,
+                    rate_limit_ok=True, venue_healthy=True, route_certified=True,
+                    expected_pnl=2.0, min_expected_pnl=0.01,
+                    worst_case_pnl=1.0, min_worst_case_pnl=0.01,
+                    expected_bps=200.0, min_expected_bps=3.0,
+                    worst_case_bps=100.0, min_worst_case_bps=0.5,
+                    orderbook_observed_at=time.monotonic(),
+                    max_book_age_ms=10_000.0,
+                ),
+                orders=(
+                    OrderScope(0, "buy", "BTC/USDT", "buy", "limit", 1.0, 100.0),
+                    OrderScope(1, "sell", "BTC/USDT", "sell", "limit", 1.0, 102.0),
+                ),
+            )
+            executor = CrossExecutor(exchanges, cfg, gate)
+            with self.assertRaisesRegex(LegFailure, "inventory imbalance"):
+                asyncio.run(executor.execute(opportunity, permit))
 
 
 if __name__ == "__main__":

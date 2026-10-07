@@ -22,6 +22,8 @@ def validate_capabilities(
         reasons.append("limit_orders_unavailable")
     if requirements.order_type == "market" and not capabilities.market_orders:
         reasons.append("market_orders_unavailable")
+    if requirements.require_market_order and not capabilities.market_orders:
+        reasons.append("market_orders_required")
     if requirements.require_websocket and not capabilities.websocket:
         reasons.append("websocket_required")
     if requirements.require_private_stream and not capabilities.user_stream:

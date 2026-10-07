@@ -61,6 +61,7 @@ try {
     # Config.validate() independently enforces the same values server-side.
     Set-ProcessSetting "BOT_EXCHANGES" ($venues -join ",")
     Set-ProcessSetting "BOT_MODE" "live"
+    Set-ProcessSetting "BOT_ALLOW_ORDERS" "0"
     Set-ProcessSetting "BOT_CROSS" "1"
     Set-ProcessSetting "BOT_CROSS_LIVE" "1"
     Set-ProcessSetting "BOT_TRADE_SIZE_USD" "3"
@@ -74,7 +75,33 @@ try {
     foreach ($venue in $venues) {
         $prefix = "BOT_$($venue.ToUpperInvariant())"
         Set-ProcessSetting "$($prefix)_KEY" (Read-MaskedValue "$venue API key")
-        Set-ProcessSetting "$($prefix)_SECRET" (Read-MaskedValue "$venue API secret or signing key")
+        if ($venue -eq "binance") {
+            $authMode = (Read-Host "Binance auth mode (hmac or ed25519)").Trim().ToLowerInvariant()
+            if ($authMode -notin @("hmac", "ed25519")) {
+                throw "Binance live startup supports only hmac or ed25519 credentials."
+            }
+            Set-ProcessSetting "$($prefix)_AUTH_MODE" $authMode
+            if ($authMode -eq "ed25519") {
+                $keyPath = Read-Host "Path to the Binance Ed25519 PKCS8 PEM private signing key"
+                if (-not $keyPath -or -not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
+                    throw "A readable Ed25519 private-key file is required."
+                }
+                $privateKey = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $keyPath).ProviderPath)
+                Set-ProcessSetting "$($prefix)_PRIVATE_KEY" $privateKey
+                $keyCheck = 'import os; from cryptography.hazmat.primitives.serialization import load_pem_private_key; from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey; key=load_pem_private_key(os.environ["BOT_BINANCE_PRIVATE_KEY"].encode("utf-8"), password=None); raise SystemExit(0 if isinstance(key, Ed25519PrivateKey) else 2)'
+                & $python -c $keyCheck
+                if ($LASTEXITCODE -ne 0) {
+                    throw "The supplied Binance key is not a valid Ed25519 PKCS8 PEM private key."
+                }
+            }
+            else {
+                Set-ProcessSetting "$($prefix)_SECRET" (Read-MaskedValue "Binance API secret")
+            }
+        }
+        else {
+            Set-ProcessSetting "$($prefix)_AUTH_MODE" "hmac"
+            Set-ProcessSetting "$($prefix)_SECRET" (Read-MaskedValue "$venue API secret")
+        }
         if ($venue -eq "kucoin") {
             Set-ProcessSetting "$($prefix)_PASSWORD" (Read-MaskedValue "kucoin API passphrase")
         }
@@ -102,6 +129,11 @@ try {
         Write-Host "Live run cancelled. No orders were submitted."
         return
     }
+
+    # The separate submission switches stay disabled through setup, self-test,
+    # preflight, and the confirmation prompt. Set them only in this process after
+    # the operator's final explicit authorization; finally restores prior values.
+    Set-ProcessSetting "BOT_ALLOW_ORDERS" "1"
 
     Write-Host "Starting live $3 profit-compounding pilot. Keep this terminal open; press Ctrl+C to stop new order activity."
     & $python run.py run --headless

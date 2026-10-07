@@ -20,16 +20,24 @@
 
 The registry includes 18 venues and allows selecting up to all 18 for verification/scanning; it does not automatically add credentials or start every venue. Permission probes now cover Binance, Bybit, KuCoin, HTX, MEXC, OKX, and Bitfinex. Only Binance, Bybit, or KuCoin can potentially pass the current strict account-scope checks; per-key evidence, authenticated streams, IOC capabilities, and fresh balances still decide eligibility. Cross-exchange scans compare depth breakpoints and available inventory, then rank by the largest modeled dollar floor, with expected return and capital utilization as tie-breakers. A modeled floor is not a promise of realized profit.
 
-## 1. The no-loss gate, precisely
+## 1. Modeled edge and loss circuit breaker, precisely
 
 For every trade, before any order is sent:
 1. Books fresh (`max_book_age_ms`, local monotonic clock) and REST RTT p95 healthy.
 2. Depth-walked expected edge >= `min_net_bps` after **per-market taker fees on every leg**.
 3. Each leg gets an **IOC limit price** = marginal book price +/- `limit_tol_bps`.
-4. **Modeled floor** = every leg filled *exactly at its IOC limit*, using estimated fees. It must be >= `min_worst_bps` and >= `min_profit_usd`; this is not an execution or realized-PnL guarantee.
+4. **Modeled floor** = every leg filled *exactly at its IOC limit*, using estimated fees. It must be >= `min_worst_bps` and >= `min_profit_usd`; expected and worst-case PnL plus their positive thresholds are pretrade estimates, not an execution or realized-PnL guarantee.
 5. Exchange min amount / min notional, balance/inventory, trades-per-minute cap, global halt flag.
 
-After every trade, realized PnL is compared with the modeled floor; a miss beyond `verify_slack_bps` halts the bot. **Not covered:** partial/missed legs, non-atomic cross-exchange fills, actual fee differences, and market unwind losses.
+The Phase 10 policy module halts on any supplied realized loss and requires
+reconciliation for unknown PnL or account/order state. Reconciliation must
+establish known realized PnL, matching balances, no open or unknown orders, and
+no partial or unknown fills; its policy remains denied until explicitly
+restarted. This pure module is not wired into the live order path and does not
+change live behavior. The modeled-floor comparison using `verify_slack_bps` is
+additional monitoring, not protection from partial/missed legs, non-atomic
+cross-exchange fills, actual fee differences, or market unwind losses. A loss
+can still occur.
 
 ## 2. Speed optimizers (what is actually applied)
 
@@ -79,6 +87,12 @@ export BOT_TRADE_SIZE_USD="25"
 export BOT_BINANCE_KEY="..." BOT_BINANCE_SECRET="..."     # only needed for live
 export BOT_BYBIT_KEY="..."   BOT_BYBIT_SECRET="..."
 ```
+For Binance RSA or Ed25519 credentials, set `BOT_BINANCE_AUTH_MODE` to `rsa` or
+`ed25519` and provide the matching private-key text in
+`BOT_BINANCE_PRIVATE_KEY` instead of `BOT_BINANCE_SECRET`. Keep key material
+server-side and out of source control. The control API likewise stores HMAC
+credentials as `apiKey` + `secret`, and RSA/Ed25519 credentials as `apiKey` +
+`privateKey`; the Binance CCXT transport performs the venue-specific mapping.
 1. `python run.py probe`  -> RTT table + verdict per exchange (public endpoints, no keys).
 2. Repeat on each candidate VPS region; pick the best; discard the rest.
 3. `python run.py transfer-plan` -> cheapest token+network for rebalancing (needs read-only key on most exchanges).
@@ -94,19 +108,180 @@ Review `trade_journal.csv`. **Go-live criteria - all must hold:**
 - Check the fee tier you configured equals the exchange's real tier (`BOT_DEFAULT_TAKER_BPS`).
 
 ### F. Live pilot (cross-venue, guarded)
-The live pilot target defaults to **$200 realized net PnL per ignition**. The hard session-loss ceiling is **$3** (a smaller value is allowed); trade size is capped at **$25**. The operator must choose a positive worst-case edge and minimum profit floor. These bounds do not assure profit or cap the loss from a missed fill, exchange outage, or unwind.
+The current live configuration fixes starter capital and the initial trade allocation at **$3**, compounds only realized positive PnL, and halts new engagements after a realized loss. It does not guarantee profit or cap losses from missed/partial fills, exchange outages, or unwinds.
 
 1. Live mode requires at least two venues and explicit `BOT_CROSS_LIVE=1`. Every selected venue must pass read-only account, scope, stream, and execution preflight. Permission evidence is available for seven venues; Binance, Bybit, and KuCoin can potentially pass strict scope checks. No account has been verified in this environment.
 2. The transfer planner ranks withdrawal/deposit routes and estimated network costs only. No funds are moved automatically. Cross-venue IOC trades require pre-funded quote balance at the buy venue and base-asset inventory at the sell venue; chain bridges are not atomic with exchange orders and are not an execution leg.
 3. `python run.py live-preflight` performs current read-only account, balances, permission, and websocket checks; it places no orders or transfers. `python run.py run --headless` repeats the preflight and starts only if all selected venues pass. An opportunity is reevaluated after balance refresh, but it can still disappear and a partial/missed fill can lose money.
-4. `python run.py opportunities` prints the latest persisted depth/latency/edge/gate evidence. `trade_journal.sqlite3` holds opportunity records; `trade_journal.csv` and its SQLite companion record executions. A halt requires an operator review before a new ignition.
+4. `python run.py opportunities` prints the latest persisted depth/latency/edge/gate evidence. `trade_journal.sqlite3` holds opportunity and execution records; when the Phase 10 policy/store interface is used, it also persists risk-policy state and sanitized incidents. Phase 10 exposes reconciliation/restart through a pure policy interface, not an operator UI, and is not integrated into live execution. Profit and no-loss outcomes are not guaranteed.
+
+Live submission is separately fail-closed: both `BOT_MODE=live` and
+`BOT_ALLOW_ORDERS=1` are required. Cross-exchange orders also require the
+separate `BOT_CROSS_LIVE=1` selection. Legacy aliases such as
+`BOT_ALLOW_ORDER_SUBMISSION` and `BOT_ALLOW_CROSS_ORDERS` never grant authority;
+if present and not exactly `1`, they only veto it. These settings default to
+paper/`0` in `.env.control.example`. The interactive launcher forces
+`BOT_ALLOW_ORDERS=0` through self-test and read-only preflight, enables it only
+after the final `START LIVE` confirmation, and restores its original value on
+exit.
 
 ### G. Windows PowerShell (no WSL required)
-The supported runtime here is native Windows with Python 3.12 and the repository's `.venv`; WSL is not used. From `arb_bot`:
+The supported runtime here is native Windows with Python 3.12 and the repository's `.venv`; WSL is not used. Administrator privileges are normally unnecessary for an isolated virtual environment. Open PowerShell in the repository root (elevate only if your machine policy requires it), then install/verify dependencies:
 ```powershell
-& ..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Set-Location 'C:\Users\saME\NU-ARB'
+py -3.12 -m venv .venv
+& .\.venv\Scripts\python.exe -m pip install --upgrade pip
+& .\.venv\Scripts\python.exe -m pip install -r .\arb_bot\requirements.txt
+& .\.venv\Scripts\python.exe -m pip check
+Set-Location .\arb_bot
 & ..\.venv\Scripts\python.exe run.py selftest
 ```
+If `.venv` already exists, omit the `py -3.12 -m venv .venv` line. Do not install
+into the system Python.
+
+**Credential incident:** all API keys/secrets previously pasted into chat must
+be treated as compromised. Revoke them at the exchanges, rotate them, and use
+only fresh keys entered at a local masked prompt. Never set credentials in
+commands, source files, screenshots, or chat.
+
+**Read-only prerequisite scans:** first inspect paper feeds and permission evidence:
+```powershell
+Set-Location 'C:\Users\saME\NU-ARB'
+Set-Location .\arb_bot
+& ..\.venv\Scripts\python.exe run.py public-feed-check binance mexc kucoin htx
+Set-Location ..
+.\arb_bot\validate-authenticated-feeds.ps1 -Symbol BTC/USDT -Venues bybit,kucoin,mexc,htx
+```
+Enter only rotated credentials at the local masked prompts. The authenticated
+scanner requires complete per-key permission evidence and valid REST plus
+WebSocket books for the same exact spot pair. Binance Ed25519 is supported by
+selecting that mode and supplying a local PKCS8 PEM path; the key is validated
+without printing its contents. MEXC and HTX can report valid
+permission-probe responses, but the project cannot prove all restrictions
+required for live mode, so they are not live candidates. KuCoin additionally
+requires its API passphrase. OKX also requires its passphrase. These checks are
+read-only and are not balance, chain-route, or trade certification. The
+supported permission-probed venues are Binance, Bybit, KuCoin, MEXC, HTX, OKX,
+and Bitfinex.
+
+**Guarded live launcher:** this is an operator-controlled real-order path, not
+a prompt that should be run with the chat-exposed keys. Only use it after
+revoking/rotating those keys, meeting the documented paper-trading criteria,
+reviewing the risks, and verifying account permissions and balances yourself:
+```powershell
+Set-Location 'C:\Users\saME\NU-ARB'
+.\start-live.ps1
+```
+The launcher accepts at least two distinct venues from Binance, Bybit, and
+KuCoin; MEXC and HTX are deliberately excluded by the current live permission
+policy. It prompts for credentials locally, runs the offline self-test and
+authenticated read-only live preflight, and will not turn on order submission
+unless every gate passes and you type exactly `START LIVE`. Do not bypass those
+gates. The launcher's supported credential prompts are Binance HMAC key/secret
+or Ed25519 API key plus a local PKCS8 PEM private-key file, Bybit key/secret,
+and KuCoin key/secret/passphrase. Current live allocation starts at $3, and any
+realized loss halts further engagements. Cross-venue orders are non-atomic;
+losses remain possible and profit is not assured.
+
+The engine does **not** perform an all-chain balance scan. Settlement networks
+are catalog metadata only; the transfer planner is read-only and does not prove
+deposits/withdrawals are enabled or submit transfers. Account balances are
+available only through explicit authenticated account preflight for configured
+venues and supported assets.
+
+To verify public REST and live order-book WebSocket feeds at Binance, MEXC,
+KuCoin, and HTX, then run the paper engine on those live feeds from the
+repository root:
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\arb_bot\start-paper-feeds.ps1
+```
+This checks `BTC/USDT` by default (override with `-Symbol ETH/USDT`), uses no
+credentials, submits no orders, and stops before the engine starts if any
+venue's REST or WebSocket book cannot be verified. The continuing engine uses
+live market data but stays in `BOT_MODE=paper`; this is not live execution.
+
+For a persistent read-only audit across the full 20-venue catalog:
+```powershell
+Set-Location .\arb_bot
+& ..\.venv\Scripts\python.exe run.py live-engagement-audit
+```
+Each run checks public BTC/USDT REST and WebSocket books where listed and saves
+a timestamped report plus `diagnostics\live-engagement-audit-latest.json`.
+The report separately records venue feed results, strategy catalog entries,
+and the canonical settlement-network catalog. Network catalog membership is
+not proof of venue chain support or transfer-route availability. This procedure
+does not authenticate, inspect private balances/permissions, submit orders or
+transfers, or establish live eligibility. It never guarantees that a displayed
+price difference is executable or profitable; live engagement remains blocked
+until fresh per-account and per-route live preflight succeeds.
+
+To revalidate and persist the four required core venues specifically
+(Binance, MEXC, KuCoin, HTX), use:
+```powershell
+& ..\.venv\Scripts\python.exe run.py required-live-venue-audit
+```
+This writes timestamped and `required-live-venue-audit-latest.json` reports
+under `diagnostics\`, with per-venue adapter constructor, REST/WS results, exact
+feed failures, and explicit missing live-evidence blockers. It is public-data
+only; even four successful books do not make the account or order route
+live-engageable. No price difference assures execution or profit.
+
+For a fresh random active spot pair on every venue in the catalog, testing both
+REST and WebSocket order books for the same pair:
+```powershell
+& ..\.venv\Scripts\python.exe run.py randomized-venue-feed-audit
+```
+The command records the random seed and sampled pair, checks the configured
+CCXT Pro adapter, and persists timestamped and latest JSON reports under
+`diagnostics\`. Failures identify the stage and reason. One random pair per
+venue is a connectivity smoke test, not full market/route coverage; reports
+explicitly keep live engagement blocked because authentication, balances,
+permissions, private streams, fees, order constraints, risk, and settlement
+are not tested. No orders, withdrawals, or transfers are made.
+
+For authenticated permission-policy revalidation of all seven permission-probed
+venues, first
+run the masked local PowerShell helper from the repository root:
+```powershell
+Set-Location 'C:\Users\saME\NU-ARB'
+.\arb_bot\revalidate-permissions.ps1
+```
+The default set is Binance, Bybit, KuCoin, MEXC, HTX, OKX, and Bitfinex.
+Run a subset with `.\arb_bot\revalidate-permissions.ps1 -Venues mexc,htx`.
+This local-only command uses authenticated permission endpoints and persists
+timestamped plus latest credential-free JSON reports in `diagnostics\`.
+Transient network/time-out/rate-limit failures retry with exponential backoff
+(30 seconds to 15 minutes by default); Ctrl+C stops the loop and preserves the
+latest report. Authentication failures, unsupported endpoints, and incomplete
+permission responses stop for operator action. A validated response that lacks
+safe spot-only, disabled-transfer, withdrawal-disabled, or IP-allowlist proof
+is recorded as policy-blocked rather than retried endlessly. MEXC and HTX
+currently cannot prove all live permission requirements and therefore remain
+ineligible; permission validation alone never grants live execution. The command
+does not query balances, start streams, submit orders, or perform transfers.
+The helper restores the process environment on exit. Never place credentials
+in source files, reports, or chat; use newly rotated keys entered only in the
+masked local prompt.
+
+To strictly validate authenticated permission evidence and both REST and
+WebSocket books for the *same exact spot pair* on all selected permission-probed
+venues, use:
+```powershell
+Set-Location 'C:\Users\saME\NU-ARB'
+.\arb_bot\validate-authenticated-feeds.ps1 -Symbol BTC/USDT -Venues mexc,htx,kucoin
+```
+The default exact pair is `BTC/USDT`. One pair is checked across all selected
+venues; each venue must first return complete key-permission evidence, then
+provide active spot-market metadata and valid, non-crossed, correctly sorted
+REST and WebSocket books with positive finite levels. Transient timeouts,
+network, exchange-unavailable, and rate-limit errors retry with exponential
+backoff (30 seconds to 15 minutes); a permission or pair-policy failure is
+recorded and stops retrying. Results persist in timestamped and
+`diagnostics\authenticated-feed-validation-latest.json` reports. A pair feed
+pass does not imply `liveEligible`: MEXC and HTX can pass permission-evidence
+validation while remaining blocked by missing scope/IP/transfer proof. This
+scanner does not query balances or place orders/transfers.
+
 To access the credential and account-verification UI locally, start from the repository root:
 ```powershell
 Set-Location C:\Users\saME\Downloads\NU-ARB
@@ -114,15 +289,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-local.ps1
 ```
 The browser opens at `http://127.0.0.1:8765`. The local host binds to loopback only; it stores encrypted credentials under `%LOCALAPPDATA%\ARBX`, with the encryption key protected for the current Windows user. Its public scanner can compare selected spot markets across the registered public adapters using REST order-book snapshots, a shared USD-equivalent notional, assumed taker-fee BPS, and a minimum estimated net-edge threshold. USDT, USDC, and DAI are assumed to equal $1 for these estimates. This scanner is read-only and does not use account balances, streams, or place orders; a positive estimate is not assured profit. Live orders are disabled by default. The optional `-EnableLive` switch requires an additional terminal confirmation before enabling live-order requests in the browser; saved venue permissions and fresh preflight checks still apply.
 
-For an interactive local run, start from the repository root (the folder containing `arb_bot`) and launch the root-level helper. It accepts credentials through masked prompts, retains them only in the current PowerShell process while the bot runs, runs the offline self-test and read-only account/balance/scope/WebSocket preflight, and asks for an explicit final confirmation before starting live orders. It supports HMAC credentials for Binance, Bybit, and KuCoin; KuCoin also requires its API passphrase. It does not write credentials to disk or send them to chat.
+For an interactive local run, start from the repository root (the folder containing `arb_bot`) and launch the root-level helper. It accepts credentials through masked prompts, retains them only in the current PowerShell process while the bot runs, runs the offline self-test and read-only account/balance/scope/WebSocket preflight, and asks for an explicit final confirmation before starting live orders. It supports Binance HMAC or Ed25519 (local PKCS8 PEM file), Bybit HMAC,
+and KuCoin HMAC plus API passphrase. It does not write credentials to disk or
+send them to chat.
 ```powershell
 Set-Location C:\Users\saME\Downloads\NU-ARB
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-live.ps1
 ```
-The helper proceeds only if every selected venue reports `liveEligible=true`; the read-only preflight itself never places orders. It defaults to a $5 per-engagement cap (maximum $25), the existing $3 session-loss halt, and the $200 realized-profit stop. Those controls do not guarantee or strictly cap realized loss. Keep the process attached in the terminal; stopping it does not reverse exchange holdings. Docker and WSL are not application requirements.
+The helper proceeds only if every selected venue reports `liveEligible=true`; the read-only preflight itself never places orders. The current policy fixes the initial allocation at $3 and halts after a realized loss; it does not guarantee a profit or a maximum realized loss. Keep the process attached in the terminal; stopping it does not reverse exchange holdings. Docker and WSL are not application requirements.
 
 ### H. Linux/VPS live deployment
-1. `export BOT_MODE=live BOT_TRADE_SIZE_USD=10 BOT_MAX_LOSS_USD=3 BOT_TARGET_PROFIT_USD=200 BOT_CROSS=1 BOT_CROSS_LIVE=1`.
+1. Do not enable live trading by copying generic environment-variable examples. Use only after the live preflight and risk requirements above pass; the supported interactive Windows launcher enforces its own gates. The Linux environment-variable path is operator-managed and has no equivalent masked prompt/final-confirmation wrapper documented here.
 2. Run headless in a supervisor so it restarts and logs:
 ```ini
 # /etc/systemd/system/arbx.service
@@ -159,9 +336,10 @@ WantedBy=multi-user.target
 | `BOT_LIMIT_TOL_BPS` | 1 | IOC price tolerance: bigger = more fills, thinner floor |
 | `BOT_MAX_RTT_MS` | 80 | live refuses above this median RTT |
 | `BOT_MAX_SYMBOLS` | 120 | order-book streams per exchange |
-| `BOT_MAX_LOSS_USD` | 5 | cumulative-loss kill switch |
+| `BOT_MAX_LOSS_USD` | 0 | legacy compatibility value; live loss halt is event-based |
 | `BOT_FEE_DISCOUNT_PCT` | 0 | fee-token discount |
 | `BOT_CROSS`, `BOT_CROSS_LIVE` | 1, 0 | cross-exchange scan / live orders |
+| `BOT_ALLOW_ORDERS` | 0 | central live-order authorization; requires `BOT_MODE=live` |
 
 ## 5. Pre-funded cross-exchange and rebalancing
 Cross trades buy on A and sell on B simultaneously (IOC both sides). Balances drift one way over time. Rebalance **manually** (bot never withdraws) using the cheapest vehicle from `transfer-plan`: stablecoins on the cheapest network (often TRC-20/other low-fee chains) when a flat fee dominates; a coin like TRX/XRP/XLM only if its fee + 2 conversion legs beats that. `rebalance_haircut_bps` (2 bps default in `config.py`) charges that amortized cost against every cross trade.

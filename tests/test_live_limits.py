@@ -84,7 +84,8 @@ class LivePilotLimitTests(unittest.TestCase):
             first = FakeWorker("binance")
             second = FakeWorker("bybit", RuntimeError("permission unavailable"))
             hub = Hub(cfg, queue.Queue())
-            with patch("arbx.hub.ExchangeWorker", side_effect=[first, second]):
+            with patch.dict(os.environ, {"BOT_MODE": "live", "BOT_ALLOW_ORDERS": "1"}, clear=False), \
+                    patch("arbx.hub.ExchangeWorker", side_effect=[first, second]):
                 asyncio.run(hub.run())
 
         first.start.assert_not_called()

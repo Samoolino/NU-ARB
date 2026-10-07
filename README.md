@@ -67,4 +67,10 @@ $env:BOT_MODE = "paper"
 python run.py --headless
 ```
 
-The bot defaults to paper mode. Live mode can place real exchange orders; it requires exchange credentials, and cross-exchange live orders require the separate `BOT_CROSS_LIVE=1` opt-in. Arbitrage is risky and profits are not guaranteed. Read the full [operations guide](ARBX_README.md) before configuring exchanges. Never commit API keys.
+The bot defaults to paper mode. Live orders require exact `BOT_MODE=live`,
+`BOT_ALLOW_ORDERS=1`, and the operator-controlled
+`ARBX_LIVE_TRADING_ENABLED=1` switch, which is rechecked before each order.
+Cross-exchange live orders separately require `BOT_CROSS_LIVE=1`; this does not
+implicitly enable triangular live orders. Arbitrage is risky and profits are
+not guaranteed. Read the full [operations guide](ARBX_README.md) before
+configuring exchanges. Never commit API keys.

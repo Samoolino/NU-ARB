@@ -1,21 +1,47 @@
 # Exchange support and verification limits
 
-The hybrid engine maintains a 20-venue candidate catalog. A registry entry is not proof that a live adapter, a permission check, or order execution works for that venue. The control API reports CCXT Pro adapter availability and per-account verification results at runtime. A venue becomes eligible for the authenticated scanner only after current REST/account/balance checks and real public and private WebSocket messages have all passed. Verification expires after five minutes; an expired venue is shown as `STALE` and is removed from engine choices until it is checked again.
+**Policy snapshot: 2026-10-07.** This documents implemented permission checks,
+not live account verification. No credentials or exchange balances were checked
+for this snapshot; per-account eligibility requires fresh local preflight.
+
+The hybrid engine maintains a canonical catalog of exactly 20 candidate identities. A registry entry is only `CATALOGUED`; it is not proof of an adapter, authentication support, market-data verification, execution certification, or live eligibility. The `adapter` field is a preferred transport selector, not capability evidence. These separate states begin `UNVERIFIED` and become eligible only through fresh runtime checks. Verification expires after five minutes; an expired venue is shown as `STALE` and is removed from engine choices until it is checked again.
 
 | Venue | Credential fields shown | Permission verification | Live trading |
 | --- | --- | --- | --- |
 | Binance | HMAC key + secret; RSA key + PEM private key; Ed25519 key + PEM private key | Signed [key-restrictions endpoint](https://developers.binance.com/en/docs/products/wallet/capital/account/API-key-permission); spot and margin share a trading flag | May qualify when permission flags and fresh preflight pass |
 | Bybit | API key + secret | Signed `/v5/user/query-api`; parses scopes, read-only flag, and IP allowlist | May qualify only for exclusive `SpotTrade`, no other scopes, write enabled, and IP allowlist |
-| KuCoin | API key + secret + passphrase | Signed `/api/v1/user/api-key`; requires the response to identify the configured key | May qualify only for `General` + `Spot` scopes, no transfer/withdraw scope, and IP allowlist |
-| HTX | API key + secret | API-key info endpoint reports scope and IP evidence when available | Disabled: returned broad trade scope does not prove spot-only permission |
-| MEXC | API key + secret | Signed `/api/v3/account` spot permission flags | Disabled: account response does not establish withdrawal/transfer restrictions or IP allowlist |
+| KuCoin | API key + secret + passphrase | Signed `/api/v1/user/api-key`; requires success code `200000`, matching configured key, parseable scopes, and checks the IP whitelist | May qualify only for `General` + `Spot` scopes, no transfer/withdraw scope, and a proven IP allowlist |
+| HTX | API key + secret | API-key info response must report `status=ok`, identify the configured key, and expose parseable scope evidence | Disabled: trade scope does not prove spot-only permission or disabled internal/universal transfers |
+| MEXC | API key + secret | Signed `/api/v3/account`; validates `permissions`, `canTrade`, and `canWithdraw` response fields | Disabled: account response does not prove an IP allowlist or disabled internal/universal transfers |
 | OKX | API key + secret + passphrase | Signed `/api/v5/account/config` permission and IP fields | Disabled: returned trade scope is not spot-specific |
 | Bitfinex | API key + secret | Signed [current key-permissions endpoint](https://docs.bitfinex.com/reference/key-permissions); reports current key read/write scopes | Disabled: `orders` is not spot-specific and this endpoint does not prove IP restriction |
 | Gate.io, LBank, Bitget, Kraken, Coinbase Exchange, Bitstamp, Gemini, Crypto.com Exchange, CoinEx, BingX, WhiteBIT | API key + secret (some venues also require a passphrase) | Authenticated REST/balance/stream checks; no supported scope probe | Disabled until a venue-specific probe proves safe spot scope, disabled withdrawals/transfers, and IP restriction |
 
-All 20 catalog venues can be selected together (when their adapters and credentials are available), but are not auto-enabled. The API key and private material stay in the encrypted control-service database and are never returned to the browser. Binance RSA and Ed25519 PEM material is passed to CCXT's signing implementation as bytes. Permission probes report evidence; only the strict Binance, Bybit, and KuCoin checks can potentially permit live execution. If the installed adapter does not advertise `fetchTime`, `watchOrderBook`, or `watchBalance`, or if a real message does not arrive, verification fails and the venue does not enter the authenticated scanner.
+The canonical identity set is Binance, Bybit, OKX, KuCoin, Gate.io, Bitget, Kraken, Coinbase Exchange, MEXC, HTX, Bitfinex, Crypto.com Exchange, CoinEx, Bitstamp, Gemini, BingX, LBank, WhiteBIT, BitMart, and Upbit. The control API and frontend catalog represent all 20 identities, but only 18 have supported control-engine selection/verification routes. BitMart and Upbit remain catalogued with `controlApiStatus=UNAVAILABLE`; they are shown as disabled catalog-only entries and are rejected if submitted to verification or engine-start endpoints. No unavailable entry is substituted with a different venue.
 
-`FULLY_VERIFIED` describes a fresh successful authenticated connectivity check, including both WebSocket message checks. It does **not** mean that an exchange has verified trading permission. The UI reports `liveEligible` separately. The hybrid registry has 20 venues; the strict have a permission-evidence probe, while the rest remain permission-unverified and ineligible for live mode. Binance's API combines spot and margin into one flag. Paper sessions use real market and private-balance streams with virtual execution. The public Vercel scanner is a separate read-only view.
+`controlApiStatus=AVAILABLE` means only that an identity has a control API
+selection route. It does not establish adapter availability, successful
+authentication, market-data connectivity, execution support, or live
+eligibility. The public scanner's selectable registry also remains 18 venues;
+its static catalog metadata does not enable the two unavailable identities.
+
+Registry metadata separately reports `CATALOGUED`,
+`PUBLIC_MARKET_VERIFIED`, `PUBLIC_WS_VERIFIED`, `AUTHENTICATED`,
+`BALANCE_VERIFIED`, `PRIVATE_STREAM_VERIFIED`, `PERMISSIONS_VERIFIED`,
+`EXECUTION_ROUTE_VERIFIED`, and `LIVE_ELIGIBLE`. Every identity starts at
+`CATALOGUED`; unobserved stages remain false/unverified and engine selection
+remains unavailable until fresh verification evidence makes a supported venue
+eligible. Existing control preflight evidence does not certify an actual order
+route, so `EXECUTION_ROUTE_VERIFIED` is not inferred from adapter capability
+flags.
+
+The API key and private material stay in the encrypted control-service database and are never returned to the browser. Binance RSA and Ed25519 PEM material is mapped to CCXT's `secret` field as text at the transport boundary; CCXT's signer then encodes it for cryptographic loading. The Ed25519 path is covered by an ephemeral-key signing test that performs no network request or order. Permission probes report evidence; only the strict Binance, Bybit, and KuCoin checks can potentially permit live execution. Bybit requires an explicit successful `retCode`; `10010` is recorded as an IP-allowlist blocker. OKX and Bitfinex return the common validation schema but remain policy-blocked because they cannot prove all required spot-only, transfer-disabled, and IP-restriction conditions. MEXC and HTX can produce validated permission-probe evidence, but their current response fields likewise do not prove all required restrictions. KuCoin is marked verified only after the success code, configured key identity, and permission scopes validate; missing IP restriction or unsafe scopes still block live. A list of IP ranges covering the entire IPv4 or IPv6 space is not accepted as restricted. If the installed adapter does not advertise `fetchTime`, `watchOrderBook`, or `watchBalance`, or if a real message does not arrive, verification fails and the venue does not enter the authenticated scanner.
+
+For repeated authenticated permission checks, `python run.py permission-revalidate [venue ...]` persists a credential-free report after each attempt. With no venue arguments, it checks all seven supported permission-probe venues: Binance, Bybit, KuCoin, HTX, MEXC, OKX, and Bitfinex. It retries transient network/time-out/rate-limit failures with exponential backoff (30 seconds up to 15 minutes by default), honors Ctrl+C, and stops a venue when its evidence is validated or a terminal auth/adapter/policy blocker is returned. A successful probe that is policy-blocked is recorded as `VALIDATED_POLICY_BLOCKED`; the retry loop does not pretend that repeated requests can create missing exchange permissions. This command checks permission endpoints only: it does not query balances, open private streams, submit orders, or enable live mode.
+
+`python run.py authenticated-feed-validation BTC/USDT [venue ...]` is the stricter connected-scanner check. Each selected venue must first return complete permission evidence, then the exact same active spot pair must return valid REST and WebSocket books; bid/ask levels must be finite, positive, correctly sorted, and not crossed. Transient connectivity errors retry with bounded exponential backoff, with each attempt durably reported. Policy failures stop without weakening the requirements. The scan is read-only and does not query balances or place orders. A strict pair pass is feed evidence only, not a live-permission grant or profit assurance.
+
+`FULLY_VERIFIED` describes a fresh successful authenticated connectivity check, including both WebSocket message checks. It does **not** mean that an exchange has verified trading permission. The UI reports `liveEligible` separately. Seven venues currently have permission probes; only Binance, Bybit, and KuCoin can potentially pass the strict live-permission policy. MEXC and HTX can have validated scope evidence yet remain live-ineligible because the evidence cannot prove every required restriction. Binance's API combines spot and margin into one flag. Paper sessions use real market and private-balance streams with virtual execution. The public Vercel scanner is a separate read-only view.
 
 Venue acceptance has distinct levels:
 
@@ -32,7 +58,7 @@ For the terminal sandbox, set `BOT_MODE=paper` and `BOT_EXCHANGES` to the venues
 
 The production live path repeats the preflight for every selected venue. Live cross-exchange execution additionally requires at least two `liveEligible` venues, the explicit `cross_live` opt-in, pre-funded balances on both sides, and the operator flag. Missed or uneven fills can still require an unwind or manual recovery at a loss; the worst-case floor applies to completed fills within IOC limits, not all execution outcomes.
 
-For cross-venue comparison, the engine tests visible depth breakpoints, caps size at the configured trade notional and available quote/base inventory, and ranks eligible candidates by largest modeled net dollar floor, then expected net and capital utilization. It serializes cross execution, refreshes the chosen venues' balances, and recomputes from the latest books immediately before the gate. Ranking, balances available, depth, book sequence/age, and latency are journaled; inspect with `python run.py opportunities`. These estimates are not guaranteed profits: cross-exchange orders are non-atomic and actual fees/fills/unwinds can differ. A live terminal ignition defaults to a $200 realized-net target and rejects a session-loss stop above $3; reaching either target halts new opportunities.
+For cross-venue comparison, the engine tests visible depth breakpoints, caps size at the configured trade notional and available quote/base inventory, and ranks eligible candidates by largest modeled net dollar floor, then expected net and capital utilization. It serializes cross execution, refreshes the chosen venues' balances, and recomputes from the latest books immediately before the gate. Ranking, balances available, depth, book sequence/age, and latency are journaled; inspect with `python run.py opportunities`. These estimates are not guaranteed profits: cross-exchange orders are non-atomic and actual fees/fills/unwinds can differ. The current guarded terminal launcher starts at $3 allocation, compounds realized gains, and halts new engagements after a realized loss; it has no fixed $200 profit target or guaranteed loss ceiling.
 
 ## Current product boundaries
 
@@ -40,7 +66,7 @@ For cross-venue comparison, the engine tests visible depth breakpoints, caps siz
 - While an engine session runs, the status panel exposes actual recent book messages, sequence/timestamp data where CCXT supplies them, private-stream message age, REST latency, clock drift, and degraded state. The engine stops a protected session if its authenticated stream goes stale, and live mode also stops on stale public market data or latency above its pause threshold.
 - The profit target is a numeric USD net-realized target for the current engine session. The engine halts new opportunities once its journaled realized PnL reaches that target. The journal endpoint also reports completed realized PnL across durable saved sessions; this lifetime total does not change the current-session stop threshold.
 - No funds are transferred by the starter-capital view. It displays only the latest authenticated balance data and does not estimate USD valuation without a price source.
-- Live trading is operator-disabled by default and starts at $3 starter capital. Realized profit may increase subsequent allocation; realized live loss halts new engagements. There is no averaging down or martingale sizing. Engine requests can name up to all 20 catalog venues; each selected venue must pass fresh account, private/public stream, latency, execution, balance, and permission checks. A single venue failure blocks the entire selected live set. Live cross-exchange execution also requires at least two eligible venues, explicit `cross_live` opt-in, and the separate operator flag. Transfer planning is read-only; transfers are never automatically submitted.
+- Live trading is operator-disabled by default and starts at $3 starter capital. Realized profit may increase subsequent allocation; realized live loss halts new engagements. There is no averaging down or martingale sizing. Engine requests can name only the 18 venues routed by the control API; BitMart and Upbit catalog entries are rejected. Each selected venue must pass fresh account, private/public stream, latency, execution, balance, and permission checks. A single venue failure blocks the entire selected live set. Live cross-exchange execution also requires at least two eligible venues, explicit `cross_live` opt-in, and the separate operator flag. Transfer planning is read-only; transfers are never automatically submitted.
 
 ## Required deployment resources
 
@@ -53,10 +79,13 @@ The production core now separates transport adapters from strategy adapters. CCX
 the canonical CEX transport. Freqtrade and Hummingbot are optional strategy/process
 bridges and cannot grant venue live eligibility.
 
-The twenty-venue candidate catalog is:
-Binance, Bybit, OKX, KuCoin, Gate.io, Bitget, Kraken, Coinbase, MEXC, HTX,
-Bitfinex, Crypto.com, CoinEx, Bitstamp, Gemini, BingX, LBank, WhiteBIT,
-BitMart and Upbit.
+The canonical twenty-venue candidate catalog is the exact identity set listed
+above. Coinbase Exchange and Crypto.com Exchange are the display identities;
+the existing internal `coinbase` and `cryptocom` IDs are retained for
+compatibility. BitMart and Upbit are catalogued only and are explicitly
+unavailable in the current web control API. Adapter, authentication,
+market-data, execution, and live-eligibility status do not inherit from catalog
+membership and remain unverified until separate runtime evidence exists.
 
 Candidate status is not an assurance of live trading. Each selected venue must pass
 fresh REST, public WebSocket, private WebSocket, balance, permission, execution and

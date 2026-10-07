@@ -326,7 +326,9 @@
         for (const venue of venueDefinitions) {
           const option = document.createElement("option");
           option.value = venue.id;
-          option.textContent = venue.name + " · " + venue.state + (venue.adapterAvailable ? "" : " · adapter unavailable");
+          option.textContent = venue.name + " · " + venue.state +
+            (venue.engineSelectionSupported ? (venue.adapterAvailable ? "" : " · adapter unavailable") : " · catalogued only; control engine unavailable");
+          option.disabled = venue.engineSelectionSupported !== true;
           select.append(option);
         }
         select.value = previous && venueDefinitions.some((venue) => venue.id === previous) ? previous : "binance";
@@ -346,7 +348,7 @@
         option.textContent = mode.label;
         select.append(option);
       }
-      const unavailable = !venue?.adapterAvailable || !venue?.authenticationModes?.length;
+      const unavailable = !venue?.engineSelectionSupported || !venue?.adapterAvailable || !venue?.authenticationModes?.length;
       $("verifyButton").disabled = unavailable;
       if (showState) {
         const verified = venue?.lastVerified ? " · checked " + new Date(venue.lastVerified).toLocaleString() : "";
@@ -360,7 +362,8 @@
     }
     function updateEngineChoices() {
       const mode = $("engineMode").value;
-      const eligible = venueDefinitions.filter((venue) => venue.adapterAvailable && venue.verificationFresh &&
+      const eligible = venueDefinitions.filter((venue) => venue.engineSelectionSupported &&
+        venue.engineSelectionAvailable && venue.adapterAvailable && venue.verificationFresh &&
         venue.scannerEligible && (mode !== "live" || (runtimeSettings.liveTradingEnabled && venue.liveEligible)));
       const select = $("engineVenue");
       const previous = [...select.selectedOptions].map((option) => option.value);

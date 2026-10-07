@@ -33,4 +33,4 @@ jobs:
       - name: Run hybrid core tests
         env:
           PYTHONPATH: arb_bot
-        run: python -m pytest -q tests/test_hybrid_engine.py
+        run: python -m pytest -q tests/test_hybrid_engine.py tests/test_execution_gate.py

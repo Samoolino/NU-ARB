@@ -4,5 +4,11 @@ __pycache__/
 *.py[cod]
 .env
 *.log
+diagnostics/live-engagement-audit-*.json
+diagnostics/live-engagement-audit-latest.json
+diagnostics/required-live-venue-audit-*.json
+diagnostics/required-live-venue-audit-latest.json
+diagnostics/randomized-venue-feed-audit-*.json
+diagnostics/randomized-venue-feed-audit-latest.json
 trade_journal.csv
 selftest_journal.csv

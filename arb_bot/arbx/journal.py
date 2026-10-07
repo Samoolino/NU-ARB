@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from arbx.risk_policy import IncidentFact, PolicyStage, incident_payload
+
 
 class TradeJournal:
     """SQLite journal; only completed fills contribute to realized PnL."""
@@ -77,6 +79,20 @@ class TradeJournal:
             evidence TEXT NOT NULL DEFAULT '{}'
         )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS venue_certifications_venue_idx ON venue_certifications(venue, id)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS risk_policy_state (
+            policy_id TEXT PRIMARY KEY,
+            state TEXT NOT NULL
+        )""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS risk_incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            code TEXT NOT NULL,
+            realized_pnl REAL,
+            balances_match INTEGER,
+            open_orders INTEGER,
+            partial_fills INTEGER,
+            stage TEXT NOT NULL
+        )""")
         self.db.commit()
 
     def realized(self, session_id: str) -> float:
@@ -159,6 +175,80 @@ class TradeJournal:
         result = dict(row)
         result["reasons"] = json.loads(result["reasons"])
         result["evidence"] = json.loads(result["evidence"])
+        return result
+
+    def load_risk_policy_state(self) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT state FROM risk_policy_state WHERE policy_id='global'"
+        ).fetchone()
+        return None if row is None else json.loads(row["state"])
+
+    def save_risk_policy_state(self, state: dict[str, Any]) -> None:
+        if (not isinstance(state, dict)
+                or state.get("stage") not in {stage.value for stage in PolicyStage}
+                or state.get("reason") is not None
+                and not isinstance(state.get("reason"), str)):
+            raise ValueError("invalid risk policy state")
+        encoded = json.dumps(state, separators=(",", ":"), allow_nan=False)
+        self.db.execute(
+            """INSERT INTO risk_policy_state (policy_id, state) VALUES ('global', ?)
+               ON CONFLICT(policy_id) DO UPDATE SET state=excluded.state""",
+            (encoded,),
+        )
+        self.db.commit()
+
+    def record_risk_incident(self, incident: IncidentFact,
+                             state: dict[str, Any]) -> None:
+        if not isinstance(incident, IncidentFact):
+            raise TypeError("typed sanitized risk incident required")
+        payload = incident_payload(incident)
+        self._record_risk_incident_atomic(payload, state)
+
+    def _record_risk_incident_atomic(self, incident: dict[str, Any],
+                                     state: dict[str, Any]) -> None:
+        """Atomically append allow-listed incident facts and update persisted breaker state."""
+        encoded_state = json.dumps(state, separators=(",", ":"), allow_nan=False)
+        cursor = self.db.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            cursor.execute(
+                """INSERT INTO risk_incidents
+                   (code, realized_pnl, balances_match, open_orders, partial_fills, stage)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    incident["code"], incident["realized_pnl"],
+                    None if incident["balances_match"] is None else int(incident["balances_match"]),
+                    None if incident["open_orders"] is None else int(incident["open_orders"]),
+                    None if incident["partial_fills"] is None else int(incident["partial_fills"]),
+                    incident["stage"],
+                ),
+            )
+            cursor.execute(
+                """INSERT INTO risk_policy_state (policy_id, state) VALUES ('global', ?)
+                   ON CONFLICT(policy_id) DO UPDATE SET state=excluded.state""",
+                (encoded_state,),
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def recent_risk_incidents(self, limit: int = 100) -> list[dict[str, Any]]:
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+            raise ValueError("risk incident limit must be between 1 and 1000")
+        rows = self.db.execute(
+            """SELECT id, timestamp, code, realized_pnl, balances_match, open_orders,
+                      partial_fills, stage
+               FROM risk_incidents ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            for key in ("balances_match", "open_orders", "partial_fills"):
+                if item[key] is not None:
+                    item[key] = bool(item[key])
+            result.append(item)
         return result
 
     def close(self) -> None:

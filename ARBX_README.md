@@ -54,6 +54,42 @@ After every trade, realized PnL is compared with the modeled floor. A sufficient
 - Latency inside the configured live threshold.
 - Pre-funded inventory on both sides for cross-exchange execution.
 
+## Phase 8: submission-boundary authorization
+
+Every live IOC order now needs an immutable permit bound to its strategy, venue(s),
+route, opportunity fingerprint, and exact per-order scope. The gate rechecks
+`BOT_MODE=live`, `BOT_ALLOW_ORDERS=1`, and `ARBX_LIVE_TRADING_ENABLED=1` at the
+actual exchange submission boundary, not only when the control API starts a
+session. Cross-exchange execution additionally requires the existing
+`BOT_CROSS_LIVE=1` selection. A running session therefore stops submitting as
+soon as the global operator switch is turned off.
+
+Permits require positive expected and worst-case modeled PnL beyond configured
+thresholds, plus explicit evidence for authenticated credentials, venue and
+execution eligibility, active spot market, fresh book, sufficient depth and
+balances/capital, known fees, latency, risk/rate-limit status, venue health, and
+certified route. An unknown, absent, stale, mismatched, or reused permit/order is
+denied before the venue order call. The evidence snapshot is short-lived and
+cannot make modeled PnL a profit guarantee.
+
+Cross-live does **not** implicitly authorize triangular live orders. Triangular
+live operation is a separate opt-in (`BOT_TRIANGULAR_LIVE=1` and
+`BOT_TRIANGULAR_LIVE` enabled in the engine configuration); the authenticated
+control API does not enable that strategy. Hybrid adapter submissions remain
+unavailable unless a caller supplies the central typed permit and exact order
+scope; the adapter does not mint authorization itself. Emergency recovery is
+limited to a one-use, opposite-side market order in the same attempted
+triangular opportunity, and it still rechecks the process/global switches and
+fresh evidence.
+
+Evidence remains deliberately unavailable when the runtime cannot prove it:
+unconfigured or unauthenticated credentials, unsupported permissions or
+execution capabilities, unknown exchange taker fee, missing market/book/depth,
+insufficient balance/capital, stale data, degraded latency/health, missing route
+certification, or failed profitability/risk/rate-limit checks all evaluate
+false and block orders. A recovery permit also fails closed if its evidence has
+gone stale. No API/exchange order is issued by authorization or preflight.
+
 ## Paper mode
 
 Use paper trading with real market data before live operation. Review the durable trade journal and compare modeled versus realized outcomes. Do not loosen profitability gates merely to create trades.

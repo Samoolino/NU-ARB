@@ -1,11 +1,64 @@
-from arbx.hybrid.registry import VENUE_CATALOG
+from arbx.hybrid.registry import VENUE_CATALOG, VENUE_IDS
 from arbx.hybrid.depth import normalize_depth, validate_depth
 from arbx.hybrid.strategies import profit_compounding_capital, strategy_catalog
 
 
 def test_catalog_has_twenty_venues():
+    expected = {
+        "binance", "bybit", "okx", "kucoin", "gateio", "bitget", "kraken",
+        "coinbase", "mexc", "htx", "bitfinex", "cryptocom", "coinex",
+        "bitstamp", "gemini", "bingx", "lbank", "whitebit", "bitmart", "upbit",
+    }
     assert len(VENUE_CATALOG) == 20
-    assert len({v.id for v in VENUE_CATALOG}) == 20
+    assert set(VENUE_IDS) == expected
+    assert len(set(VENUE_IDS)) == 20
+
+
+def test_catalog_names_are_exact_required_venue_identities():
+    expected = {
+        "Binance", "Bybit", "OKX", "KuCoin", "Gate.io", "Bitget", "Kraken",
+        "Coinbase Exchange", "MEXC", "HTX", "Bitfinex", "Crypto.com Exchange",
+        "CoinEx", "Bitstamp", "Gemini", "BingX", "LBank", "WhiteBIT", "BitMart", "Upbit",
+    }
+    assert {venue.display_name for venue in VENUE_CATALOG} == expected
+
+
+def test_catalog_membership_does_not_imply_adapter_or_live_capabilities():
+    for venue in VENUE_CATALOG:
+        assert venue.catalog_status == "CATALOGUED"
+        assert venue.spot is False
+        assert venue.adapter_status == "UNVERIFIED"
+        assert venue.authentication_status == "UNVERIFIED"
+        assert venue.market_data_status == "UNVERIFIED"
+        assert venue.execution_status == "UNVERIFIED"
+        assert venue.live_eligibility_status == "UNVERIFIED"
+        assert venue.native_sdk is None
+
+
+def test_venues_missing_from_control_api_are_explicitly_unavailable():
+    by_id = {venue.id: venue for venue in VENUE_CATALOG}
+    assert by_id["bitmart"].control_api_status == "UNAVAILABLE"
+    assert by_id["upbit"].control_api_status == "UNAVAILABLE"
+    assert by_id["bitmart"].engine_selection_supported is False
+    assert by_id["upbit"].engine_selection_supported is False
+    assert "Not exposed" in by_id["bitmart"].notes
+    assert "Not exposed" in by_id["upbit"].notes
+    assert {venue.id for venue in VENUE_CATALOG if venue.control_api_status == "AVAILABLE"} == {
+        "binance", "bybit", "okx", "kucoin", "gateio", "mexc", "htx", "lbank",
+        "bitget", "kraken", "coinbase", "bitfinex", "bitstamp", "gemini",
+        "cryptocom", "coinex", "bingx", "whitebit",
+    }
+
+
+def test_catalog_metadata_does_not_make_unavailable_venues_selectable():
+    from arbx.hybrid.registry import venue_registry_metadata
+
+    for venue in VENUE_CATALOG:
+        metadata = venue_registry_metadata(venue)
+        assert metadata["catalogState"] == "CATALOGUED"
+        assert metadata["lifecycleState"] == "CATALOGUED"
+        assert metadata["engineSelectionAvailable"] is False
+        assert metadata["engineSelectionStatus"] == "UNAVAILABLE"
 
 
 def test_depth_walk_validation():

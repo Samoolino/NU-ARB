@@ -12,7 +12,15 @@ from dataclasses import dataclass, field
 
 from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
+from arbx.execution_gate import (
+    ExecutionEvidence,
+    ExecutionGate,
+    OrderScope,
+    opportunity_fingerprint,
+)
 from arbx.gate import ProfitGate, RiskManager
+from arbx.hybrid.contracts import ExecutionRequirements
+from arbx.hybrid.router import validate_route
 from arbx.journal import TradeJournal
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
@@ -47,6 +55,7 @@ class Hub:
         self.session_id = os.getenv("BOT_SESSION_ID") or uuid.uuid4().hex
         self.journal_store = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
         self.risk = RiskManager(cfg)
+        self.execution_gate = ExecutionGate(cfg, self.risk)
         self.risk.pnl = self.journal_store.realized(self.session_id)
         self.gate = ProfitGate(cfg, self.risk)
         self.stats = Stats(session_id=self.session_id, pnl=self.risk.pnl, equity=cfg.start_capital_usd + self.risk.pnl,
@@ -329,8 +338,103 @@ class Hub:
                 self.stats.rejects[d.reason] += 1
                 return
             t0, name = time.perf_counter(), f"X {x.symbol} {x.buy_ex}>{x.sell_ex}"
+            permit = None
+            if live:
+                requirements = ExecutionRequirements(
+                    market_type="spot",
+                    order_type="limit",
+                    require_websocket=True,
+                    require_private_stream=True,
+                    require_ioc=True,
+                )
+                capabilities = {
+                    worker.id: worker.live_capabilities
+                    for worker in (bw, sw)
+                    if worker.live_capabilities is not None
+                }
+                route = validate_route(
+                    capabilities,
+                    (bw.id, sw.id),
+                    requirements,
+                )
+                capital_available = (
+                    x.cost > 0
+                    and x.cost <= self.trade_size()
+                    and free_quote >= x.cost * 1.002
+                    and free_base >= x.base
+                )
+                buy_market = bw.ex.markets.get(x.symbol) or {}
+                sell_market = sw.ex.markets.get(x.symbol) or {}
+                fresh_books = all(
+                    book.bids and book.asks
+                    and (time.monotonic() - book.recv) * 1000 <= self.cfg.max_book_age_ms
+                    for book in (buy_book, sell_book)
+                )
+                buy_health, sell_health = bw.health_snapshot(), sw.health_snapshot()
+                evidence = ExecutionEvidence(
+                    authenticated_credentials=all(
+                        bool(worker.x.api_key and worker.x.signing_key and worker.private_stream_ready)
+                        for worker in (bw, sw)
+                    ),
+                    venue_live_eligible=(bw.live_venue_eligible is True
+                                         and sw.live_venue_eligible is True),
+                    execution_eligible=(bw.live_execution_eligible is True
+                                        and sw.live_execution_eligible is True),
+                    active_market=(
+                        buy_market.get("spot") is True and buy_market.get("contract") is not True
+                        and sell_market.get("spot") is True and sell_market.get("contract") is not True
+                    ),
+                    fresh_orderbook=fresh_books,
+                    sufficient_depth=bool(d.ok),
+                    sufficient_balance=free_quote >= x.cost * 1.002 and free_base >= x.base,
+                    sufficient_capital=capital_available,
+                    known_fees=(x.symbol in bw.fees_known and x.symbol in sw.fees_known),
+                    latency_acceptable=all(
+                        worker.lat.ok()
+                        and worker.lat.stats()["p95"] <= self.cfg.max_rtt_ms
+                        for worker in (bw, sw)
+                    ),
+                    risk_approved=bool(d.ok and not self.risk.halted),
+                    rate_limit_ok=self.risk.rate_ok(),
+                    venue_healthy=(buy_health["state"] == "HEALTHY"
+                                   and sell_health["state"] == "HEALTHY"),
+                    route_certified=route.ok is True,
+                    expected_pnl=x.expected_usd,
+                    min_expected_pnl=self.cfg.min_profit_usd,
+                    worst_case_pnl=x.worst_usd,
+                    min_worst_case_pnl=self.cfg.min_profit_usd,
+                    expected_bps=x.net_bps,
+                    min_expected_bps=self.cfg.min_net_bps,
+                    worst_case_bps=x.worst_bps,
+                    min_worst_case_bps=self.cfg.min_worst_bps,
+                    orderbook_observed_at=min(buy_book.recv, sell_book.recv),
+                    max_book_age_ms=self.cfg.max_book_age_ms,
+                )
+                route_id = f"cross:{x.buy_ex}>{x.sell_ex}"
+                orders = (
+                    OrderScope(0, x.buy_ex, x.symbol, "buy", "limit",
+                               float(bw.ex.amount_to_precision(x.symbol, x.base)), x.limit_buy),
+                    OrderScope(1, x.sell_ex, x.symbol, "sell", "limit",
+                               float(sw.ex.amount_to_precision(x.symbol, x.base)), x.limit_sell),
+                )
+                try:
+                    permit = self.execution_gate.authorize(
+                        "cross",
+                        venue_ids=(x.buy_ex, x.sell_ex),
+                        route_id=route_id,
+                        opportunity_id=opportunity_fingerprint("cross", x),
+                        evidence=evidence,
+                        orders=orders,
+                    )
+                except Exception as exc:
+                    self.stats.rejects["execution_authorization"] += 1
+                    self.risk.halt(f"cross live execution authorization denied ({type(exc).__name__})")
+                    return
             try:
-                res = await (self.cross_exec.execute(x) if live else self._paper.execute_cross(x))
+                res = (
+                    await self.cross_exec.execute(x, permit)
+                    if live else await self._paper.execute_cross(x)
+                )
             except Exception as e:
                 self.risk.halt(f"{name}: {e}" if isinstance(e, LegFailure) else f"{name} execution error {e!r}")
                 self.journal(x.buy_ex + "/" + x.sell_ex, name, x.cost, 0.0, x.worst_bps, False)
@@ -363,6 +467,11 @@ class Hub:
         self.workers = [ExchangeWorker(x, self.cfg, self) for x in self.cfg.exchanges]
         tasks: list = []
         try:
+            if self.cfg.mode == "live":
+                # Fail before connecting to venues if the central execution policy
+                # is not explicitly enabled. The executors repeat this check at
+                # every exchange order-submission boundary.
+                self.execution_gate.check_environment("cross")
             res = await asyncio.gather(*(w.prepare() for w in self.workers), return_exceptions=True)
             ok = []
             for w, r in zip(self.workers, res):
@@ -379,7 +488,9 @@ class Hub:
             if self.cross_active:
                 self.cross_syms = self._pick_cross_symbols()
                 if self.cfg.mode == "live":
-                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok})
+                    self.cross_exec = CrossExecutor(
+                        {w.id: w.ex for w in ok}, self.cfg, self.execution_gate
+                    )
             for w in ok:
                 w.start(self.cross_syms)
             tasks = [asyncio.create_task(w.run_loop(), name=f"loop:{w.id}") for w in ok]

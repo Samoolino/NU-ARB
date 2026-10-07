@@ -96,7 +96,90 @@ The hybrid certification layer is enforced twice in live mode:
 
 A stale or manually asserted certification therefore cannot authorize live trading.
 
+All real order submissions pass through `arbx.execution_gate.ExecutionGate` at
+the engine startup boundary and again immediately before each CCXT order call.
+Paper mode is always denied by this gate. A live order requires both
+`BOT_MODE=live` and `BOT_ALLOW_ORDERS=1`; the control service additionally
+requires `ARBX_LIVE_TRADING_ENABLED=1` and the explicit user confirmation.
+Legacy aliases such as `BOT_ALLOW_ORDER_SUBMISSION` and
+`BOT_ALLOW_CROSS_ORDERS` never grant authority and can only veto when configured
+to a value other than `1`. Any other configured `BOT_ALLOW_*` switch is also a
+veto unless it is exactly `1`; an absent switch is never an enable.
+Cross-exchange submissions additionally require `cfg.cross_live` and
+`BOT_CROSS_LIVE=1`. The interactive terminal launcher forces
+`BOT_ALLOW_ORDERS=0` through self-test and read-only preflight, sets it to `1`
+only after the final `START LIVE` confirmation, and restores the previous
+process value when it exits. The example deployment config keeps paper mode and
+all order switches at `0`.
+
+Switch approval alone cannot mint an execution permit. The production worker or
+hub must also provide explicit true evidence for `venue.liveEligible`, execution
+capabilities, the risk decision, available capital/inventory, and route
+capabilities. Missing or unknown evidence is rejected. Required authorization
+is checked again at every normal-order and emergency-unwind submission boundary.
+
+The live triangular executor, cross executor, and CCXT Pro adapter wrapper are
+all guarded; the hybrid adapter wrapper is unavailable for submission unless a
+central gate is explicitly injected. Triangular emergency unwind orders require
+the same in-process permit minted for the already-authorized execution and are
+limited to its reverse-leg recovery path. They do not authorize a new
+opportunity. A disabled gate halts live session startup before exchange workers
+connect, and repeated authorization happens immediately before submission to
+catch changed/expired process switches.
+
 Certification evidence is persisted in the SQLite journal under `venue_certifications`. The record contains venue, symbol, notional, eligibility, failure reasons, and the verification evidence.
+
+## Offline readiness certification
+
+From the repository root, run:
+
+```powershell
+.\scripts\certify-live-readiness.ps1
+```
+
+The script emits exactly seven named matrices: `VENUE`, `AUTH`, `MARKET DATA`,
+`NETWORK`, `EXECUTION`, `RISK`, and `SANDBOX`. Each matrix contains checks with
+an explicit status and evidence/limitation text. It checks the checked-in
+`BOT_MODE=paper` and explicit `BOT_ALLOW_ORDERS=0` defaults and reports only
+safe classifications for those two process values. It never enumerates the
+environment or reads credentials.
+
+Static defaults and source markers are not sandbox proof. The script is
+read-only and therefore requires a separate, reproducible evidence bundle at
+`diagnostics/sandbox-readiness.json`; no such evidence is bundled or presumed
+by this repository change. The bundle must bind to the current Git `HEAD` and
+SHA-256 of the exact source/test file set, be no more than seven days old, and
+include passing exit codes, exact commands, and hashed local logs for:
+
+* from `arb_bot/`: `python run.py selftest` (`SELFTEST PASSED`)
+* from repository root: `python tests/test_execution_gate.py`
+* from repository root: `python -m pytest -q tests/test_live_limits.py`
+* from repository root: `python -m pytest -q tests/test_hybrid_engine.py`
+
+Every log path must remain within the evidence bundle directory and its bytes
+must match the recorded SHA-256. The report includes the exact ordered
+`evidenceBinding.sourceFiles` list and digest inputs. Missing, stale, malformed, failed, or
+source-mismatched evidence keeps the result at `NOT_READY` (exit code 1).
+`SANDBOX_READY` (exit code 0) is possible only when that evidence bundle and
+all static safety/order-boundary checks validate. This script does not
+generate test evidence, execute application code, open the trading journal or
+database, contact a venue, or submit an order. It cannot establish
+`LIVE_SCAN_READY` or `LIVE_EXECUTION_READY`; those require separate fresh,
+authenticated runtime evidence and normal operator controls.
+
+The evidence JSON uses `schemaVersion: 1`, `status: "PASSED"`, the lowercase
+40-character `git rev-parse HEAD` value, the lowercase `sourceSha256` shown by
+the report, ISO-8601 UTC `completedUtc`, and a `checks` object keyed by
+`paper_selftest`, `execution_gate_tests`, `live_limits_tests`, and
+`hybrid_engine_tests`. Each check records `status: "PASSED"`, `exitCode: 0`,
+the exact command and `workingDirectory` above, plus a relative `logPath` and
+the log file's lowercase SHA-256 as `logSha256`. The source digest is SHA-256
+over each report-listed file, in listed order, as UTF-8 relative path plus LF,
+raw file bytes, then LF. Treat this as a reproducibility/provenance bundle;
+it is not a cryptographic CI attestation.
+
+This work delivers readiness-script foundations only. It does not complete
+the broader NU-ARB mission or its Phases 0–23.
 
 ## Capital policy
 

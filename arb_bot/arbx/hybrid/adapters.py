@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from abc import ABC, abstractmethod
 from typing import Any
@@ -13,10 +14,57 @@ from .contracts import (
     VenueInfo,
 )
 from .depth import normalize_depth
+from arbx.execution_gate import ExecutionAuthorizationError
 
 
 class AdapterError(RuntimeError):
     pass
+
+
+def safe_ccxt_error(exc: Exception, exchange=None, credentials: dict | None = None) -> str:
+    """Format transport errors without returning credential values or signatures."""
+    message = str(exc)[:1000]
+    values = list((credentials or {}).values())
+    if exchange is not None:
+        values.extend(
+            getattr(exchange, name, None)
+            for name in ("apiKey", "secret", "password", "privateKey")
+        )
+    for value in values:
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="ignore")
+        if isinstance(value, str) and value:
+            message = message.replace(value, "[REDACTED]")
+    message = re.sub(
+        r"(?i)(api[-_]?key|signature|sign|passphrase|secret|private[-_]?key)=([^&\s]+)",
+        r"\1=[REDACTED]",
+        message,
+    )
+    message = re.sub(
+        r"-----BEGIN [^-]+-----.*?-----END [^-]+-----",
+        "[REDACTED PRIVATE KEY]",
+        message,
+        flags=re.S,
+    )
+    return (
+        f"{type(exc).__name__}: {message}"[:1200]
+        if message
+        else f"{type(exc).__name__}: [redacted]"
+    )
+
+
+def ccxt_transport_config(venue_id: str, auth_mode: str, credentials: dict) -> dict:
+    """Return CCXT constructor credentials, keeping key profiles intact until transport setup."""
+    params = {key: value for key, value in credentials.items() if value}
+    if "privateKey" in params and (
+        venue_id != "binance" or auth_mode not in ("rsa", "ed25519")
+    ):
+        raise ValueError("Private-key authentication profile is unsupported for this venue or mode")
+    if "privateKey" in params:
+        # Binance's CCXT signer inspects PEM text before its EdDSA helper
+        # encodes the key. Passing bytes here makes that inspection fail.
+        params["secret"] = params.pop("privateKey")
+    return params
 
 
 class BaseAdapter(ABC):
@@ -97,11 +145,13 @@ class CCXTProAdapter(BaseAdapter):
 
     adapter_name = "ccxt_pro"
 
-    def __init__(self, venue_id, ccxt_id=None, credentials=None):
+    def __init__(self, venue_id, ccxt_id=None, credentials=None, execution_gate=None, *, auth_mode="hmac"):
         super().__init__(venue_id)
         self.ccxt_id = ccxt_id or venue_id
         self.credentials = credentials or {}
         self.ex = None
+        self.execution_gate = execution_gate
+        self.auth_mode = auth_mode
 
     async def connect(self):
         import ccxt.pro as ccxtpro
@@ -110,7 +160,7 @@ class CCXTProAdapter(BaseAdapter):
         if cls is None:
             raise AdapterError(f"CCXT Pro adapter unavailable: {self.ccxt_id}")
         params = {"enableRateLimit": True, "options": {"defaultType": "spot"}}
-        params.update({k: v for k, v in self.credentials.items() if v})
+        params.update(ccxt_transport_config(self.venue_id, self.auth_mode, self.credentials))
         self.ex = cls(params)
         await self.ex.load_markets()
 
@@ -172,7 +222,21 @@ class CCXTProAdapter(BaseAdapter):
     async def get_balances(self):
         return await self.ex.fetch_balance()
 
-    async def create_order(self, request: OrderRequest):
+    async def create_order(self, request: OrderRequest, permit=None, *,
+                           route_id: str = "", opportunity_id: str = "",
+                           order_scope=None):
+        if self.execution_gate is None:
+            raise AdapterError("order submission blocked: no central execution gate is attached")
+        if permit is None or order_scope is None:
+            raise AdapterError("order submission blocked: typed central permit and order evidence are required")
+        try:
+            self.execution_gate.authorize_order(
+                permit, order_scope, strategy="hybrid", route_id=route_id,
+                opportunity_id=opportunity_id,
+            )
+        except ExecutionAuthorizationError as exc:
+            raise AdapterError(f"order submission blocked by central execution gate: {exc}") from exc
+        self.execution_gate.note_order_attempt(permit, order_scope)
         params = {}
         if request.time_in_force:
             params["timeInForce"] = request.time_in_force
@@ -207,7 +271,12 @@ class CCXTProAdapter(BaseAdapter):
             result = await self.verify_rest()
             return {"ok": bool(result.get("ok")), "adapter": self.adapter_name, "venue": self.venue_id, **result}
         except Exception as exc:
-            return {"ok": False, "adapter": self.adapter_name, "venue": self.venue_id, "error": f"{type(exc).__name__}: {exc}"}
+            return {
+                "ok": False,
+                "adapter": self.adapter_name,
+                "venue": self.venue_id,
+                "error": safe_ccxt_error(exc, self.ex, self.credentials),
+            }
 
     async def verify_rest(self):
         started = time.perf_counter()
@@ -292,16 +361,34 @@ class CCXTAdapter(CCXTProAdapter):
         if cls is None:
             raise AdapterError(f"CCXT adapter unavailable: {self.ccxt_id}")
         params = {"enableRateLimit": True, "options": {"defaultType": "spot"}}
-        params.update({k: v for k, v in self.credentials.items() if v})
+        params.update(ccxt_transport_config(self.venue_id, self.auth_mode, self.credentials))
         self.ex = cls(params)
         await self.ex.load_markets()
 
     async def get_capabilities(self):
         base = await super().get_capabilities()
-        return VenueCapabilities(**{**base.__dict__ if hasattr(base, "__dict__") else {f.name: getattr(base, f.name) for f in base.__dataclass_fields__.values()},
-                                    "websocket": False, "native_websocket": False,
-                                    "user_stream": False, "balance_stream": False,
-                                    "ccxt": True, "ccxt_pro": False})
+        if hasattr(base, "__dict__"):
+            values = dict(base.__dict__)
+        elif hasattr(base, "__dataclass_fields__"):
+            values = {
+                name: getattr(base, name)
+                for name in base.__dataclass_fields__
+            }
+        else:
+            values = {}
+
+        values.update(
+            {
+                "websocket": False,
+                "native_websocket": False,
+                "user_stream": False,
+                "balance_stream": False,
+                "ccxt": True,
+                "ccxt_pro": False,
+            }
+        )
+
+        return VenueCapabilities(**values)
 
 
 class NativeSDKAdapter(BaseAdapter):

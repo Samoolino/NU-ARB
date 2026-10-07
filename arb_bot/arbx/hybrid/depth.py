@@ -24,7 +24,10 @@ def validate_depth(book, notional_usd, max_age_ms, min_levels=3):
     if book.best_bid<=0 or book.best_ask<=book.best_bid: return DepthValidation(False,"invalid_top_of_book",levels=levels)
     spread=(book.best_ask/book.best_bid-1)*10000
     if levels<min_levels: return DepthValidation(False,"insufficient_depth_levels",spread_bps=spread,levels=levels)
-    depth=min(sum(p*a for p,a in book.bids),sum(p*a for p,a in book.asks))
+    depth = min(
+        sum(level.price * level.amount for level in book.bids),
+        sum(level.price * level.amount for level in book.asks),
+    )
     if depth<notional_usd: return DepthValidation(False,"insufficient_visible_quote_depth",depth,book.best_bid,book.best_ask,spread,levels)
     return DepthValidation(True,"depth_validated",depth,book.best_bid,book.best_ask,spread,levels)
 

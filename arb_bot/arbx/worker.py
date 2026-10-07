@@ -8,13 +8,15 @@ import time
 from contextlib import suppress
 
 from arbx.config import CCXT_ADAPTERS
-from arbx.execute import LegFailure, LiveExecutor, PaperExecutor
+from arbx.execute import LiveExecutor, PaperExecutor
+from arbx.execution_gate import ExecutionEvidence, OrderScope, opportunity_fingerprint
 from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
 from arbx.graph import discover
 from arbx.market import LatencyGuard, MarketData
 from arbx.permissions import inspect_permissions
 from arbx.strategy import evaluate_triangle
 from arbx.util import STABLES
+from arbx.hybrid.adapters import ccxt_transport_config, safe_ccxt_error
 
 
 def spot_market_options(exchange_id: str) -> dict:
@@ -32,11 +34,17 @@ def build_exchange(x, live: bool):
     if cls is None:
         raise RuntimeError(f"'{x.id}' is not supported by ccxt.pro (see ccxt.pro.exchanges)")
     params = {"enableRateLimit": True, "options": spot_market_options(x.venue_id or x.id)}
-    if x.api_key and x.secret:
-        secret = x.secret.encode("utf-8") if x.id == "binance" and x.auth_mode in ("rsa", "ed25519") else x.secret
-        params.update(apiKey=x.api_key, secret=secret)
-        if x.password:
-            params["password"] = x.password
+    credentials = {}
+    if x.api_key:
+        credentials["apiKey"] = x.api_key
+    if x.auth_mode in ("rsa", "ed25519"):
+        if x.private_key:
+            credentials["privateKey"] = x.private_key
+    elif x.secret:
+        credentials["secret"] = x.secret
+    if x.password:
+        credentials["password"] = x.password
+    params.update(ccxt_transport_config(x.venue_id or x.id, x.auth_mode, credentials))
     return cls(params)
 
 
@@ -53,9 +61,14 @@ class ExchangeWorker:
         self.symbols: set = set()
         self.vol: dict = {}
         self.fees: dict = {}
+        self.fees_known: set[str] = set()
         self.mlimits: dict = {}
         self.triangles: list = []
         self.free: dict = {}
+        self.live_venue_eligible = False
+        self.live_execution_eligible = False
+        self.live_route_eligible = False
+        self.live_capabilities = None
         self.lock = asyncio.Lock()
         self.tasks: list = []
 
@@ -78,6 +91,10 @@ class ExchangeWorker:
             m = self.ex.markets[s]
             t = m.get("taker")
             self.fees[s] = (t if t is not None else self.x.default_taker_bps / 1e4) * disc
+            if isinstance(t, (int, float)) and not isinstance(t, bool) and 0 <= t < 1:
+                self.fees_known.add(s)
+            else:
+                self.fees_known.discard(s)
             lim = m.get("limits") or {}
             self.mlimits[s] = ((lim.get("amount") or {}).get("min"), (lim.get("cost") or {}).get("min"))
 
@@ -86,7 +103,7 @@ class ExchangeWorker:
         self.ex = build_exchange(self.x, self.live)
         await self.ex.load_markets()
         need_private_stream = self.live or self.x.require_private_stream
-        if need_private_stream and self.x.api_key and self.x.secret and self.ex.has.get("watchBalance") is True:
+        if need_private_stream and self.x.api_key and self.x.signing_key and self.ex.has.get("watchBalance") is True:
             private_balance = await asyncio.wait_for(self.ex.watch_balance(), timeout=15)
             if not isinstance(private_balance, dict) or not all(key in private_balance for key in ("free", "used", "total")):
                 raise RuntimeError("authenticated balance WebSocket did not return a unified balance snapshot")
@@ -116,7 +133,10 @@ class ExchangeWorker:
             tickers = await self.ex.fetch_tickers()
         except Exception as e:
             tickers = {}
-            self.hub.log("warn", f"[{self.id}] tickers unavailable ({e!r}); ranking without volume")
+            self.hub.log(
+                "warn",
+                f"[{self.id}] tickers unavailable ({safe_ccxt_error(e, self.ex)}); ranking without volume",
+            )
         tris, self.symbols, self.vol = discover(self.ex.markets, tickers, self.cfg.start_assets,
                                                 self.x.max_symbols, self.x.default_taker_bps)
         if not tris:
@@ -143,18 +163,44 @@ class ExchangeWorker:
                     f"live venue certification failed for {venue_id}: "
                     + ", ".join(evidence.reasons)
                 )
+            from arbx.hybrid.contracts import ExecutionRequirements
+            self.live_venue_eligible = evidence.live_eligible is True
+            self.live_execution_eligible = evidence.execution_ok is True
+            self.live_capabilities = hybrid.capabilities.get(venue_id)
+            requirements = ExecutionRequirements(
+                market_type="spot",
+                order_type="limit",
+                require_websocket=True,
+                require_private_stream=True,
+                require_ioc=True,
+                require_market_order=True,
+            )
+            route = hybrid.validate_route((venue_id,), requirements)
+            self.live_route_eligible = route.ok is True
+            if not self.live_execution_eligible or not self.live_route_eligible:
+                reasons = route.reasons or ("execution_evidence_unavailable",)
+                raise RuntimeError(
+                    f"live execution route is not verified for {venue_id}: "
+                    + ", ".join(reasons)
+                )
             self.hub.log("info", f"[{self.id}] hybrid live certification passed for {cert_symbol}")
-        self.executor = LiveExecutor(self.ex, self.cfg) if self.live else PaperExecutor(self.cfg)
+        self.executor = (
+            LiveExecutor(self.ex, self.cfg, self.hub.execution_gate)
+            if self.live else PaperExecutor(self.cfg)
+        )
         if self.live:
             missing = [name for name in ("createOrder", "createMarketOrder", "fetchOrder")
                        if self.ex.has.get(name) is not True]
             if missing:
                 raise RuntimeError(f"live adapter lacks required execution capabilities: {', '.join(missing)}")
             feature_value = getattr(self.ex, "feature_value", None)
-            symbol = next(iter(self.symbols))
-            tif = feature_value(symbol, "createOrder", "timeInForce") if callable(feature_value) else None
-            if not isinstance(tif, dict) or tif.get("IOC") is not True:
-                raise RuntimeError("live adapter does not declare IOC limit support for the selected spot market")
+            for symbol in self.symbols:
+                market = self.ex.markets.get(symbol) or {}
+                tif = feature_value(symbol, "createOrder", "timeInForce") if callable(feature_value) else None
+                if market.get("spot") is not True or market.get("contract") is True:
+                    raise RuntimeError(f"live route is not a verified spot market: {symbol}")
+                if not isinstance(tif, dict) or tif.get("IOC") is not True:
+                    raise RuntimeError(f"live adapter does not declare IOC limit support for {symbol}")
             await self.refresh_balance()      # also warms the authenticated TLS connection
         self.hub.log("info", f"[{self.id}] {len(tris)} cycles over {len(self.symbols)} order books "
                              f"(cheapest vehicle: {min(t.fee_bps for t in tris):.1f} bps total taker fees)")
@@ -316,13 +362,90 @@ class ExchangeWorker:
             if not coordinator.gate(expected_net_usd=o.expected_final - o.start, worst_case_net_usd=o.worst_final - o.start, min_profit_usd=max(0.0, getattr(cfg, 'min_profit_usd', 0.0)), min_worst_profit_usd=max(0.0, getattr(cfg, 'min_worst_profit_usd', 0.0))):
                 hub.stats.rejects['execution_profitability_gate'] += 1
                 return
+            if self.live and (
+                getattr(cfg, "triangular_live", False) is not True
+                or os.getenv("BOT_TRIANGULAR_LIVE", "0") != "1"
+            ):
+                hub.stats.rejects["triangular_live_not_selected"] += 1
+                return
+            permit = None
+            if self.live:
+                live_symbols = tuple(leg.symbol for leg in o.legs)
+                books = [self.md.books.get(symbol) for symbol in live_symbols]
+                market_ok = all(
+                    (self.ex.markets.get(symbol) or {}).get("spot") is True
+                    and (self.ex.markets.get(symbol) or {}).get("contract") is not True
+                    for symbol in live_symbols
+                )
+                fresh_books = all(
+                    book is not None
+                    and (time.monotonic() - book.recv) * 1000 <= self.cfg.max_book_age_ms
+                    and bool(book.bids) and bool(book.asks)
+                    for book in books
+                )
+                observed_at = min((book.recv for book in books if book is not None), default=None)
+                scopes = []
+                for index, (leg, limit, path) in enumerate(zip(o.legs, o.limits, o.path)):
+                    expected_size = path[0] / limit if leg.side == "buy" else path[0]
+                    scopes.append(OrderScope(
+                        index, self.id, leg.symbol, leg.side, "limit",
+                        float(self.ex.amount_to_precision(leg.symbol, expected_size)), limit,
+                    ))
+                health = self.health_snapshot()
+                expected_pnl = o.expected_final - o.start
+                worst_pnl = o.worst_final - o.start
+                evidence = ExecutionEvidence(
+                    authenticated_credentials=bool(self.x.api_key and self.x.signing_key
+                                                    and self.private_stream_ready),
+                    venue_live_eligible=self.live_venue_eligible is True,
+                    execution_eligible=self.live_execution_eligible is True,
+                    active_market=market_ok,
+                    fresh_orderbook=fresh_books,
+                    sufficient_depth=bool(d.ok),
+                    sufficient_balance=self.free_of(o.start_asset) >= o.start > 0,
+                    sufficient_capital=0 < o.start <= hub.trade_size(),
+                    known_fees=all(symbol in self.fees_known for symbol in live_symbols),
+                    latency_acceptable=bool(self.lat.ok()
+                                             and self.lat.stats()["p95"] <= self.cfg.max_rtt_ms),
+                    risk_approved=bool(d.ok and not hub.risk.halted and not coordinator.halted),
+                    rate_limit_ok=hub.risk.rate_ok(),
+                    venue_healthy=health["state"] == "HEALTHY",
+                    route_certified=self.live_route_eligible is True,
+                    expected_pnl=expected_pnl,
+                    min_expected_pnl=self.cfg.min_profit_usd,
+                    worst_case_pnl=worst_pnl,
+                    min_worst_case_pnl=self.cfg.min_profit_usd,
+                    expected_bps=o.net_bps,
+                    min_expected_bps=self.cfg.min_net_bps,
+                    worst_case_bps=o.worst_bps,
+                    min_worst_case_bps=self.cfg.min_worst_bps,
+                    orderbook_observed_at=observed_at,
+                    max_book_age_ms=self.cfg.max_book_age_ms,
+                )
+                try:
+                    permit = hub.execution_gate.authorize(
+                        "triangular",
+                        venue_ids=(self.id,),
+                        route_id=f"triangular:{self.id}",
+                        opportunity_id=opportunity_fingerprint("triangular", o),
+                        evidence=evidence,
+                        orders=tuple(scopes),
+                    )
+                except Exception as exc:
+                    hub.stats.rejects["execution_authorization"] += 1
+                    hub.risk.halt(f"[{self.id}] live execution authorization denied ({type(exc).__name__})")
+                    return
             coordinator.on_submission()
             try:
-                res = await self.executor.execute_tri(o)
+                res = (
+                    await self.executor.execute_tri(o, permit)
+                    if self.live else await self.executor.execute_tri(o)
+                )
             except Exception as e:
-                coordinator.fail(str(e))
+                safe_error = safe_ccxt_error(e, self.ex)
+                coordinator.fail(safe_error)
                 coordinator.require_reconciliation()
-                hub.risk.halt(f"[{self.id}] {o.name}: {e}" if isinstance(e, LegFailure) else f"[{self.id}] execution error {e!r}")
+                hub.risk.halt(f"[{self.id}] execution error {safe_error}")
                 hub.journal(self.id, o.name, o.start, 0.0, o.worst_bps, False)
                 return
             if not res.ok:

@@ -84,7 +84,6 @@ class MonteCarloResult:
 
 
 @dataclass(slots=True)
-@dataclass(slots=True)
 class DepthComparison:
     buy_vwap_bps_from_top: float
     sell_vwap_bps_from_top: float
@@ -259,26 +258,131 @@ class PersistentOpportunityFinder:
         self.tasks: list[asyncio.Task] = []
         self.scans = 0
         self.opportunities = 0
+        self._feed_successes: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._feed_failures: dict[tuple[str, str, str], int] = defaultdict(int)
 
     async def _capture_ws(self, venue: str, symbol: str, adapter: Any) -> None:
+        """Persistent WS order-book worker.
+
+        WS is a market-data source only. A timeout or transient exchange/socket
+        failure must never terminate the persistent opportunity finder.
+        REST remains the fallback source while WS reconnects.
+        """
+        failure_streak = 0
+        timeout_s = max(
+            5.0,
+            float(os.getenv("BOT_OPPORTUNITY_WS_TIMEOUT_S", "12")),
+        )
+        max_backoff_s = max(
+            2.0,
+            float(os.getenv("BOT_OPPORTUNITY_WS_MAX_BACKOFF_S", "15")),
+        )
+
         while not self.stop_event.is_set():
             started = time.perf_counter()
+
             try:
-                raw = await asyncio.wait_for(adapter.ex.watch_order_book(symbol, max(50, int(self.cfg.depth))), timeout=10)
-                book = normalize_depth(venue, symbol, raw, limit=max(50, int(self.cfg.depth)))
+                raw = await asyncio.wait_for(
+                    adapter.ex.watch_order_book(
+                        symbol,
+                        max(50, int(self.cfg.depth)),
+                    ),
+                    timeout=timeout_s,
+                )
+
+                failure_streak = 0
+
+                book = normalize_depth(
+                    venue,
+                    symbol,
+                    raw,
+                    limit=max(50, int(self.cfg.depth)),
+                )
+
                 sample = BookSample(
-                    venue, symbol, time.monotonic_ns(), raw.get("timestamp"),
-                    raw.get("nonce"), list(book.bids), list(book.asks), "ws",
+                    venue,
+                    symbol,
+                    time.monotonic_ns(),
+                    raw.get("timestamp"),
+                    raw.get("nonce"),
+                    [
+                        (float(level.price), float(level.amount))
+                        for level in book.bids
+                    ],
+                    [
+                        (float(level.price), float(level.amount))
+                        for level in book.asks
+                    ],
+                    "ws",
                     (time.perf_counter() - started) * 1000,
                 )
+
                 self.books[(venue, symbol)] = sample
                 self._remember(sample)
+
+                key = (venue, symbol, "ws")
+                self._feed_successes[key] += 1
+
+                if (
+                    self._feed_successes[key] == 1
+                    or self._feed_successes[key] % 20 == 0
+                ):
+                    print(
+                        f"[opportunity-finder] WS feed {venue} {symbol} "
+                        f"levels={min(len(book.bids), len(book.asks))} "
+                        f"rtt_ms={sample.rest_rtt_ms:.1f}"
+                    )
+
                 await self._scan_symbol(symbol)
+
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                await asyncio.sleep(0.25)
 
+            except asyncio.TimeoutError:
+                key = (venue, symbol, "ws")
+                self._feed_failures[key] += 1
+                failure_streak += 1
+
+                backoff_s = min(
+                    max_backoff_s,
+                    0.5 * (2 ** min(failure_streak - 1, 5)),
+                )
+
+                if (
+                    self._feed_failures[key] == 1
+                    or self._feed_failures[key] % 5 == 0
+                ):
+                    print(
+                        f"[opportunity-finder] WS feed {venue} {symbol} "
+                        f"timeout={timeout_s:.1f}s "
+                        f"failure_streak={failure_streak} "
+                        f"backoff_s={backoff_s:.1f}"
+                    )
+
+                await asyncio.sleep(backoff_s)
+
+            except Exception as exc:
+                key = (venue, symbol, "ws")
+                self._feed_failures[key] += 1
+                failure_streak += 1
+
+                backoff_s = min(
+                    max_backoff_s,
+                    0.5 * (2 ** min(failure_streak - 1, 5)),
+                )
+
+                if (
+                    self._feed_failures[key] == 1
+                    or self._feed_failures[key] % 5 == 0
+                ):
+                    print(
+                        f"[opportunity-finder] WS feed {venue} {symbol} "
+                        f"error={type(exc).__name__} "
+                        f"failure_streak={failure_streak} "
+                        f"backoff_s={backoff_s:.1f}"
+                    )
+
+                await asyncio.sleep(backoff_s)
     async def _capture_balance(self, venue: str, adapter: Any) -> None:
         while not self.stop_event.is_set():
             try:
@@ -297,14 +401,22 @@ class PersistentOpportunityFinder:
                 await asyncio.sleep(2.0)
 
     async def _capture_rest(self, venue: str, symbol: str, adapter: Any) -> None:
+        timeout_s = max(2.0, float(os.getenv("BOT_OPPORTUNITY_REST_TIMEOUT_S", "8")))
+        configured_depth = max(50, int(self.cfg.depth))
+        # Keep the scanner responsive when a venue/API stalls on a large depth request.
+        # Execution performs its own final depth verification before any order.
+        depth = min(configured_depth, 200)
         while not self.stop_event.is_set():
             started = time.perf_counter()
             try:
-                raw = await adapter.get_order_book(symbol, max(50, int(self.cfg.depth)))
-                book = normalize_depth(venue, symbol, raw, limit=max(50, int(self.cfg.depth)))
+                raw = await asyncio.wait_for(
+                    adapter.get_order_book(symbol, depth),
+                    timeout=timeout_s,
+                )
+                book = normalize_depth(venue, symbol, raw, limit=depth)
                 sample = BookSample(
                     venue, symbol, time.monotonic_ns(), raw.get("timestamp"),
-                    raw.get("nonce"), list(book.bids), list(book.asks), "rest",
+                    raw.get("nonce"), [(float(level.price), float(level.amount)) for level in book.bids], [(float(level.price), float(level.amount)) for level in book.asks], "rest",
                     (time.perf_counter() - started) * 1000,
                 )
                 self.last_rest[(venue, symbol)] = sample
@@ -312,10 +424,28 @@ class PersistentOpportunityFinder:
                 ws = self.books.get((venue, symbol))
                 if ws is None or sample.received_ns > ws.received_ns:
                     self.books[(venue, symbol)] = sample
-                await asyncio.sleep(max(0.2, float(getattr(self.cfg, "opportunity_rest_interval_s", 1.0))))
+                key = (venue, symbol, "rest")
+                self._feed_successes[key] += 1
+                if self._feed_successes[key] == 1 or self._feed_successes[key] % 10 == 0:
+                    print(
+                        f"[opportunity-finder] REST feed {venue} {symbol} "
+                        f"levels={min(len(book.bids), len(book.asks))} "
+                        f"rtt_ms={sample.rest_rtt_ms:.1f}"
+                    )
+                await self._scan_symbol(symbol)
+                await asyncio.sleep(
+                    max(0.5, float(getattr(self.cfg, "opportunity_rest_interval_s", 1.0)))
+                )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                key = (venue, symbol, "rest")
+                self._feed_failures[key] += 1
+                if self._feed_failures[key] == 1 or self._feed_failures[key] % 10 == 0:
+                    print(
+                        f"[opportunity-finder] REST feed {venue} {symbol} "
+                        f"error={type(exc).__name__} timeout_s={timeout_s:g}"
+                    )
                 await asyncio.sleep(1.0)
 
     def _remember(self, sample: BookSample) -> None:
@@ -567,9 +697,21 @@ class PersistentOpportunityFinder:
             for symbol in self.symbols:
                 self.tasks.append(asyncio.create_task(self._capture_rest(venue, symbol, adapter)))
             # CCXT Pro adapters expose the underlying authenticated WS connection.
-            if getattr(adapter, "ex", None) is not None and hasattr(adapter.ex, "watch_order_book"):
+            exchange = getattr(adapter, "ex", None)
+            has_ws = bool(
+                exchange is not None
+                and getattr(exchange, "has", {}).get("watchOrderBook") is True
+            )
+            if has_ws:
                 for symbol in self.symbols:
                     self.tasks.append(asyncio.create_task(self._capture_ws(venue, symbol, adapter)))
+            else:
+                print(
+                    f"[opportunity-finder] WS feed unavailable for {venue}; "
+                    "using REST feed only"
+                )
+        if not self.tasks:
+            raise RuntimeError("persistent opportunity finder started with no feed tasks")
         await asyncio.gather(*self.tasks)
 
     async def stop(self) -> None:
