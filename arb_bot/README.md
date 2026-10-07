@@ -261,6 +261,11 @@ candidate and currently certified venues, order authorization state, and
 evidence still required. It is a policy/status record, not a control that
 enables live mode. Current terminal result is **zero certified venues**;
 public-feed success cannot clear the missing account-level gates.
+For a venue to report fresh public-depth evidence, the randomized audit must
+also validate both REST and WebSocket books at the configured visible-depth
+threshold and complete its simulated same-book depth walk. This is an
+order-book access/depth diagnostic only; it includes no authenticated account,
+fees, chain settlement, or real fills.
 
 For an elevated-shell-compatible but read-only refresh from the repository
 root, use:

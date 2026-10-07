@@ -24,7 +24,25 @@ def _fresh_reports(directory, generated_at):
         "scope": "unauthenticated_public_spot_market_data_only",
         "persistenceValidation": {"validated": True},
         "venues": [
-            {"venue": venue, "restOk": True, "websocketOk": True, "verified": True}
+            {
+                "venue": venue,
+                "restOk": True,
+                "websocketOk": True,
+                "verified": True,
+                "depthPilot": {
+                    "passed": True,
+                    "notionalQuote": 25.0,
+                    "quoteCurrency": "USDT",
+                    "rest": {
+                        "depthValidated": True,
+                        "simulatedImmediateRoundTrip": {"completed": True},
+                    },
+                    "websocket": {
+                        "depthValidated": True,
+                        "simulatedImmediateRoundTrip": {"completed": True},
+                    },
+                },
+            }
             for venue in ("binance", "bybit", "kucoin")
         ],
     })
@@ -81,12 +99,47 @@ def test_readiness_is_always_fail_closed_without_live_connection_evidence(tmp_pa
     assert all(source["status"] == "FRESH" for source in report["evidenceSources"].values())
     for venue in report["venues"]:
         if venue["livePermissionCandidate"]:
+            assert venue["publicOrderbookDepth"]["verified"] is True
             assert venue["permissionEvidence"]["liveEligible"] is True
             assert venue["accountBalancesVerified"] is False
             assert venue["privateStreamVerified"] is False
             assert venue["executionRouteVerified"] is False
             assert venue["riskAndCapitalApproved"] is False
             assert venue["liveEligible"] is False
+
+
+def test_readiness_marks_missing_public_depth_pilot_as_blocked(tmp_path):
+    now = datetime.now(timezone.utc)
+    _fresh_reports(tmp_path, now)
+    public_path = tmp_path / "randomized-venue-feed-audit-latest.json"
+    public_report = json.loads(public_path.read_text(encoding="utf-8"))
+    public_report["venues"][0].pop("depthPilot")
+    public_path.write_text(json.dumps(public_report), encoding="utf-8")
+
+    report = build_readiness_state(tmp_path, now=now)
+    binance = next(row for row in report["venues"] if row["venue"] == "binance")
+
+    assert binance["publicOrderbookDepth"]["status"] == "NOT_RECORDED"
+    assert binance["publicOrderbookDepth"]["verified"] is False
+    assert "fresh_public_orderbook_depth_not_recorded" in binance["blockers"]
+    assert report["liveModeRequirement"]["ordersEnabled"] is False
+
+
+def test_readiness_rejects_depth_pilot_without_both_book_walks(tmp_path):
+    now = datetime.now(timezone.utc)
+    _fresh_reports(tmp_path, now)
+    public_path = tmp_path / "randomized-venue-feed-audit-latest.json"
+    public_report = json.loads(public_path.read_text(encoding="utf-8"))
+    public_report["venues"][0]["depthPilot"]["websocket"][
+        "simulatedImmediateRoundTrip"
+    ]["completed"] = False
+    public_path.write_text(json.dumps(public_report), encoding="utf-8")
+
+    report = build_readiness_state(tmp_path, now=now)
+    binance = next(row for row in report["venues"] if row["venue"] == "binance")
+
+    assert binance["publicOrderbookDepth"]["status"] == "FAILED"
+    assert binance["publicOrderbookDepth"]["verified"] is False
 
 
 def test_readiness_marks_expired_and_malformed_evidence_unusable(tmp_path):

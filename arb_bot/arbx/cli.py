@@ -1139,6 +1139,7 @@ def main(argv=None) -> None:
             if venue["livePermissionCandidate"]:
                 print(
                     f"  [{venue['venue']}] public={venue['publicFeed']['status']} "
+                    f"depth={venue['publicOrderbookDepth']['status']} "
                     f"permissions={venue['permissionEvidence']['status']} "
                     f"same_pair={venue['authenticatedSamePairFeeds']['status']} "
                     "live_eligible=false"

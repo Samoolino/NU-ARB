@@ -159,6 +159,52 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
             public_row,
             ("restOk", "websocketOk", "verified"),
         )
+        public_depth_row = (
+            public_row.get("depthPilot") if isinstance(public_row, dict) else None
+        )
+        if public["status"] != "FRESH":
+            public_depth_state = {
+                "status": public["status"],
+                "verified": False,
+            }
+        elif not isinstance(public_depth_row, dict):
+            public_depth_state = {"status": "NOT_RECORDED", "verified": False}
+        else:
+            rest_depth = public_depth_row.get("rest")
+            websocket_depth = public_depth_row.get("websocket")
+            depth_verified = (
+                public_depth_row.get("passed") is True
+                and isinstance(rest_depth, dict)
+                and rest_depth.get("depthValidated") is True
+                and isinstance(rest_depth.get("simulatedImmediateRoundTrip"), dict)
+                and rest_depth["simulatedImmediateRoundTrip"].get("completed") is True
+                and isinstance(websocket_depth, dict)
+                and websocket_depth.get("depthValidated") is True
+                and isinstance(websocket_depth.get("simulatedImmediateRoundTrip"), dict)
+                and websocket_depth["simulatedImmediateRoundTrip"].get("completed") is True
+            )
+            public_depth_state = {
+                "status": (
+                    "VERIFIED"
+                    if depth_verified
+                    else "FAILED"
+                ),
+                "verified": depth_verified,
+                "restDepthValidated": (
+                    rest_depth.get("depthValidated") is True
+                    if isinstance(rest_depth, dict)
+                    else False
+                ),
+                "websocketDepthValidated": (
+                    websocket_depth.get("depthValidated") is True
+                    if isinstance(websocket_depth, dict)
+                    else False
+                ),
+                "notionalQuote": public_depth_row.get("notionalQuote"),
+                "quoteCurrency": public_depth_row.get("quoteCurrency"),
+                "profitAssurance": False,
+                "chainSettlementVerified": False,
+            }
         permission_state = _safe_permission_summary(permissions, permission_row)
         strict_state = _evidence_summary(
             strict_feed,
@@ -171,6 +217,8 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
             blockers.append("venue_not_in_strict_live_permission_candidate_policy")
         if not public_state["verified"]:
             blockers.append(f"fresh_public_rest_and_websocket_books_{public_state['status'].lower()}")
+        if not public_depth_state["verified"]:
+            blockers.append(f"fresh_public_orderbook_depth_{public_depth_state['status'].lower()}")
         if not permission_state["verified"]:
             blockers.append(f"fresh_account_permission_evidence_{permission_state['status'].lower()}")
         if permission_state["verified"] and not permission_state["liveEligible"]:
@@ -187,6 +235,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
             "venue": venue_id,
             "livePermissionCandidate": is_live_candidate,
             "publicFeed": public_state,
+            "publicOrderbookDepth": public_depth_state,
             "permissionEvidence": permission_state,
             "authenticatedSamePairFeeds": strict_state,
             "accountBalancesVerified": False,
@@ -230,6 +279,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
     qualified_live_venues = [
         row for row in live_venues
         if row["publicFeed"]["verified"]
+        and row["publicOrderbookDepth"]["verified"]
         and row["permissionEvidence"]["verified"]
         and row["permissionEvidence"]["liveEligible"]
         and row["authenticatedSamePairFeeds"]["verified"]
@@ -261,6 +311,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
         ],
         "requiredEvidence": [
             "fresh_public_rest_and_websocket_books",
+            "fresh_public_orderbook_depth_and_simulation",
             "fresh_account_permission_revalidation",
             "authenticated_same_pair_rest_and_websocket_books",
             "available_balances_and_order_reservations",
