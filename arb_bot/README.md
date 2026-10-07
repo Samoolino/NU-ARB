@@ -256,6 +256,24 @@ balances, live environment switches, or private streams, and therefore never
 marks a venue or strategy live eligible. The three current permission-policy
 candidates are Binance, Bybit, and KuCoin; at least two fresh, independently
 certified venue connections are required for cross-venue live execution.
+The persisted `liveModeRequirement` records the desired mode, current block,
+candidate and currently certified venues, order authorization state, and
+evidence still required. It is a policy/status record, not a control that
+enables live mode. Current terminal result is **zero certified venues**;
+public-feed success cannot clear the missing account-level gates.
+
+For an elevated-shell-compatible but read-only refresh from the repository
+root, use:
+```powershell
+.\arb_bot\prepare-live-readiness.ps1 -Symbol BTC/USDT
+```
+Elevation is not required. The script checks the existing project virtualenv,
+dependency consistency, and offline self-test; then runs the all-venue
+randomized REST/WebSocket/depth audit, required-venue feed audit, and persistent
+readiness command. It deliberately selects paper mode and disables order
+authorization for that process. It does not prompt for keys, query balances,
+or start live preflight/order submission. Exit code 2 means the evidence was
+persisted but live eligibility remains blocked.
 
 Only two catalog entries are distinct order execution paths today:
 `cross_exchange` (two eligible venues) and `triangular_intra_exchange` (one

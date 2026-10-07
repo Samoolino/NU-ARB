@@ -1122,6 +1122,14 @@ def main(argv=None) -> None:
             f"LIVE_ENGAGEABLE={str(report['liveEngageable']).lower()} "
             f"FRESH_LIVE_VENUES={report['qualifiedLiveVenueCount']}"
         )
+        live_mode = report["liveModeRequirement"]
+        print(
+            f"REQUIRED_MODE={live_mode['targetMode']} "
+            f"MODE_STATE={live_mode['readinessState']} "
+            f"AUTHORIZED={str(live_mode['authorized']).lower()} "
+            f"ORDERS_ENABLED={str(live_mode['ordersEnabled']).lower()} "
+            f"CERTIFIED_VENUES={','.join(live_mode['currentlyVerifiedVenues']) or 'none'}"
+        )
         for source_name, evidence in report["evidenceSources"].items():
             print(
                 f"  {source_name}: {evidence['status']} "

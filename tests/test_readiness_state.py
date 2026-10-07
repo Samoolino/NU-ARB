@@ -70,6 +70,14 @@ def test_readiness_is_always_fail_closed_without_live_connection_evidence(tmp_pa
     assert report["liveEngageable"] is False
     assert report["credentialsRead"] is False
     assert report["qualifiedLiveVenueCount"] == 0
+    requirement = report["liveModeRequirement"]
+    assert requirement["targetMode"] == "live"
+    assert requirement["readinessState"] == "BLOCKED_LIVE_EVIDENCE_MISSING"
+    assert requirement["authorized"] is False
+    assert requirement["ordersEnabled"] is False
+    assert requirement["minimumDistinctLiveEligibleVenues"] == 2
+    assert requirement["currentlyVerifiedVenues"] == []
+    assert "market_specific_ioc_execution_route_and_fee_tier" in requirement["requiredEvidence"]
     assert all(source["status"] == "FRESH" for source in report["evidenceSources"].values())
     for venue in report["venues"]:
         if venue["livePermissionCandidate"]:
@@ -126,6 +134,7 @@ def test_readiness_is_atomically_persisted_as_latest_and_timestamped_report(tmp_
     assert persisted == report
     assert persisted["persistenceValidation"]["validated"] is True
     assert persisted["liveEngageable"] is False
+    assert persisted["liveModeRequirement"]["ordersEnabled"] is False
     assert persisted["ordersSubmitted"] is False
 
 

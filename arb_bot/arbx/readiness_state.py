@@ -245,6 +245,37 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
         "balances_private_stream_execution_route_and_runtime_risk_are_not_consumed_by_this_report",
         "no_strategy_is_declared_live_engagement_verified_by_catalog_or_public_feed_evidence",
     ))
+    candidate_rows = [
+        row for row in venue_rows if row["livePermissionCandidate"]
+    ]
+    live_mode_requirement = {
+        "targetMode": "live",
+        "readinessState": "READY" if qualified_live_venues else "BLOCKED_LIVE_EVIDENCE_MISSING",
+        "authorized": False,
+        "ordersEnabled": False,
+        "requiredStrategy": "cross_exchange",
+        "minimumDistinctLiveEligibleVenues": 2,
+        "eligibleVenueCandidates": list(LIVE_CANDIDATE_VENUES),
+        "currentlyVerifiedVenues": [
+            row["venue"] for row in candidate_rows if row["liveEligible"]
+        ],
+        "requiredEvidence": [
+            "fresh_public_rest_and_websocket_books",
+            "fresh_account_permission_revalidation",
+            "authenticated_same_pair_rest_and_websocket_books",
+            "available_balances_and_order_reservations",
+            "private_user_stream",
+            "market_specific_ioc_execution_route_and_fee_tier",
+            "asset_identity_and_settlement_route",
+            "runtime_risk_and_capital_approval",
+        ],
+        "blockingReasons": list(dict.fromkeys(reasons)),
+        "explanation": (
+            "This is the persisted target policy, not a switch that enables trading. "
+            "Public feed success cannot substitute for account, balance, private-stream, "
+            "execution-route, settlement, or risk evidence."
+        ),
+    }
     return {
         "schemaVersion": SCHEMA_VERSION,
         "generatedAtUtc": now.isoformat(),
@@ -261,6 +292,7 @@ def build_readiness_state(report_dir: Path, *, now: datetime | None = None) -> d
         },
         "liveCandidateVenues": list(LIVE_CANDIDATE_VENUES),
         "qualifiedLiveVenueCount": len(qualified_live_venues),
+        "liveModeRequirement": live_mode_requirement,
         "venues": venue_rows,
         "strategies": strategies,
         "blockingReasons": reasons,
