@@ -124,7 +124,7 @@ class HybridEngine:
                 os.getenv(f"BOT_{spec.id.upper()}_ADAPTER")
                 or os.getenv("BOT_ADAPTER")
                 or spec.adapter
-            ).lower()
+            ).strip().lower()
 
             if selector == "native":
                 adapter = NativeSDKAdapter(spec.id, credentials)
@@ -135,12 +135,17 @@ class HybridEngine:
                     credentials,
                     auth_mode=auth_mode,
                 )
-            else:
+            elif selector == "ccxt_pro":
                 adapter = CCXTProAdapter(
                     spec.id,
                     spec.ccxt_id,
                     credentials,
                     auth_mode=auth_mode,
+                )
+            else:
+                raise ValueError(
+                    f"unsupported adapter '{selector}' for venue '{spec.id}'; "
+                    "choose ccxt_pro, ccxt, or native"
                 )
 
             adapters[spec.id] = adapter

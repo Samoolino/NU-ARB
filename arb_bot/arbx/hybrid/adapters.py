@@ -355,7 +355,7 @@ class CCXTAdapter(CCXTProAdapter):
     adapter_name = "ccxt"
 
     async def connect(self):
-        import ccxt
+        import ccxt.async_support as ccxt
 
         cls = getattr(ccxt, self.ccxt_id, None)
         if cls is None:
@@ -423,7 +423,7 @@ class NativeSDKAdapter(BaseAdapter):
                 await result
 
     async def get_capabilities(self):
-        return VenueCapabilities(native_sdk=True, native_rest=True, native_websocket=True)
+        return VenueCapabilities()
 
 
 class ExternalProcessAdapter(BaseAdapter):

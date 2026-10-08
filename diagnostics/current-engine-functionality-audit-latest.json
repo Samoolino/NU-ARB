@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "auditType": "current_engine_functionality",
+  "recordedAtUtc": "2026-10-08T05:46:55.778Z",
+  "repositoryBranch": "integration/live-opportunity-scanner",
+  "overallState": "FUNCTIONALITY_PARTIALLY_VERIFIED",
+  "scope": "source review, targeted tests, public read-only REST/WebSocket checks, and dependency/source checks",
+  "safety": {
+    "credentialsRead": false,
+    "authenticatedAccountsChecked": false,
+    "ordersSubmitted": false,
+    "transfersOrWithdrawalsSubmitted": false,
+    "liveExecutionCertified": false,
+    "profitAssurance": false
+  },
+  "components": [
+    {
+      "component": "Venue adapter construction and selection",
+      "state": "CODE_AND_TEST_VERIFIED",
+      "evidence": "HybridEngine selected CCXT Pro, async REST-only CCXT, and native placeholders across all 20 catalog entries in selector tests. Unsupported Freqtrade/Hummingbot selectors now fail closed."
+    },
+    {
+      "component": "CCXT Pro public market data",
+      "state": "PARTIALLY_RUNTIME_VERIFIED",
+      "evidence": "BTC/USDT and SOL/USDT checks exercised REST books, WebSocket books, depth structure, and three normalized WebSocket update events on 20 catalogued venues. Final unique full-pass count after retries was 21 of 40 venue/pair checks."
+    },
+    {
+      "component": "Async REST-only CCXT adapter",
+      "state": "CODE_AND_TARGETED_RUNTIME_VERIFIED",
+      "evidence": "Connector uses ccxt.async_support and reports no WebSocket/order-book-stream capability. Adapter-selection, regression, and public REST checks passed."
+    },
+    {
+      "component": "Native SDK adapter",
+      "state": "NOT_IMPLEMENTED_FAIL_CLOSED",
+      "evidence": "No native venue SDK transport is registered; capability reporting is empty and connection attempts fail closed."
+    },
+    {
+      "component": "Freqtrade and Hummingbot bridges",
+      "state": "STRATEGY_BRIDGE_ONLY",
+      "evidence": "Optional external-process hooks do not implement normalized REST/WS books, depth updates, or venue execution; tests assert no feed/execution eligibility."
+    },
+    {
+      "component": "Credential schemas and transport mapping",
+      "state": "STRUCTURE_TESTED_ACCOUNT_UNVERIFIED",
+      "evidence": "Targeted tests validate HMAC/RSA/Ed25519 field separation, Binance private-key mapping at the CCXT boundary, required passphrases, and redaction. No account keys or signed private requests were used in this audit."
+    },
+    {
+      "component": "Persistent opportunity finder",
+      "state": "IMPLEMENTED_SOURCE_REVIEWED_NOT_ALL_VENUES_CERTIFIED",
+      "evidence": "Runs REST order-book polling and WebSocket subscriptions concurrently per configured venue/symbol, retaining source and freshness observations. It is a separate scanner and is not implied to run in every control-panel engine session."
+    },
+    {
+      "component": "Triangular and cross-venue opportunity ranking",
+      "state": "CODE_AND_TEST_COVERED_LIVE_FILLS_UNVERIFIED",
+      "evidence": "Engine ranks depth-aware candidates and applies fee, latency, freshness, capital, and risk gates. No live route or order fill was attempted."
+    },
+    {
+      "component": "Execution gates and recovery",
+      "state": "CODE_AND_TEST_COVERED_LIVE_OPERATION_UNVERIFIED",
+      "evidence": "Order submission requires the central execution gate and typed permits; live routes require fresh private/account evidence, permissions, depth, and IOC capabilities. This audit submitted no orders."
+    },
+    {
+      "component": "SQLite trade, opportunity, and risk persistence",
+      "state": "CODE_AND_TEST_COVERED",
+      "evidence": "Journal has WAL/FULL synchronous persistence and stores trades, opportunities, certifications, and risk incidents; repository tests cover persistence paths."
+    },
+    {
+      "component": "Web/API dashboard and controls",
+      "state": "REPOSITORY_TEST_COVERED_DEPLOYMENT_UNVERIFIED",
+      "evidence": "Repository tests cover API/frontend contracts. No production control service, browser session, or deployment configuration was probed in this audit."
+    },
+    {
+      "component": "Settlement-chain support",
+      "state": "CATALOG_ONLY_NO_ROUTES_VERIFIED",
+      "evidence": "20 network identities across 12 families are catalogued, including EVM, Bitcoin/UTXO, and Solana. No venue/asset deposit or withdrawal availability, address, transfer route, or settlement was checked."
+    }
+  ],
+  "publicFeedAudit": {
+    "windowStartedAtUtc": "2026-10-08T05:05:02.575Z",
+    "venueCount": 20,
+    "symbols": [
+      "BTC/USDT",
+      "SOL/USDT"
+    ],
+    "venuePairChecks": 40,
+    "checks": [
+      "spot market listing",
+      "REST order book with bid/ask depth",
+      "WebSocket order book with bid/ask depth",
+      "three CCXT-normalized WebSocket update samples"
+    ],
+    "restDepthPassed": 24,
+    "websocketDepthPassedBeforeRetries": 20,
+    "websocketDepthPassedAfterRetries": 24,
+    "websocketUpdateSamplePassedBeforeRetries": 16,
+    "websocketUpdateSamplePassedAfterRetries": 21,
+    "fullyPassedAfterRetries": 21,
+    "fullyPassedVenuePairs": [
+      "binance BTC/USDT",
+      "binance SOL/USDT",
+      "bybit BTC/USDT",
+      "bybit SOL/USDT",
+      "gateio BTC/USDT",
+      "gateio SOL/USDT",
+      "bitget BTC/USDT",
+      "bitget SOL/USDT",
+      "mexc BTC/USDT",
+      "mexc SOL/USDT",
+      "htx BTC/USDT",
+      "htx SOL/USDT",
+      "bitfinex BTC/USDT",
+      "bingx BTC/USDT",
+      "bingx SOL/USDT",
+      "bitstamp BTC/USDT",
+      "gemini BTC/USDT",
+      "lbank BTC/USDT",
+      "lbank SOL/USDT",
+      "whitebit BTC/USDT",
+      "whitebit SOL/USDT"
+    ],
+    "scope": "Unauthenticated public market data only; no raw exchange delta certification."
+  },
+  "networkCatalog": {
+    "networkEntries": 20,
+    "networkFamilies": 12,
+    "venueSpecificRoutesChecked": 0,
+    "routesVerified": 0
+  },
+  "validation": {
+    "targetedPythonTests": {
+      "passed": 40,
+      "passedSubtests": 9
+    },
+    "fullPythonSuite": {
+      "status": "passed",
+      "passed": 296,
+      "passedSubtests": 86,
+      "durationSeconds": 99.57
+    },
+    "readinessScriptTests": {
+      "passed": 4,
+      "passedSubtests": 10
+    },
+    "frontendScannerTestsPassed": 9,
+    "pythonDependencyCheck": "passed",
+    "pythonCompilation": "passed",
+    "gitDiffCheck": "passed"
+  },
+  "limitations": [
+    "A public feed pass is not authenticated account or live execution eligibility.",
+    "Three normalized WebSocket samples are a short observation, not sustained availability or exchange-side latency certification.",
+    "Books from separate venues are observations, not proof that cross-venue executable depth, balances, fees, or settlement match.",
+    "Chain catalog entries do not imply venue support or a verified transfer route.",
+    "Actual API credentials, account permissions, private streams, IOC fills, recovery orders, deployment health, and profits remain unverified."
+  ]
+}

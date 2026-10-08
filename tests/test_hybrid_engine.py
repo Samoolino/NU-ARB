@@ -35,6 +35,31 @@ def test_catalog_membership_does_not_imply_adapter_or_live_capabilities():
         assert venue.native_sdk is None
 
 
+def test_rest_only_ccxt_adapter_uses_async_exchange_client(monkeypatch):
+    import asyncio
+    import ccxt.async_support as ccxt_async
+
+    from arbx.hybrid.adapters import CCXTAdapter
+
+    class FakeExchange:
+        def __init__(self, _params):
+            self.markets = {}
+
+        async def load_markets(self):
+            self.markets = {"SOL/USDT": {"spot": True, "active": True}}
+            return self.markets
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(ccxt_async, "binance", FakeExchange, raising=False)
+    adapter = CCXTAdapter("binance", credentials={})
+    asyncio.run(adapter.connect())
+
+    assert adapter.ex.markets["SOL/USDT"]["spot"] is True
+    assert adapter.adapter_name == "ccxt"
+
+
 def test_venues_missing_from_control_api_are_explicitly_unavailable():
     by_id = {venue.id: venue for venue in VENUE_CATALOG}
     assert by_id["bitmart"].control_api_status == "UNAVAILABLE"
@@ -59,6 +84,58 @@ def test_catalog_metadata_does_not_make_unavailable_venues_selectable():
         assert metadata["lifecycleState"] == "CATALOGUED"
         assert metadata["engineSelectionAvailable"] is False
         assert metadata["engineSelectionStatus"] == "UNAVAILABLE"
+
+
+def test_hybrid_engine_adapter_selection_is_explicit_and_fail_closed(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    import pytest
+
+    from arbx.hybrid.adapters import CCXTAdapter, CCXTProAdapter, NativeSDKAdapter
+    from arbx.hybrid.engine import HybridEngine
+
+    monkeypatch.setenv("BOT_HYBRID_ALL_VENUES", "1")
+    for selector, adapter_type in (
+        ("ccxt_pro", CCXTProAdapter),
+        ("ccxt", CCXTAdapter),
+        ("native", NativeSDKAdapter),
+    ):
+        monkeypatch.setenv("BOT_ADAPTER", selector)
+        engine = HybridEngine.create(SimpleNamespace(exchanges=[]))
+        assert len(engine.adapters) == len(VENUE_CATALOG)
+        assert all(isinstance(adapter, adapter_type) for adapter in engine.adapters.values())
+        if selector == "native":
+            capabilities = asyncio.run(engine.adapters["binance"].get_capabilities())
+            assert not capabilities.native_sdk
+            assert not capabilities.native_rest
+            assert not capabilities.native_websocket
+
+    monkeypatch.setenv("BOT_ADAPTER", "freqtrade")
+    with pytest.raises(ValueError, match="unsupported adapter"):
+        HybridEngine.create(SimpleNamespace(exchanges=[]))
+
+
+def test_freqtrade_and_hummingbot_bridges_do_not_claim_live_feeds(monkeypatch):
+    import asyncio
+
+    import pytest
+
+    from arbx.hybrid.adapters import AdapterError, optional_strategy_adapters
+
+    monkeypatch.delenv("NU_ARB_FREQTRADE_CMD", raising=False)
+    monkeypatch.delenv("NU_ARB_HUMMINGBOT_CMD", raising=False)
+    for name, factory in optional_strategy_adapters().items():
+        adapter = factory("binance")
+        capabilities = asyncio.run(adapter.get_capabilities())
+        assert capabilities.websocket is False
+        assert capabilities.order_book_depth is False
+        assert capabilities.limit_orders is False
+        assert asyncio.run(adapter.verify_rest())["ok"] is False
+        assert asyncio.run(adapter.verify_public_stream("BTC/USDT", 5))["ok"] is False
+        assert asyncio.run(adapter.verify_execution("BTC/USDT"))["executionEligible"] is False
+        with pytest.raises(AdapterError, match="not configured"):
+            asyncio.run(adapter.connect())
 
 
 def test_depth_walk_validation():
