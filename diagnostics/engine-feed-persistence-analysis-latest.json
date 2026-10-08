@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "assessmentType": "source_and_frontend_run_analysis",
+  "assessmentDateUtc": "2026-10-08",
+  "assessmentRecordedAtUtc": "2026-10-08T02:49:37.807249Z",
+  "credentialsRead": false,
+  "ordersSubmitted": false,
+  "liveSessionObserved": false,
+  "readiness": {
+    "currentState": "BLOCKED_LIVE_EVIDENCE_MISSING",
+    "qualifiedLiveVenues": 0,
+    "ordersAuthorized": false,
+    "reason": "The public audits do not verify authenticated accounts, permissions, balances, private streams, or market-specific live routes.",
+    "operatorSwitchState": "BOT_MODE=paper and BOT_ALLOW_ORDERS=0 for read-only audits; no live authorization was enabled.",
+    "priorPersistedSnapshot": {
+      "path": "diagnostics/live-readiness-state-latest.json",
+      "generatedAtUtc": "2026-10-08T02:47:16.146618+00:00",
+      "state": "BLOCKED_LIVE_EVIDENCE_MISSING",
+      "historicalQualifiedVenues": 0,
+      "evidenceFreshnessSeconds": 900,
+      "freshForCurrentAssessment": true,
+      "authenticatedSamePairFeedValidation": "MISSING",
+      "permissionRevalidation": "MISSING",
+      "randomizedPublicFeedAudit": "FRESH"
+    }
+  },
+  "publicReadOnlyRevalidation": {
+    "randomizedAllVenueAudit": {
+      "path": "diagnostics/randomized-venue-feed-audit-latest.json",
+      "generatedAtUtc": "2026-10-08T02:42:56.412376+00:00",
+      "persistenceReadbackValidated": true,
+      "scope": "one randomized active spot pair per venue, REST book, WebSocket book, depth pilot, and normalized WS update sampling",
+      "venuesCatalogued": 20,
+      "restAndWebSocketBooksPassed": 8,
+      "depthPilotsPassed": 6,
+      "asyncWebSocketUpdateSamplesPassed": 6,
+      "adapterConstructorUnavailable": [
+        "bitmart"
+      ],
+      "liveEngageable": false,
+      "ordersSubmitted": false
+    },
+    "requiredVenuePairAudit": {
+      "path": "diagnostics/required-live-venue-audit-latest.json",
+      "generatedAtUtc": "2026-10-08T02:45:56.904216+00:00",
+      "pair": "BTC/USDT",
+      "persistenceReadbackValidated": true,
+      "venues": {
+        "binance": "REST+WS passed",
+        "mexc": "REST+WS passed",
+        "kucoin": "failed at public market discovery timeout",
+        "htx": "REST+WS passed"
+      },
+      "passed": 3,
+      "total": 4,
+      "liveEngageable": false,
+      "ordersSubmitted": false
+    },
+    "engagementAndNetworkCatalogAudit": {
+      "path": "diagnostics/live-engagement-audit-latest.json",
+      "generatedAtUtc": "2026-10-08T02:47:13.714671+00:00",
+      "persistenceReadbackValidated": true,
+      "venuePublicFeedsPassed": 11,
+      "venuesCatalogued": 20,
+      "networksCatalogued": 20,
+      "strategiesCatalogued": 6,
+      "chainSettlementRoutesVerified": 0,
+      "liveEngageable": false,
+      "ordersSubmitted": false
+    },
+    "multiPairRestSnapshot": {
+      "recordedAtUtc": "2026-10-08T02:49:37.807249Z",
+      "scope": "public REST scanner across all 18 selectable venues and BTC/USDT, ETH/USDT, SOL/USDT",
+      "venuesAvailable": 11,
+      "venuesSelected": 18,
+      "spotBooksReturned": 30,
+      "rankedModeledDirections": 276,
+      "directionsMeetingEstimatedEdgeFloor": 0,
+      "executionEnabled": false,
+      "topEstimatedNetUsd": {
+        "BTC/USDT": -0.042882,
+        "ETH/USDT": -0.047004,
+        "SOL/USDT": -0.045719
+      },
+      "unavailableVenueIds": [
+        "okx",
+        "kucoin",
+        "gateio",
+        "htx",
+        "kraken",
+        "bitfinex",
+        "coinex"
+      ],
+      "limitations": [
+        "snapshot-only public data",
+        "assumed 10 bps taker fee per side",
+        "no authenticated balances or account permissions",
+        "no cross-venue live execution or settlement verification",
+        "no price-difference profit assurance"
+      ]
+    }
+  },
+  "feedAndExecutionAnalysis": {
+    "continuousOrderBooks": "An active engine starts a CCXT Pro watch_order_book loop for each discovered/configured symbol per selected venue. Changed books trigger scan evaluation; reconnect uses bounded exponential backoff. This is not every symbol on every exchange.",
+    "restOrderBooks": "Not continuously streamed by the engine. REST is used for preflight and periodic server-time RTT samples; the public scanner is a separate REST snapshot flow.",
+    "crossVenuePricing": "The hub compares both buy/sell directions for common symbols, estimates depth-aware expected and worst-case net PnL, and ranks candidates before rechecking the selected opportunity.",
+    "liveExecutor": "A selected opportunity still requires fresh books, depth, balances, fees, permission, private-stream health, latency, risk, and certified IOC routes. Cross-venue execution uses simultaneous IOC limit orders with pre-funded inventory. Unmatched fills can halt the engine for review.",
+    "profitTarget": "A session stop threshold based on realized PnL; it is not an assurance or guarantee of attaining that amount.",
+    "browser": "The authenticated frontend polls engine state while a session is active and reads recent journal entries. It does not own exchange sockets or display every depth delta.",
+    "persistency": "Per-user SQLite journal stores trades and opportunities. Runtime sockets/session state are not persistent across service restarts and the live engine does not auto-resume."
+  },
+  "frontendRunAnalysis": {
+    "available": true,
+    "surfaces": [
+      "Current engine status and mode",
+      "Per-venue subscribed symbol, received book, fresh-book, and stale-book counts",
+      "Scan, signal, trade, and opportunity counters",
+      "Session realized PnL and target progress",
+      "Persisted all-session realized PnL and recent trade/opportunity rows",
+      "Explicit REST sampling, live-switch, and non-guarantee clarifications"
+    ],
+    "files": [
+      "index.html",
+      "public/index.html"
+    ],
+    "apis": [
+      "/api/v1/engine/state",
+      "/api/v1/engine/journal"
+    ],
+    "noLiveRunReason": "No authenticated credentials were used. Public observations and static adapter availability do not qualify venues for live execution."
+  },
+  "codeLocations": {
+    "marketDataAndRtt": "arb_bot/arbx/market.py",
+    "venueSubscriptionsAndHealth": "arb_bot/arbx/worker.py",
+    "rankingRiskAndScanLoop": "arb_bot/arbx/hub.py",
+    "LiveIocExecutor": "arb_bot/arbx/execute.py",
+    "DurableJournal": "arb_bot/arbx/journal.py",
+    "AuthenticatedStateAndJournalApis": "arb_bot/arbx/web_api.py"
+  },
+  "validation": {
+    "tests": "293 passed across the full Python suite; npm test passed 9 JavaScript scanner tests; pip check found no broken requirements.",
+    "inlineJavaScript": "Both dashboard scripts parsed with Node.js",
+    "domSelectors": "All static script DOM references resolve in both dashboards",
+    "pythonCompilation": "arb_bot/arbx compiled successfully",
+    "diffCheck": "Passed"
+  }
+}

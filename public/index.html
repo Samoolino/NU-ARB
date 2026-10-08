@@ -17,6 +17,7 @@
     .account{margin-top:24px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:620}.account-note,.account-status{color:var(--muted);font-size:12px;line-height:1.6}.account-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0d1316}.account-box h3{font-size:13px;margin:0 0 13px}.account-form{display:grid;gap:10px}.account-form input,.account-form select{height:38px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:11px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px}.balance-list{font:12px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto}.disabled-note{color:var(--amber);font-size:11px;line-height:1.5}
     .field.selection{flex:1 1 250px;max-width:340px;min-width:220px}.field.selection select{height:auto;min-height:145px;padding:5px 10px}.field.selection option{padding:4px}.field.selection .account-note{margin-top:1px}
     @media(max-width:760px){.shell{padding:18px 15px 35px}.top{padding-bottom:16px}.hero{align-items:start;flex-direction:column;gap:13px;padding:27px 0 19px}.venues{grid-template-columns:1fr}.controls{gap:10px}.field{flex:1 1 42%}.actions{margin:5px 0 0;width:100%}.actions .button{flex:1}.fee-group{flex:1 1 100%}.fee-group .field{max-width:none}.stamp{font-size:10px}.footer{gap:10px;flex-direction:column}.account-grid{grid-template-columns:1fr}}
+    .wire-note{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#080d0f;color:var(--muted2);font-size:11px;line-height:1.5;margin:10px 0}.board-table{width:100%;border-collapse:collapse;min-width:820px}.board-table th,.board-table td{text-align:left;padding:9px 10px;border-bottom:1px solid #1c272b;vertical-align:top;font-size:10px}.board-table th{color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}.board-table td{font-family:var(--mono);color:#c2cecb;white-space:pre-wrap;overflow-wrap:anywhere}.board-table .ok{color:var(--green)}.board-table .warn{color:var(--amber)}.board-table .bad{color:var(--red)}.target-track{height:10px;overflow:hidden;border:1px solid var(--line);border-radius:99px;background:#070c0e;margin:9px 0}.target-fill{height:100%;width:0;background:var(--green);transition:width .25s ease}.target-fill.attained{background:var(--amber)}.board-heading{margin:18px 0 8px;font-size:12px}.raw-diagnostics{margin-top:10px;color:var(--muted);font-size:11px}.raw-diagnostics summary{cursor:pointer}
     .account{margin-top:24px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:620}.account-note,.account-status{color:var(--muted);font-size:12px;line-height:1.6}.account-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0d1316}.account-box h3{font-size:13px;margin:0 0 13px}.account-form{display:grid;gap:10px}.account-form input,.account-form select{height:38px;width:100%;background:#080d0f;border:1px solid #2b383b;border-radius:7px;color:var(--text);font:13px var(--sans);padding:0 10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:11px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px}.balance-list{font:12px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto}.disabled-note{color:var(--amber);font-size:11px;line-height:1.5}
   </style>
 </head>
@@ -62,7 +63,19 @@
             <label class="field"><span>Email</span><input id="accountEmail" type="email" autocomplete="username" required></label>
             <label class="field" id="passwordField"><span>Password</span><input id="accountPassword" type="password" minlength="12" autocomplete="current-password" required></label>
             <label class="field" id="confirmField" hidden><span>Confirm password</span><input id="accountPasswordConfirm" type="password" minlength="12" autocomplete="new-password"></label>
-            <div class="account-actions"><button class="button primary" id="loginButton" type="submit">Sign in</button><button class="button secondary" id="signupButton" type="button">Create account</button><button class="button secondary" id="logoutButton" type="button" hidden>Sign out</button></div>
+            <label class="toggle" id="rememberField"><input id="rememberMe" type="checkbox" style="width:auto;height:auto;accent-color:var(--green)"> Remember me on this device</label>
+            <div class="account-actions"><button class="button primary" id="loginButton" type="submit">Sign in</button><button class="button secondary" id="signupButton" type="button">Create account</button><button class="button secondary" id="forgotPasswordButton" type="button">Forgot password?</button><button class="button secondary" id="logoutButton" type="button" hidden>Sign out</button></div>
+          </form>
+          <form class="account-form" id="recoveryForm" hidden>
+            <label class="field"><span>Account email</span><input id="recoveryEmail" type="email" autocomplete="email" required></label>
+            <div class="account-actions"><button class="button primary" type="submit">Send reset link</button><button class="button secondary" id="cancelRecovery" type="button">Back to sign in</button></div>
+            <div class="account-status" id="recoveryStatus" role="status"></div>
+          </form>
+          <form class="account-form" id="resetPasswordForm" hidden>
+            <label class="field"><span>New password (12 characters minimum)</span><input id="resetPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>
+            <label class="field"><span>Confirm new password</span><input id="resetPasswordConfirm" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>
+            <div class="account-actions"><button class="button primary" type="submit">Update password</button><button class="button secondary" id="cancelReset" type="button">Back to sign in</button></div>
+            <div class="account-status" id="resetStatus" role="status"></div>
           </form>
           <div class="account-status" id="authStatus" role="status">Control API status: checking configuration…</div>
         </section>
@@ -95,7 +108,22 @@
             <div class="account-actions"><button class="button primary" id="engineStart" type="submit">Start paper scanner</button><button class="button secondary" id="engineStop" type="button" disabled>Stop engine</button><button class="button secondary" id="engineRefresh" type="button">Refresh status</button></div>
           </form>
           <div class="account-status" id="engineStatus" role="status">Sign in and verify an exchange to use the engine.</div>
-          <pre class="evidence" id="engineDetails"></pre>
+          <div class="wire-note" id="sessionWireSummary">Saved credentials are not open connections. Start a scanner session to see its live socket and book state; session sockets close when the session stops.</div>
+          <h4 class="board-heading">Per-venue connection and book frame</h4>
+          <div class="table-wrap"><table class="board-table"><thead><tr><th>Venue</th><th>Saved credential check</th><th>Session link</th><th>Public WS · book/depth/sequence</th><th>Private WS</th><th>REST RTT samples</th></tr></thead><tbody id="connectionRows"><tr><td colspan="6">Sign in to load saved venue states.</td></tr></tbody></table></div>
+          <h4 class="board-heading">Run analysis · current session and persisted outcomes</h4>
+          <div class="wire-note" id="runAnalysisSummary" role="status">Run analysis will appear after the authenticated engine state and journal load.</div>
+          <details class="raw-diagnostics"><summary>How continuous scanning, execution gates, and persistence work</summary>
+            <p>The engine opens a WebSocket order-book watcher for each configured market symbol and reconnects with backoff. It ranks cross-venue buy/sell directions when books change; a live attempt must still pass fresh-book, depth, balance, fee, permission, IOC-route, latency, and risk checks immediately before submission. The UI shows the latest per-venue books plus aggregate subscription/receipt/freshness counts; it does not render every depth delta.</p>
+            <p>REST is not a second continuous order-book stream: the engine samples REST server-time RTT at preflight and periodically during a run. The public scanner separately takes REST snapshots. The browser polls authenticated engine state and journal APIs; it does not maintain exchange sockets. A target is a realized-PnL stop threshold, not a promised profit.</p>
+            <p>Code: <code>arb_bot/arbx/market.py</code> (WebSocket books and RTT sampling), <code>worker.py</code> (per-venue lifecycle and health), <code>hub.py</code> (cross-venue ranking and gates), <code>execute.py</code> (IOC executor), <code>journal.py</code> (durable SQLite outcomes), <code>web_api.py</code> (<code>/api/v1/engine/state</code> and <code>/api/v1/engine/journal</code>); this board is in <code>index.html</code> and <code>public/index.html</code>.</p>
+          </details>
+          <h4 class="board-heading">Session scan and realized-target progress</h4>
+          <div class="account-status" id="targetProgressText">No active session target.</div>
+          <div class="target-track" role="progressbar" id="targetProgress" aria-label="Session target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="target-fill" id="targetProgressFill"></div></div>
+          <h4 class="board-heading">Engine opportunities · latest ranked observations</h4>
+          <div class="table-wrap"><table class="board-table"><thead><tr><th>Observed</th><th>Strategy / pair</th><th>Route</th><th>Notional</th><th>Expected / worst</th><th>Book age</th><th>Decision</th></tr></thead><tbody id="opportunityRows"><tr><td colspan="7">No engine opportunities recorded.</td></tr></tbody></table></div>
+          <details class="raw-diagnostics"><summary>Raw session diagnostics</summary><pre class="evidence" id="engineDetails"></pre></details>
         </section>
         <section class="account-box" id="capitalBox" hidden>
           <h3>Verified capital sources</h3>
@@ -108,7 +136,7 @@
           <p class="account-note">Durable journal entries only. Target attainment remains session-scoped; this total includes completed records across saved engine sessions.</p>
           <div class="account-actions"><button class="button secondary" id="journalRefresh" type="button">Refresh journal</button></div>
           <div class="account-status" id="journalSummary"></div>
-          <pre class="evidence" id="journalRows"></pre>
+          <div class="table-wrap"><table class="board-table"><thead><tr><th>Time</th><th>Mode / strategy</th><th>Venue route</th><th>Result</th><th>Realized net</th><th>RTT / book age</th><th>Target before → after</th></tr></thead><tbody id="journalRows"><tr><td colspan="7">No executions recorded.</td></tr></tbody></table></div>
         </section>
       </div>
     </details>
@@ -122,10 +150,13 @@
     let timer = null;
     let scanning = false;
     let signupMode = false;
+    let resetToken = null;
     let venueDefinitions = [];
     let signedInUser = null;
     let runtimeSettings = {liveTradingEnabled: false};
     let engineTimer = null;
+    let latestEngineState = null;
+    let latestJournalData = null;
 
     function selectedValues(select) {
       return Array.from(select.selectedOptions, (option) => option.value);
@@ -209,8 +240,13 @@
     }
     function setSignupMode(enabled, message) {
       signupMode = enabled;
+      $("authForm").hidden = false;
+      $("recoveryForm").hidden = true;
+      $("resetPasswordForm").hidden = true;
       $("confirmField").hidden = !enabled;
       $("accountPasswordConfirm").required = enabled;
+      $("rememberField").hidden = enabled;
+      $("forgotPasswordButton").hidden = enabled;
       $("accountPassword").setAttribute("autocomplete", enabled ? "new-password" : "current-password");
       $("authTitle").textContent = enabled ? "Create an application account" : "Sign in to your application account";
       $("authStatus").textContent = message || (enabled
@@ -218,6 +254,16 @@
         : "Sign in with your application account.");
       $("loginButton").textContent = enabled ? "Create account" : "Sign in";
       $("signupButton").textContent = enabled ? "Already have an account? Sign in" : "Create account";
+    }
+    function showRecovery(view, message = "") {
+      $("authForm").hidden = view !== "auth";
+      $("recoveryForm").hidden = view !== "recovery";
+      $("resetPasswordForm").hidden = view !== "reset";
+      $("authTitle").textContent = view === "recovery" ? "Recover your account"
+        : view === "reset" ? "Set a new password" : "Sign in to your application account";
+      if (view === "recovery") $("recoveryStatus").textContent = message;
+      if (view === "reset") $("resetStatus").textContent = message;
+      $("accountPanel").open = true;
     }
 
     async function control(path, options = {}) {
@@ -238,13 +284,151 @@
       $("authStatus").textContent = message;
       $("authStatus").style.color = error ? "var(--red)" : "var(--muted)";
     }
+    const displayNumber = (value, digits = 1) =>
+      value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))
+        ? Number(value).toFixed(digits) : "—";
+    function fillBoardRows(tbody, rows, columns, emptyText) {
+      tbody.replaceChildren();
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = columns.length;
+        td.textContent = emptyText;
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+      for (const item of rows) {
+        const tr = document.createElement("tr");
+        for (const column of columns) {
+          const td = document.createElement("td");
+          td.textContent = String(column.value(item) ?? "—");
+          if (column.className) td.className = column.className(item);
+          tr.append(td);
+        }
+        tbody.append(tr);
+      }
+    }
+    function renderConnectionBoard(state = latestEngineState) {
+      const stats = state?.stats;
+      const workers = Array.isArray(stats?.venues) ? stats.venues : [];
+      const active = Boolean(state && ["STARTING", "RUNNING", "PREFLIGHTING", "STOPPING"].some(
+        (status) => String(state.status).toUpperCase().startsWith(status)
+      ));
+      const adapterId = (id) => id === "gateio" ? "gate" : id;
+      const rows = venueDefinitions.map((venue) => {
+        const worker = workers.find((item) => item.exchange === adapterId(venue.id));
+        const saved = venue.state === "NOT_CONFIGURED"
+          ? "NO SAVED KEY"
+          : `${venue.state || "UNKNOWN"} · ${venue.verificationFresh ? "fresh" : "stale"}${venue.lastVerified ? " · " + new Date(venue.lastVerified).toLocaleString() : ""}`;
+        const session = worker
+          ? active ? `${state.mode?.toUpperCase() || "SESSION"} · ${worker.state}` : "SESSION ENDED · socket closed"
+          : active ? "STARTING · awaiting worker" : "IDLE · no open socket";
+        const latest = worker?.publicWebSocket?.latestBook;
+        let publicBook = "NO ACTIVE ENGINE BOOK";
+        if (latest) {
+          const levels = latest.depthLevels || {};
+          const depth = latest.visibleDepthQuote || {};
+          const seq = latest.sequenceAvailable ? `seq ${latest.sequence}` : "sequence unavailable";
+          const age = active ? `${displayNumber(latest.receivedAtAgeMs)} ms age` : "last session sample";
+          publicBook = `${active ? worker.publicWebSocket.state : "LAST SESSION · " + worker.publicWebSocket.state} · ${latest.symbol} · ${levels.bids ?? 0}/${levels.asks ?? 0} levels · bid ${displayNumber(depth.bids, 2)} / ask ${displayNumber(depth.asks, 2)} ${depth.currency || ""} · ${age} · ${seq}`;
+        }
+        const privateStream = worker
+          ? `${active ? "" : "LAST SESSION · "}${worker.privateWebSocket.state}${worker.privateWebSocket.lastMessageAgeMs == null ? "" : " · " + displayNumber(worker.privateWebSocket.lastMessageAgeMs) + " ms since message"}`
+          : "NOT OPEN";
+        const latency = worker?.restLatencyMs;
+        const rtt = latency?.samples
+          ? `${active ? "" : "LAST SESSION · "}p50 ${displayNumber(latency.p50)} / p95 ${displayNumber(latency.p95)} ms · ${latency.samples} samples · ${latency.withinLiveThreshold ? "under live RTT threshold" : "over live RTT threshold"}`
+          : "No active RTT samples";
+        return {name: venue.name, saved, session, publicBook, privateStream, rtt, active};
+      });
+      fillBoardRows($("connectionRows"), rows, [
+        {value: (row) => row.name},
+        {value: (row) => row.saved},
+        {value: (row) => row.session, className: (row) => row.session.includes("RUNNING") || row.session.includes("PAPER") || row.session.includes("LIVE") ? "ok" : "warn"},
+        {value: (row) => row.publicBook, className: (row) => row.publicBook.startsWith("LIVE") ? "ok" : "warn"},
+        {value: (row) => row.privateStream, className: (row) => row.privateStream.startsWith("LIVE") ? "ok" : "warn"},
+        {value: (row) => row.rtt, className: (row) => row.active && row.rtt.includes("under live") ? "ok" : "warn"},
+      ], "No venue catalog data.");
+      const activeCount = workers.filter((item) => item.state === "HEALTHY").length;
+      const savedCount = venueDefinitions.filter((venue) => venue.state && venue.state !== "NOT_CONFIGURED").length;
+      const operatorGate = state?.executionEnabled ? "operator live switch enabled" : "live orders disabled";
+      $("sessionWireSummary").textContent = active
+        ? `${state.mode?.toUpperCase() || "ENGINE"} session active · ${activeCount}/${workers.length} worker(s) healthy · ${savedCount} credential record(s) saved. ${operatorGate}. Per-venue health and per-trade gates still determine eligibility.`
+        : `${savedCount} credential record(s) saved; no engine WebSocket session is currently open. A credential check is a point-in-time probe, not a persistent socket. ${operatorGate}.`;
+    }
+    function renderTargetProgress(stats, mode) {
+      const target = Number(stats?.target_profit_usd);
+      const pnl = Number(stats?.pnl);
+      const hasTarget = Number.isFinite(target) && target > 0;
+      const realized = Number.isFinite(pnl) ? pnl : 0;
+      const progress = hasTarget
+        ? Math.min(100, Math.max(0, Number(stats?.target_progress_pct) || realized / target * 100))
+        : 0;
+      const attained = hasTarget && realized >= target;
+      $("targetProgressFill").style.width = `${progress}%`;
+      $("targetProgressFill").classList.toggle("attained", attained);
+      $("targetProgress").setAttribute("aria-valuenow", String(Math.round(progress)));
+      $("targetProgressText").textContent = hasTarget
+        ? `${mode === "paper" ? "SIMULATED" : "REALIZED"} session PnL $${currency(realized, 4)} of $${currency(target, 4)} target · ${progress.toFixed(1)}% · ${attained ? "TARGET ATTAINED" : "IN PROGRESS"}`
+        : "No profit target is set for this session.";
+    }
+    function renderRunAnalysis(state = latestEngineState, journal = latestJournalData) {
+      const stats = state?.stats;
+      if (!stats) {
+        $("runAnalysisSummary").textContent =
+          "No engine session is currently attached to this account. No exchange sockets are active from this browser session. Durable journal totals remain available below; public scanner snapshots are separate.";
+        return;
+      }
+      const workers = Array.isArray(stats.venues) ? stats.venues : [];
+      const active = ["STARTING", "RUNNING", "PREFLIGHTING", "STOPPING"].some(
+        (status) => String(state.status).toUpperCase().startsWith(status)
+      );
+      const subscriptions = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.subscribedSymbols) || 0), 0);
+      const received = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.booksReceived) || 0), 0);
+      const fresh = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.freshBooks) || 0), 0);
+      const stale = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.staleBooks) || 0), 0);
+      const sessionId = stats.session_id;
+      const sessionTrades = (journal?.trades || []).filter((item) => item.session_id === sessionId);
+      const sessionOpportunities = (journal?.opportunities || []).filter((item) => item.session_id === sessionId);
+      const filled = sessionTrades.filter((item) => item.execution_status === "FILLED").length;
+      const rejected = sessionOpportunities.filter((item) =>
+        item.decision !== "APPROVED_BY_GATE" && item.decision !== "RANKED_NOT_SELECTED"
+      ).length;
+      const liveSwitch = state.executionEnabled ? "operator switches enabled (not a trade approval)" : "live order switches disabled";
+      const sessionState = active ? `${state.status} · ${String(state.mode).toUpperCase()}` : `${state.status} · session inactive`;
+      const feedState = active
+        ? `${fresh}/${subscriptions} subscribed symbols have a fresh received book across ${workers.length} engine venue(s) (${received} received, ${stale} stale)`
+        : "exchange streams are closed; any retained worker health values are last-session observations";
+      const journalTotal = journal && Number.isFinite(Number(journal.realizedNetPnl))
+        ? `$${currency(Number(journal.realizedNetPnl), 4)} realized net across durable sessions`
+        : "durable journal total unavailable";
+      const sessionCounts = `${stats.scans || 0} scan pass(es) · ${stats.signals || 0} signal(s) · ${stats.trades || 0} engine trade(s) · ${filled} filled record(s) in returned journal page · ${rejected} rejected opportunity record(s) in returned page`;
+      const target = Number(stats.target_profit_usd);
+      const targetLine = Number.isFinite(target) && target > 0
+        ? `Session PnL $${currency(Number(stats.pnl) || 0, 4)} / $${currency(target, 4)} target; target is a stop threshold after realized PnL, never a guarantee.`
+        : "No session profit target is configured.";
+      $("runAnalysisSummary").textContent =
+        `Snapshot ${new Date().toLocaleString()} · ${sessionState}. ${feedState}. ${sessionCounts}. ` +
+        `${targetLine} ${journalTotal}. ${liveSwitch}. ` +
+        `REST provides preflight/periodic RTT samples, not continuous REST books; only current per-order authorization can permit live execution.`;
+    }
     function setSignedIn(user) {
       signedInUser = user || null;
+      if (user) signupMode = false;
       $("accountEmail").disabled = Boolean(user);
       $("passwordField").hidden = Boolean(user);
       $("confirmField").hidden = Boolean(user) || !signupMode;
+      $("rememberField").hidden = Boolean(user) || signupMode;
       $("loginButton").hidden = Boolean(user);
       $("signupButton").hidden = Boolean(user);
+      $("loginButton").textContent = signupMode ? "Create account" : "Sign in";
+      $("signupButton").textContent = signupMode ? "Already have an account? Sign in" : "Create account";
+      $("forgotPasswordButton").hidden = Boolean(user) || signupMode;
       $("logoutButton").hidden = !user;
       $("authTitle").textContent = user ? "Signed in as " + user.email : signupMode ? "Create an application account" : "Sign in to your application account";
       $("exchangeBox").hidden = !user;
@@ -308,6 +492,7 @@
         select.value = previous && venueDefinitions.some((venue) => venue.id === previous) ? previous : "binance";
         updateAuthModes();
         updateEngineChoices();
+        renderConnectionBoard();
       } catch (error) {
         $("exchangeStatus").textContent = error.message;
       }
@@ -374,6 +559,7 @@
       if (!signedInUser) return;
       try {
         const data = await control("/api/v1/engine/state");
+        latestEngineState = data;
         const stats = data.stats;
         $("engineStatus").textContent = stats
           ? data.status + (data.error ? " · preflight failed (" + data.error + ")" : "") + " · " + data.mode.toUpperCase() + " · scans " + stats.scans + " · signals " + stats.signals + " · trades " + stats.trades + " · net PnL $" + currency(stats.pnl, 4)
@@ -381,9 +567,12 @@
         $("engineDetails").textContent = stats ? JSON.stringify({equity: stats.equity, target_profit_usd: stats.target_profit_usd,
           target_progress_pct: stats.target_progress_pct, failed: stats.failed, rejects: stats.rejects, venues: stats.venues}, null, 2) : "";
         const active = ["starting", "running", "preflight", "stopping"].some((word) => data.status.toLowerCase().startsWith(word));
+        renderTargetProgress(stats, data.mode);
+        renderConnectionBoard(data);
         $("engineStop").disabled = !active;
         if (active && !engineTimer) engineTimer = setInterval(loadEngineState, 2500);
         if (!active && engineTimer) { clearInterval(engineTimer); engineTimer = null; }
+        await loadJournal();
       } catch (error) { $("engineStatus").textContent = error.message; }
     }
     async function loadCapitalSources() {
@@ -399,10 +588,30 @@
       if (!signedInUser) return;
       try {
         const data = await control("/api/v1/engine/journal");
+        latestJournalData = data;
         $("journalSummary").textContent = `Realized net PnL across saved engine sessions: $${currency(data.realizedNetPnl, 4)}`;
-        $("journalRows").textContent = data.trades.length
-          ? data.trades.map((item) => `${item.timestamp} · ${item.mode.toUpperCase()} · ${item.strategy} · ${item.exchange_a}${item.exchange_b ? " → " + item.exchange_b : ""} · ${item.execution_status} · net ${currency(item.net_pnl, 4)} USD · target ${currency(item.target_before, 4)} → ${currency(item.target_after, 4)}`).join("\n")
-          : "No journal entries yet.";
+        const trades = data.trades || [];
+        fillBoardRows($("journalRows"), trades, [
+          {value: (item) => item.timestamp},
+          {value: (item) => `${item.mode.toUpperCase()} · ${item.strategy}`},
+          {value: (item) => `${item.exchange_a}${item.exchange_b ? " → " + item.exchange_b : ""}`},
+          {value: (item) => `${item.execution_status} · ${item.risk_decision || "—"}`},
+          {value: (item) => `${currency(item.net_pnl, 4)} USD`, className: (item) => Number(item.net_pnl) >= 0 ? "ok" : "bad"},
+          {value: (item) => `${displayNumber(item.latency_ms)} / ${displayNumber(item.book_age_ms)} ms`},
+          {value: (item) => `${currency(item.target_before, 4)} → ${currency(item.target_after, 4)} USD`},
+        ], "No executions recorded.");
+        const opportunities = data.opportunities || [];
+        fillBoardRows($("opportunityRows"), opportunities, [
+          {value: (item) => item.timestamp},
+          {value: (item) => `${item.strategy} · ${item.symbol}`},
+          {value: (item) => `${item.exchange_a}${item.exchange_b ? " → " + item.exchange_b : ""}`},
+          {value: (item) => `${currency(item.requested_usd, 2)} USD`},
+          {value: (item) => `${currency(item.expected_net_usd, 4)} / ${currency(item.worst_case_net_usd, 4)} USD`},
+          {value: (item) => `${displayNumber(item.book_age_ms)} ms`},
+          {value: (item) => `${item.decision}${item.rejection_reason ? " · " + item.rejection_reason : ""}`,
+            className: (item) => item.decision === "APPROVED_BY_GATE" ? "ok" : "warn"},
+        ], "No engine opportunities recorded. The public scanner estimates are separate and do not submit orders.");
+        renderRunAnalysis();
       } catch (error) { $("journalRows").textContent = error.message; }
     }
     $("authForm").addEventListener("submit", async (event) => {
@@ -417,7 +626,7 @@
       try {
         const result = signupMode
           ? await control("/api/v1/auth/signup", {method: "POST", body: {email, password, password_confirmation: $("accountPasswordConfirm").value}})
-          : await control("/api/v1/auth/login", {method: "POST", body: {email, password}});
+          : await control("/api/v1/auth/login", {method: "POST", body: {email, password, remember_me: $("rememberMe").checked}});
         setSignedIn(result.user);
       } catch (error) {
         if (signupMode && error.message.toLowerCase().includes("already exists")) {
@@ -431,6 +640,48 @@
     });
     $("signupButton").addEventListener("click", () => {
       setSignupMode(!signupMode);
+    });
+    $("forgotPasswordButton").addEventListener("click", () => {
+      $("recoveryEmail").value = $("accountEmail").value.trim();
+      showRecovery("recovery");
+      $("recoveryEmail").focus();
+    });
+    $("cancelRecovery").addEventListener("click", () => showRecovery("auth"));
+    $("cancelReset").addEventListener("click", () => {
+      resetToken = null;
+      history.replaceState(null, "", location.pathname + location.search);
+      showRecovery("auth");
+    });
+    $("recoveryForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("recoveryStatus").textContent = "Requesting password-reset instructions…";
+      try {
+        const result = await control("/api/v1/auth/password-reset/request", {
+          method: "POST", body: {email: $("recoveryEmail").value.trim()}
+        });
+        $("recoveryStatus").textContent = result.message;
+      } catch (error) { $("recoveryStatus").textContent = error.message; }
+    });
+    $("resetPasswordForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const password = $("resetPassword").value;
+      if (password !== $("resetPasswordConfirm").value) {
+        $("resetStatus").textContent = "The passwords do not match.";
+        return;
+      }
+      try {
+        const result = await control("/api/v1/auth/password-reset/confirm", {
+          method: "POST", body: {
+            token: resetToken, password, password_confirmation: $("resetPasswordConfirm").value
+          }
+        });
+        resetToken = null;
+        $("resetPassword").value = "";
+        $("resetPasswordConfirm").value = "";
+        history.replaceState(null, "", location.pathname + location.search);
+        showRecovery("auth");
+        authMessage(result.message);
+      } catch (error) { $("resetStatus").textContent = error.message; }
     });
     $("logoutButton").addEventListener("click", async () => {
       try { await control("/api/v1/auth/logout", {method: "POST"}); }
@@ -511,7 +762,15 @@
       if (timer) clearInterval(timer);
       timer = $("auto").checked ? setInterval(() => scan(), 30000) : null;
     });
-    control("/api/v1/auth/me").then((data) => setSignedIn(data.user)).catch((error) => authMessage(error.message));
+    const resetParams = new URLSearchParams(location.hash.slice(1));
+    resetToken = resetParams.get("reset");
+    if (resetToken && /^[A-Za-z0-9_-]{32,128}$/.test(resetToken)) {
+      history.replaceState(null, "", location.pathname + location.search);
+      showRecovery("reset");
+    } else {
+      resetToken = null;
+      control("/api/v1/auth/me").then((data) => setSignedIn(data.user)).catch((error) => authMessage(error.message));
+    }
   </script>
 </body>
 </html>

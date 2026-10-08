@@ -1,0 +1,771 @@
+{
+  "authenticated": false,
+  "generatedAtUtc": "2026-10-08T02:47:13.714671+00:00",
+  "limitations": [
+    "A modeled price difference is not an assurance of executable or realized profit.",
+    "Venue catalog membership does not verify account permissions, balances, private streams, or order execution.",
+    "Network catalog entries are not evidence that every venue supports a chain or that a transfer route is available.",
+    "The audit does not place orders, perform transfers, authenticate, or enable live mode."
+  ],
+  "liveEngageable": false,
+  "liveModeState": "BLOCKED_NOT_AUTHENTICATED",
+  "ordersSubmitted": false,
+  "persistenceValidation": {
+    "artifactPaths": [
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\live-engagement-audit-20261008T024713Z.json",
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\live-engagement-audit-latest.json"
+    ],
+    "method": "atomic_write_then_json_readback",
+    "validated": true
+  },
+  "priceDifferenceProfitAssurance": false,
+  "schemaVersion": 1,
+  "scope": "read_only_public_market_data",
+  "settlementNetworks": [
+    {
+      "evidence": "catalog_only",
+      "family": "evm",
+      "id": "ethereum"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "utxo",
+      "id": "bitcoin"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "evm",
+      "id": "bsc"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "solana",
+      "id": "solana"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "evm",
+      "id": "polygon"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "evm",
+      "id": "arbitrum"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "evm",
+      "id": "optimism"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "evm",
+      "id": "avalanche"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "evm",
+      "id": "base"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "tron",
+      "id": "tron"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "xrpl",
+      "id": "xrp_ledger"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "cardano",
+      "id": "cardano"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "sui",
+      "id": "sui"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "aptos",
+      "id": "aptos"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "near",
+      "id": "near"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "cosmos",
+      "id": "cosmos"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "substrate",
+      "id": "polkadot"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "utxo",
+      "id": "litecoin"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "utxo",
+      "id": "dogecoin"
+    },
+    {
+      "evidence": "catalog_only",
+      "family": "ton",
+      "id": "ton"
+    }
+  ],
+  "strategies": [
+    {
+      "cataloged": true,
+      "id": "dca_profit_compounding",
+      "live_execution_verified": false
+    },
+    {
+      "cataloged": true,
+      "id": "cross_exchange",
+      "live_execution_verified": false
+    },
+    {
+      "cataloged": true,
+      "id": "triangular_intra_exchange",
+      "live_execution_verified": false
+    },
+    {
+      "cataloged": true,
+      "id": "triangular_multi_exchange",
+      "live_execution_verified": false
+    },
+    {
+      "cataloged": true,
+      "id": "stablecoin_arbitrage",
+      "live_execution_verified": false
+    },
+    {
+      "cataloged": true,
+      "id": "spot",
+      "live_execution_verified": false
+    }
+  ],
+  "symbol": "BTC/USDT",
+  "venues": [
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427572514,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 9313.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 488.0,
+      "sequence": 101168949871,
+      "symbol": "BTC/USDT",
+      "venue": "binance",
+      "verified": true,
+      "websocketFirstBookMs": 2936.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427571136,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 4850.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 1916.0,
+      "sequence": null,
+      "symbol": "BTC/USDT",
+      "venue": "bybit",
+      "verified": true,
+      "websocketFirstBookMs": 1589.0,
+      "websocketLevels": {
+        "asks": 50,
+        "bids": 50
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "market_discovery",
+      "liveEngageable": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: okx GET https://www.okx.com/api/v5/public/instruments?instType=SPOT",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "okx",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "market_discovery",
+      "liveEngageable": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: kucoin GET https://api.kucoin.com/api/v3/currencies",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "kucoin",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "market_discovery",
+      "liveEngageable": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "TimeoutError: [redacted]",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "gateio",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427585650,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 6068.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 764.0,
+      "sequence": null,
+      "symbol": "BTC/USDT",
+      "venue": "bitget",
+      "verified": true,
+      "websocketFirstBookMs": 2777.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "market_discovery",
+      "liveEngageable": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: kraken GET https://api.kraken.com/0/public/Assets",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "kraken",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "market_discovery",
+      "liveEngageable": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: coinbase GET https://api.coinbase.com/v2/currencies",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "coinbase",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427608467,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 2953.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 5592.0,
+      "sequence": 83180639496,
+      "symbol": "BTC/USDT",
+      "venue": "mexc",
+      "verified": true,
+      "websocketFirstBookMs": 5069.0,
+      "websocketLevels": {
+        "asks": 100,
+        "bids": 100
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427610410,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 8634.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 617.0,
+      "sequence": 194249280203,
+      "symbol": "BTC/USDT",
+      "venue": "htx",
+      "verified": true,
+      "websocketFirstBookMs": 3277.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "rest_orderbook",
+      "liveEngageable": false,
+      "marketLoadMs": 1854.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "BadRequest: bitfinex len: invalid",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "bitfinex",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "websocket_orderbook",
+      "liveEngageable": false,
+      "marketLoadMs": 2656.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "TimeoutError: [redacted]",
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 515.0,
+      "symbol": "BTC/USDT",
+      "venue": "cryptocom",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427614972,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 4434.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "order_book_missing_one_or_both_sides",
+      "restLevels": {
+        "asks": 0,
+        "bids": 0
+      },
+      "restOk": false,
+      "restRttMs": 447.0,
+      "sequence": null,
+      "symbol": "BTC/USDT",
+      "venue": "coinex",
+      "verified": false,
+      "websocketFirstBookMs": 1784.0,
+      "websocketLevels": {
+        "asks": 0,
+        "bids": 0
+      },
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427621904,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 2145.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 47,
+        "bids": 72
+      },
+      "restOk": true,
+      "restRttMs": 242.0,
+      "sequence": 1791427621904559,
+      "symbol": "BTC/USDT",
+      "venue": "bitstamp",
+      "verified": true,
+      "websocketFirstBookMs": 7837.0,
+      "websocketLevels": {
+        "asks": 47,
+        "bids": 72
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": null,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 2167.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 733.0,
+      "sequence": null,
+      "symbol": "BTC/USDT",
+      "venue": "gemini",
+      "verified": true,
+      "websocketFirstBookMs": 625.0,
+      "websocketLevels": {
+        "asks": 138,
+        "bids": 327
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427626108,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 3313.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 487.0,
+      "sequence": 16434287899,
+      "symbol": "BTC/USDT",
+      "venue": "bingx",
+      "verified": true,
+      "websocketFirstBookMs": 1635.0,
+      "websocketLevels": {
+        "asks": 100,
+        "bids": 100
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791456430265,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 4393.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 885.0,
+      "sequence": null,
+      "symbol": "BTC/USDT",
+      "venue": "lbank",
+      "verified": true,
+      "websocketFirstBookMs": 3253.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": null,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 1760.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 187.0,
+      "sequence": null,
+      "symbol": "BTC/USDT",
+      "venue": "whitebit",
+      "verified": true,
+      "websocketFirstBookMs": 679.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked",
+        "public_rest_and_websocket_not_both_verified"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "executionRouteVerified": false,
+      "failedStage": "market_discovery",
+      "liveEngageable": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "AdapterError: CCXT Pro adapter unavailable: bitmart",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "bitmart",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "authenticated": false,
+      "authenticatedBalanceVerified": false,
+      "blockers": [
+        "authenticated_account_not_checked",
+        "private_user_stream_not_checked",
+        "trading_permissions_not_checked",
+        "execution_route_not_checked"
+      ],
+      "catalogAdapter": "ccxt_pro",
+      "exchangeTimestampMs": 1791427631248,
+      "executionRouteVerified": false,
+      "liveEngageable": false,
+      "marketLoadMs": 2341.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 529.0,
+      "sequence": null,
+      "symbol": "BTC/USDT",
+      "venue": "upbit",
+      "verified": true,
+      "websocketFirstBookMs": 815.0,
+      "websocketLevels": {
+        "asks": 15,
+        "bids": 15
+      },
+      "websocketOk": true
+    }
+  ],
+  "withdrawalsOrTransfersSubmitted": false
+}

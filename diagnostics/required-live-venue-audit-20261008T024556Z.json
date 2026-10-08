@@ -1,0 +1,177 @@
+{
+  "auditType": "required_live_venue_readiness",
+  "authenticated": false,
+  "clarification": "A public REST/WebSocket order book only verifies public market-data access. It does not verify authenticated balances, private streams, account permissions, fees/order constraints, asset identity, settlement routes, or execution. A price difference is not an assurance of executable or realized profit.",
+  "generatedAtUtc": "2026-10-08T02:45:56.904216+00:00",
+  "liveEngageable": false,
+  "liveModeState": "BLOCKED_REQUIRED_EVIDENCE_MISSING",
+  "ordersSubmitted": false,
+  "persistenceValidation": {
+    "artifactPaths": [
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\required-live-venue-audit-20261008T024556Z.json",
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\required-live-venue-audit-latest.json"
+    ],
+    "method": "atomic_write_then_json_readback",
+    "validated": true
+  },
+  "priceDifferenceProfitAssurance": false,
+  "requiredVenues": [
+    "binance",
+    "mexc",
+    "kucoin",
+    "htx"
+  ],
+  "schemaVersion": 1,
+  "symbol": "BTC/USDT",
+  "venues": [
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "blockers": [
+        "authenticated_credentials_and_account_scope_not_verified",
+        "available_balances_and_reservations_not_verified",
+        "private_balance_or_order_stream_not_verified",
+        "spot_permissions_and_withdrawal_restrictions_not_verified",
+        "ioc_order_route_minimums_and_fee_tier_not_verified",
+        "cross_venue_asset_identity_and_settlement_route_not_verified"
+      ],
+      "ccxtId": "binance",
+      "exchangeTimestampMs": null,
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 7491.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 470.0,
+      "sequence": 101168939950,
+      "symbol": "BTC/USDT",
+      "venue": "binance",
+      "verified": true,
+      "websocketFirstBookMs": 1987.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "blockers": [
+        "authenticated_credentials_and_account_scope_not_verified",
+        "available_balances_and_reservations_not_verified",
+        "private_balance_or_order_stream_not_verified",
+        "spot_permissions_and_withdrawal_restrictions_not_verified",
+        "ioc_order_route_minimums_and_fee_tier_not_verified",
+        "cross_venue_asset_identity_and_settlement_route_not_verified"
+      ],
+      "ccxtId": "mexc",
+      "exchangeTimestampMs": 1791427550967,
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 5441.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 6725.0,
+      "sequence": 83180586934,
+      "symbol": "BTC/USDT",
+      "venue": "mexc",
+      "verified": true,
+      "websocketFirstBookMs": 5242.0,
+      "websocketLevels": {
+        "asks": 100,
+        "bids": 100
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "blockers": [
+        "public_rest_spot_orderbook_not_verified",
+        "public_websocket_spot_orderbook_not_verified",
+        "feed_failure:market_discovery:RequestTimeout: kucoin GET https://api.kucoin.com/api/v3/currencies",
+        "authenticated_credentials_and_account_scope_not_verified",
+        "available_balances_and_reservations_not_verified",
+        "private_balance_or_order_stream_not_verified",
+        "spot_permissions_and_withdrawal_restrictions_not_verified",
+        "ioc_order_route_minimums_and_fee_tier_not_verified",
+        "cross_venue_asset_identity_and_settlement_route_not_verified"
+      ],
+      "ccxtId": "kucoin",
+      "failedStage": "market_discovery",
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: kucoin GET https://api.kucoin.com/api/v3/currencies",
+      "restOk": false,
+      "symbol": "BTC/USDT",
+      "venue": "kucoin",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "blockers": [
+        "authenticated_credentials_and_account_scope_not_verified",
+        "available_balances_and_reservations_not_verified",
+        "private_balance_or_order_stream_not_verified",
+        "spot_permissions_and_withdrawal_restrictions_not_verified",
+        "ioc_order_route_minimums_and_fee_tier_not_verified",
+        "cross_venue_asset_identity_and_settlement_route_not_verified"
+      ],
+      "ccxtId": "htx",
+      "exchangeTimestampMs": 1791427556237,
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 7994.0,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 703.0,
+      "sequence": 194249259903,
+      "symbol": "BTC/USDT",
+      "venue": "htx",
+      "verified": true,
+      "websocketFirstBookMs": 3581.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    }
+  ],
+  "withdrawalsOrTransfersSubmitted": false
+}

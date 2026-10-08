@@ -6,7 +6,8 @@
   <meta name="theme-color" content="#080b0d">
   <meta name="description" content="Cross-exchange public market scanner with secure exchange account verification.">
   <title>NU-ARB | Execution Command Center</title>
-  <style>:root{color-scheme:dark;--bg:#06090b;--line:#223035;--line2:#2b3b40;--muted:#819195;--muted2:#a9b8b7;--text:#edf5f2;--green:#72e6b7;--red:#ff7180;--amber:#e7c06b;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(900px 520px at 78% -8%,#12372b 0,transparent 62%),radial-gradient(700px 420px at 10% 8%,#101e27 0,transparent 58%),var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}.shell{max-width:1480px;margin:auto;padding:18px 28px 56px}.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 0 14px;border-bottom:1px solid #26353a;background:#06090be8;backdrop-filter:blur(18px)}.brand{display:flex;align-items:center;gap:12px}.mark{width:40px;height:40px;border:1px solid #39755d;border-radius:12px;display:grid;place-items:center;color:var(--green);font:800 17px var(--mono);background:#0c2119}.brand-name{font-weight:750;letter-spacing:.03em}.brand-sub{font-size:11px;color:var(--muted);margin-top:3px}.nav{display:flex;gap:4px;margin-left:auto}.nav a{color:var(--muted2);text-decoration:none;font-size:12px;padding:8px 10px;border-radius:7px}.nav a:hover{background:#122025;color:var(--text)}.live-label{display:flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:99px;padding:8px 12px;color:#c7d3d0;font-size:11px;background:#0b1113}.dot{width:7px;height:7px;border-radius:50%;background:#667477;display:inline-block}.dot.on{background:var(--green);box-shadow:0 0 14px #6de0b277}.dot.error{background:var(--red)}.hero{display:flex;justify-content:space-between;align-items:end;gap:20px;padding:42px 0 25px}.hero h1{font-size:clamp(30px,4.5vw,50px);letter-spacing:-.055em;margin:0 0 10px;line-height:1}.hero p{margin:0;color:var(--muted);font-size:14px;max-width:690px}.stamp{font:11px var(--mono);color:var(--muted);white-space:nowrap}.command-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:14px;margin-bottom:16px}.policy,.readiness{border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,#0f181b,#0a1012);box-shadow:0 18px 60px #0008}.policy{padding:18px 19px}.policy-head,.readiness-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.kicker{font:10px var(--mono);letter-spacing:.14em;color:#8ca09f}.policy h2,.readiness h2{font-size:16px;margin:6px 0 0}.policy p{font-size:12px;line-height:1.6;color:var(--muted2);margin:10px 0 14px}.policy-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.policy-item{padding:11px;border:1px solid var(--line);border-radius:10px;background:#0a1113}.policy-item b{display:block;font:14px var(--mono);margin-bottom:4px}.policy-item span{font-size:10px;color:var(--muted)}.readiness{padding:18px 19px}.guard{display:flex;align-items:center;gap:9px;margin-top:14px;padding:11px 12px;border-radius:9px;background:#17150e;border:1px solid #4b3b1f;color:#d9c88e;font-size:11px;line-height:1.45}.guard .dot{background:var(--amber);flex:none}.readiness-list{display:grid;gap:7px;margin-top:12px}.readiness-row{display:flex;justify-content:space-between;gap:10px;color:var(--muted2);font:11px var(--mono)}.blocked{color:var(--amber)}.controls,.panel{background:linear-gradient(145deg,#10191c,#0a1012);border:1px solid var(--line);border-radius:15px;box-shadow:0 12px 45px #0004}.controls{display:flex;align-items:end;gap:12px;padding:15px;flex-wrap:wrap}.field{display:flex;flex-direction:column;gap:6px;min-width:125px}.field label,.field>span{font-size:10px;color:#94a5a4;letter-spacing:.06em}.field input,.field select{height:39px;width:100%;background:#070c0e;border:1px solid #29383d;border-radius:8px;color:var(--text);font:13px var(--sans);padding:0 10px;outline:none}.field input:focus,.field select:focus{border-color:#4e9e7d;box-shadow:0 0 0 2px #4e9e7d18}.field.symbol{max-width:155px}.field.amount{max-width:155px}.field.exchange{max-width:175px}.field.small{max-width:140px}.fee-group{display:flex;gap:8px}.actions{display:flex;align-items:center;gap:9px;margin-left:auto}.button{height:39px;border-radius:8px;padding:0 14px;font-weight:650;cursor:pointer;transition:.15s ease}.button:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--green);color:#07100d;border:0}.primary:hover:not(:disabled){transform:translateY(-1px);background:#9af0cf}.secondary{background:#151f23;color:#dce7e3;border:1px solid #34464b}.secondary:hover:not(:disabled){background:#1c2a2f}.toggle{color:#93a3a3;font-size:11px;display:flex;align-items:center;gap:7px;white-space:nowrap}.venues{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:16px 0}.panel{padding:17px 19px}.venue-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:17px}.venue-name{display:flex;align-items:center;gap:9px;font-weight:650}.venue-code{font:10px var(--mono);color:var(--muted);border:1px solid var(--line);padding:4px 7px;border-radius:6px}.venue-status{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:7px}.book{display:grid;grid-template-columns:1fr 1fr;gap:14px}.book label{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.12em;margin-bottom:7px}.price{font:23px var(--mono);letter-spacing:-.055em}.price.ask{color:#e9b982}.price.bid{color:var(--green)}.latency{margin-top:14px;color:#788a8d;font:10px var(--mono)}.section-head{display:flex;justify-content:space-between;align-items:center;margin:28px 2px 12px}.section-head h2{margin:0;font-size:14px;font-weight:650}.section-head span{color:var(--muted);font-size:11px}.table-wrap{overflow:auto}.opps{width:100%;border-collapse:collapse;min-width:720px}.opps th{text-align:left;color:#829397;font-size:9px;text-transform:uppercase;letter-spacing:.11em;font-weight:600;padding:11px 14px;border-bottom:1px solid var(--line)}.opps td{padding:13px 14px;border-bottom:1px solid #182428;font:12px var(--mono)}.opps tr:last-child td{border:0}.positive{color:var(--green)}.negative{color:#a3adae}.status-pill{font:10px var(--sans);border:1px solid #30413a;color:#a9d9c2;background:#13211b;border-radius:99px;padding:5px 8px;white-space:nowrap}.status-pill.neutral{background:#1a1d1f;color:#aab3b4;border-color:#343b3d}.empty{padding:29px 14px!important;text-align:center;color:var(--muted);font:12px var(--sans)!important}.fineprint{display:flex;gap:10px;align-items:flex-start;color:#829093;font-size:10px;line-height:1.6;margin-top:16px;padding:13px 15px;border-left:2px solid #a47e38;background:#15130e;border-radius:0 9px 9px 0}.fineprint strong{color:#d4b572}.error-banner{display:none;margin-top:12px;padding:11px 13px;background:#291619;border:1px solid #51252a;color:#ffadb4;border-radius:8px;font-size:11px}.error-banner.show{display:block}.account{margin-top:26px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:650;list-style:none}.account summary::-webkit-details-marker{display:none}.account summary:after{content:"+";float:right;color:var(--muted);font:16px var(--mono)}.account[open] summary:after{content:"−"}.account-note,.account-status{color:var(--muted);font-size:11px;line-height:1.6}.account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0a1113}.account-box h3{font-size:13px;margin:0 0 12px}.account-form{display:grid;gap:10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:10px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px;max-height:260px;overflow:auto}.balance-list{font:11px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto;white-space:pre-wrap}.disabled-note{color:var(--amber);font-size:10px;line-height:1.5}.footer{color:#657579;font:10px var(--mono);display:flex;justify-content:space-between;gap:12px;margin-top:30px;padding-top:16px;border-top:1px solid var(--line)}@media(max-width:1050px){.command-grid{grid-template-columns:1fr}.policy-grid{grid-template-columns:repeat(2,1fr)}.actions{margin-left:0}.controls .actions{width:100%}}@media(max-width:760px){.shell{padding:14px 14px 38px}.top{padding-bottom:12px}.nav{display:none}.live-label{font-size:10px;padding:7px 9px}.hero{align-items:start;flex-direction:column;gap:12px;padding:32px 0 20px}.hero h1{font-size:36px}.venues{grid-template-columns:1fr}.controls{gap:10px}.field{flex:1 1 42%;max-width:none!important}.actions{width:100%;flex-wrap:wrap}.actions .button{flex:1}.fee-group{flex:1 1 100%}.fee-group .field{max-width:none!important}.stamp{font-size:9px}.policy-grid{grid-template-columns:1fr 1fr}.account-grid{grid-template-columns:1fr}.footer{flex-direction:column}}</style>
+  <style>:root{color-scheme:dark;--bg:#06090b;--line:#223035;--line2:#2b3b40;--muted:#819195;--muted2:#a9b8b7;--text:#edf5f2;--green:#72e6b7;--red:#ff7180;--amber:#e7c06b;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}  *{box-sizing:border-box}[hidden]{display:none!important}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(900px 520px at 78% -8%,#12372b 0,transparent 62%),radial-gradient(700px 420px at 10% 8%,#101e27 0,transparent 58%),var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}.shell{max-width:1480px;margin:auto;padding:18px 28px 56px}.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 0 14px;border-bottom:1px solid #26353a;background:#06090be8;backdrop-filter:blur(18px)}.brand{display:flex;align-items:center;gap:12px}.mark{width:40px;height:40px;border:1px solid #39755d;border-radius:12px;display:grid;place-items:center;color:var(--green);font:800 17px var(--mono);background:#0c2119}.brand-name{font-weight:750;letter-spacing:.03em}.brand-sub{font-size:11px;color:var(--muted);margin-top:3px}.nav{display:flex;gap:4px;margin-left:auto}.nav a{color:var(--muted2);text-decoration:none;font-size:12px;padding:8px 10px;border-radius:7px}.nav a:hover{background:#122025;color:var(--text)}.live-label{display:flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:99px;padding:8px 12px;color:#c7d3d0;font-size:11px;background:#0b1113}.dot{width:7px;height:7px;border-radius:50%;background:#667477;display:inline-block}.dot.on{background:var(--green);box-shadow:0 0 14px #6de0b277}.dot.error{background:var(--red)}.hero{display:flex;justify-content:space-between;align-items:end;gap:20px;padding:42px 0 25px}.hero h1{font-size:clamp(30px,4.5vw,50px);letter-spacing:-.055em;margin:0 0 10px;line-height:1}.hero p{margin:0;color:var(--muted);font-size:14px;max-width:690px}.stamp{font:11px var(--mono);color:var(--muted);white-space:nowrap}.command-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:14px;margin-bottom:16px}.policy,.readiness{border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,#0f181b,#0a1012);box-shadow:0 18px 60px #0008}.policy{padding:18px 19px}.policy-head,.readiness-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.kicker{font:10px var(--mono);letter-spacing:.14em;color:#8ca09f}.policy h2,.readiness h2{font-size:16px;margin:6px 0 0}.policy p{font-size:12px;line-height:1.6;color:var(--muted2);margin:10px 0 14px}.policy-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.policy-item{padding:11px;border:1px solid var(--line);border-radius:10px;background:#0a1113}.policy-item b{display:block;font:14px var(--mono);margin-bottom:4px}.policy-item span{font-size:10px;color:var(--muted)}.readiness{padding:18px 19px}.guard{display:flex;align-items:center;gap:9px;margin-top:14px;padding:11px 12px;border-radius:9px;background:#17150e;border:1px solid #4b3b1f;color:#d9c88e;font-size:11px;line-height:1.45}.guard .dot{background:var(--amber);flex:none}.readiness-list{display:grid;gap:7px;margin-top:12px}.readiness-row{display:flex;justify-content:space-between;gap:10px;color:var(--muted2);font:11px var(--mono)}.blocked{color:var(--amber)}.controls,.panel{background:linear-gradient(145deg,#10191c,#0a1012);border:1px solid var(--line);border-radius:15px;box-shadow:0 12px 45px #0004}.controls{display:flex;align-items:end;gap:12px;padding:15px;flex-wrap:wrap}.field{display:flex;flex-direction:column;gap:6px;min-width:125px}.field label,.field>span{font-size:10px;color:#94a5a4;letter-spacing:.06em}.field input,.field select{height:39px;width:100%;background:#070c0e;border:1px solid #29383d;border-radius:8px;color:var(--text);font:13px var(--sans);padding:0 10px;outline:none}.field input:focus,.field select:focus{border-color:#4e9e7d;box-shadow:0 0 0 2px #4e9e7d18}.field.symbol{max-width:155px}.field.amount{max-width:155px}.field.exchange{max-width:175px}.field.small{max-width:140px}.fee-group{display:flex;gap:8px}.actions{display:flex;align-items:center;gap:9px;margin-left:auto}.button{height:39px;border-radius:8px;padding:0 14px;font-weight:650;cursor:pointer;transition:.15s ease}.button:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--green);color:#07100d;border:0}.primary:hover:not(:disabled){transform:translateY(-1px);background:#9af0cf}.secondary{background:#151f23;color:#dce7e3;border:1px solid #34464b}.secondary:hover:not(:disabled){background:#1c2a2f}.toggle{color:#93a3a3;font-size:11px;display:flex;align-items:center;gap:7px;white-space:nowrap}.venues{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:16px 0}.panel{padding:17px 19px}.venue-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:17px}.venue-name{display:flex;align-items:center;gap:9px;font-weight:650}.venue-code{font:10px var(--mono);color:var(--muted);border:1px solid var(--line);padding:4px 7px;border-radius:6px}.venue-status{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:7px}.book{display:grid;grid-template-columns:1fr 1fr;gap:14px}.book label{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.12em;margin-bottom:7px}.price{font:23px var(--mono);letter-spacing:-.055em}.price.ask{color:#e9b982}.price.bid{color:var(--green)}.latency{margin-top:14px;color:#788a8d;font:10px var(--mono)}.section-head{display:flex;justify-content:space-between;align-items:center;margin:28px 2px 12px}.section-head h2{margin:0;font-size:14px;font-weight:650}.section-head span{color:var(--muted);font-size:11px}.table-wrap{overflow:auto}.opps{width:100%;border-collapse:collapse;min-width:720px}.opps th{text-align:left;color:#829397;font-size:9px;text-transform:uppercase;letter-spacing:.11em;font-weight:600;padding:11px 14px;border-bottom:1px solid var(--line)}.opps td{padding:13px 14px;border-bottom:1px solid #182428;font:12px var(--mono)}.opps tr:last-child td{border:0}.positive{color:var(--green)}.negative{color:#a3adae}.status-pill{font:10px var(--sans);border:1px solid #30413a;color:#a9d9c2;background:#13211b;border-radius:99px;padding:5px 8px;white-space:nowrap}.status-pill.neutral{background:#1a1d1f;color:#aab3b4;border-color:#343b3d}.empty{padding:29px 14px!important;text-align:center;color:var(--muted);font:12px var(--sans)!important}.fineprint{display:flex;gap:10px;align-items:flex-start;color:#829093;font-size:10px;line-height:1.6;margin-top:16px;padding:13px 15px;border-left:2px solid #a47e38;background:#15130e;border-radius:0 9px 9px 0}.fineprint strong{color:#d4b572}.error-banner{display:none;margin-top:12px;padding:11px 13px;background:#291619;border:1px solid #51252a;color:#ffadb4;border-radius:8px;font-size:11px}.error-banner.show{display:block}.account{margin-top:26px;border-top:1px solid var(--line);padding-top:18px}.account summary{cursor:pointer;font-size:14px;font-weight:650;list-style:none}.account summary::-webkit-details-marker{display:none}.account summary:after{content:"+";float:right;color:var(--muted);font:16px var(--mono)}.account[open] summary:after{content:"−"}.account-note,.account-status{color:var(--muted);font-size:11px;line-height:1.6}.account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}.account-box{padding:17px;border:1px solid var(--line);border-radius:12px;background:#0a1113}.account-box h3{font-size:13px;margin:0 0 12px}.account-form{display:grid;gap:10px}.account-actions{display:flex;gap:8px;flex-wrap:wrap}.account-actions .button{height:36px}.account-status{margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence{font:10px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c9c5;margin-top:10px;max-height:260px;overflow:auto}.balance-list{font:11px var(--mono);color:#b9c9c5;max-height:180px;overflow:auto;white-space:pre-wrap}.disabled-note{color:var(--amber);font-size:10px;line-height:1.5}.footer{color:#657579;font:10px var(--mono);display:flex;justify-content:space-between;gap:12px;margin-top:30px;padding-top:16px;border-top:1px solid var(--line)}@media(max-width:1050px){.command-grid{grid-template-columns:1fr}.policy-grid{grid-template-columns:repeat(2,1fr)}.actions{margin-left:0}.controls .actions{width:100%}}@media(max-width:760px){.shell{padding:14px 14px 38px}.top{padding-bottom:12px}.nav{display:none}.live-label{font-size:10px;padding:7px 9px}.hero{align-items:start;flex-direction:column;gap:12px;padding:32px 0 20px}.hero h1{font-size:36px}.venues{grid-template-columns:1fr}.controls{gap:10px}.field{flex:1 1 42%;max-width:none!important}.actions{width:100%;flex-wrap:wrap}.actions .button{flex:1}.fee-group{flex:1 1 100%}.fee-group .field{max-width:none!important}.stamp{font-size:9px}.policy-grid{grid-template-columns:1fr 1fr}.account-grid{grid-template-columns:1fr}.footer{flex-direction:column}}    .wire-note{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#080d0f;color:var(--muted2);font-size:11px;line-height:1.5;margin:10px 0}.board-table{width:100%;border-collapse:collapse;min-width:820px}.board-table th,.board-table td{text-align:left;padding:9px 10px;border-bottom:1px solid #1c272b;vertical-align:top;font-size:10px}.board-table th{color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}.board-table td{font-family:var(--mono);color:#c2cecb;white-space:pre-wrap;overflow-wrap:anywhere}.board-table .ok{color:var(--green)}.board-table .warn{color:var(--amber)}.board-table .bad{color:var(--red)}.target-track{height:10px;overflow:hidden;border:1px solid var(--line);border-radius:99px;background:#070c0e;margin:9px 0}.target-fill{height:100%;width:0;background:var(--green);transition:width .25s ease}.target-fill.attained{background:var(--amber)}.board-heading{margin:18px 0 8px;font-size:12px}.raw-diagnostics{margin-top:10px;color:var(--muted);font-size:11px}.raw-diagnostics summary{cursor:pointer}
+  </style>
 </head>
 <body>
   <main class="shell">
@@ -77,7 +78,19 @@
             <label class="field"><span>Email</span><input id="accountEmail" type="email" autocomplete="username" required></label>
             <label class="field" id="passwordField"><span>Password</span><input id="accountPassword" type="password" minlength="12" autocomplete="current-password" required></label>
             <label class="field" id="confirmField" hidden><span>Confirm password</span><input id="accountPasswordConfirm" type="password" minlength="12" autocomplete="new-password"></label>
-            <div class="account-actions"><button class="button primary" id="loginButton" type="submit">Sign in</button><button class="button secondary" id="signupButton" type="button">Create account</button><button class="button secondary" id="logoutButton" type="button" hidden>Sign out</button></div>
+            <label class="toggle" id="rememberField"><input id="rememberMe" type="checkbox" style="width:auto;height:auto;accent-color:var(--green)"> Remember me on this device</label>
+            <div class="account-actions"><button class="button primary" id="loginButton" type="submit">Sign in</button><button class="button secondary" id="signupButton" type="button">Create account</button><button class="button secondary" id="forgotPasswordButton" type="button">Forgot password?</button><button class="button secondary" id="logoutButton" type="button" hidden>Sign out</button></div>
+          </form>
+          <form class="account-form" id="recoveryForm" hidden>
+            <label class="field"><span>Account email</span><input id="recoveryEmail" type="email" autocomplete="email" required></label>
+            <div class="account-actions"><button class="button primary" type="submit">Send reset link</button><button class="button secondary" id="cancelRecovery" type="button">Back to sign in</button></div>
+            <div class="account-status" id="recoveryStatus" role="status"></div>
+          </form>
+          <form class="account-form" id="resetPasswordForm" hidden>
+            <label class="field"><span>New password (12 characters minimum)</span><input id="resetPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>
+            <label class="field"><span>Confirm new password</span><input id="resetPasswordConfirm" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>
+            <div class="account-actions"><button class="button primary" type="submit">Update password</button><button class="button secondary" id="cancelReset" type="button">Back to sign in</button></div>
+            <div class="account-status" id="resetStatus" role="status"></div>
           </form>
           <div class="account-status" id="authStatus" role="status">Control API status: checking configuration…</div>
         </section>
@@ -109,7 +122,22 @@
             <div class="account-actions"><button class="button primary" id="engineStart" type="submit">Start paper scanner</button><button class="button secondary" id="engineStop" type="button" disabled>Stop engine</button><button class="button secondary" id="engineRefresh" type="button">Refresh status</button></div>
           </form>
           <div class="account-status" id="engineStatus" role="status">Sign in and verify an exchange to use the engine.</div>
-          <pre class="evidence" id="engineDetails"></pre>
+          <div class="wire-note" id="sessionWireSummary">Saved credentials are not open connections. Start a scanner session to see its live socket and book state; session sockets close when the session stops.</div>
+          <h4 class="board-heading">Per-venue connection and book frame</h4>
+          <div class="table-wrap"><table class="board-table"><thead><tr><th>Venue</th><th>Saved credential check</th><th>Session link</th><th>Public WS · book/depth/sequence</th><th>Private WS</th><th>REST RTT samples</th></tr></thead><tbody id="connectionRows"><tr><td colspan="6">Sign in to load saved venue states.</td></tr></tbody></table></div>
+          <h4 class="board-heading">Run analysis · current session and persisted outcomes</h4>
+          <div class="wire-note" id="runAnalysisSummary" role="status">Run analysis will appear after the authenticated engine state and journal load.</div>
+          <details class="raw-diagnostics"><summary>How continuous scanning, execution gates, and persistence work</summary>
+            <p>The engine opens a WebSocket order-book watcher for each configured market symbol and reconnects with backoff. It ranks cross-venue buy/sell directions when books change; a live attempt must still pass fresh-book, depth, balance, fee, permission, IOC-route, latency, and risk checks immediately before submission. The UI shows the latest per-venue books plus aggregate subscription/receipt/freshness counts; it does not render every depth delta.</p>
+            <p>REST is not a second continuous order-book stream: the engine samples REST server-time RTT at preflight and periodically during a run. The public scanner separately takes REST snapshots. The browser polls authenticated engine state and journal APIs; it does not maintain exchange sockets. A target is a realized-PnL stop threshold, not a promised profit.</p>
+            <p>Code: <code>arb_bot/arbx/market.py</code> (WebSocket books and RTT sampling), <code>worker.py</code> (per-venue lifecycle and health), <code>hub.py</code> (cross-venue ranking and gates), <code>execute.py</code> (IOC executor), <code>journal.py</code> (durable SQLite outcomes), <code>web_api.py</code> (<code>/api/v1/engine/state</code> and <code>/api/v1/engine/journal</code>); this board is in <code>index.html</code> and <code>public/index.html</code>.</p>
+          </details>
+          <h4 class="board-heading">Session scan and realized-target progress</h4>
+          <div class="account-status" id="targetProgressText">No active session target.</div>
+          <div class="target-track" role="progressbar" id="targetProgress" aria-label="Session target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="target-fill" id="targetProgressFill"></div></div>
+          <h4 class="board-heading">Engine opportunities · latest ranked observations</h4>
+          <div class="table-wrap"><table class="board-table"><thead><tr><th>Observed</th><th>Strategy / pair</th><th>Route</th><th>Notional</th><th>Expected / worst</th><th>Book age</th><th>Decision</th></tr></thead><tbody id="opportunityRows"><tr><td colspan="7">No engine opportunities recorded.</td></tr></tbody></table></div>
+          <details class="raw-diagnostics"><summary>Raw session diagnostics</summary><pre class="evidence" id="engineDetails"></pre></details>
         </section>
         <section class="account-box" id="capitalBox" hidden>
           <h3>Verified capital sources</h3>
@@ -122,7 +150,7 @@
           <p class="account-note">Durable journal entries only. Target attainment remains session-scoped; this total includes completed records across saved engine sessions.</p>
           <div class="account-actions"><button class="button secondary" id="journalRefresh" type="button">Refresh journal</button></div>
           <div class="account-status" id="journalSummary"></div>
-          <pre class="evidence" id="journalRows"></pre>
+          <div class="table-wrap"><table class="board-table"><thead><tr><th>Time</th><th>Mode / strategy</th><th>Venue route</th><th>Result</th><th>Realized net</th><th>RTT / book age</th><th>Target before → after</th></tr></thead><tbody id="journalRows"><tr><td colspan="7">No executions recorded.</td></tr></tbody></table></div>
         </section>
       </div>
     </details>
@@ -136,10 +164,13 @@
     let timer = null;
     let scanning = false;
     let signupMode = false;
+    let resetToken = null;
     let venueDefinitions = [];
     let signedInUser = null;
     let runtimeSettings = {liveTradingEnabled: false};
     let engineTimer = null;
+    let latestEngineState = null;
+    let latestJournalData = null;
 
     function syncVenueNames() {
       const a = $("exchangeA").value;
@@ -264,13 +295,162 @@
       $("authStatus").textContent = message;
       $("authStatus").style.color = error ? "var(--red)" : "var(--muted)";
     }
+    const displayNumber = (value, digits = 1) =>
+      value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))
+        ? Number(value).toFixed(digits) : "—";
+    function fillBoardRows(tbody, rows, columns, emptyText) {
+      tbody.replaceChildren();
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = columns.length;
+        td.textContent = emptyText;
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+      for (const item of rows) {
+        const tr = document.createElement("tr");
+        for (const column of columns) {
+          const td = document.createElement("td");
+          td.textContent = String(column.value(item) ?? "—");
+          if (column.className) td.className = column.className(item);
+          tr.append(td);
+        }
+        tbody.append(tr);
+      }
+    }
+    function renderConnectionBoard(state = latestEngineState) {
+      const stats = state?.stats;
+      const workers = Array.isArray(stats?.venues) ? stats.venues : [];
+      const active = Boolean(state && ["STARTING", "RUNNING", "PREFLIGHTING", "STOPPING"].some(
+        (status) => String(state.status).toUpperCase().startsWith(status)
+      ));
+      const adapterId = (id) => id === "gateio" ? "gate" : id;
+      const rows = venueDefinitions.map((venue) => {
+        const worker = workers.find((item) => item.exchange === adapterId(venue.id));
+        const saved = venue.state === "NOT_CONFIGURED"
+          ? "NO SAVED KEY"
+          : `${venue.state || "UNKNOWN"} · ${venue.verificationFresh ? "fresh" : "stale"}${venue.lastVerified ? " · " + new Date(venue.lastVerified).toLocaleString() : ""}`;
+        const session = worker
+          ? active ? `${state.mode?.toUpperCase() || "SESSION"} · ${worker.state}` : "SESSION ENDED · socket closed"
+          : active ? "STARTING · awaiting worker" : "IDLE · no open socket";
+        const latest = worker?.publicWebSocket?.latestBook;
+        let publicBook = "NO ACTIVE ENGINE BOOK";
+        if (latest) {
+          const levels = latest.depthLevels || {};
+          const depth = latest.visibleDepthQuote || {};
+          const seq = latest.sequenceAvailable ? `seq ${latest.sequence}` : "sequence unavailable";
+          const age = active ? `${displayNumber(latest.receivedAtAgeMs)} ms age` : "last session sample";
+          publicBook = `${active ? worker.publicWebSocket.state : "LAST SESSION · " + worker.publicWebSocket.state} · ${latest.symbol} · ${levels.bids ?? 0}/${levels.asks ?? 0} levels · bid ${displayNumber(depth.bids, 2)} / ask ${displayNumber(depth.asks, 2)} ${depth.currency || ""} · ${age} · ${seq}`;
+        }
+        const privateStream = worker
+          ? `${active ? "" : "LAST SESSION · "}${worker.privateWebSocket.state}${worker.privateWebSocket.lastMessageAgeMs == null ? "" : " · " + displayNumber(worker.privateWebSocket.lastMessageAgeMs) + " ms since message"}`
+          : "NOT OPEN";
+        const latency = worker?.restLatencyMs;
+        const rtt = latency?.samples
+          ? `${active ? "" : "LAST SESSION · "}p50 ${displayNumber(latency.p50)} / p95 ${displayNumber(latency.p95)} ms · ${latency.samples} samples · ${latency.withinLiveThreshold ? "under live RTT threshold" : "over live RTT threshold"}`
+          : "No active RTT samples";
+        return {name: venue.name, saved, session, publicBook, privateStream, rtt, active};
+      });
+      fillBoardRows($("connectionRows"), rows, [
+        {value: (row) => row.name},
+        {value: (row) => row.saved},
+        {value: (row) => row.session, className: (row) => row.session.includes("RUNNING") || row.session.includes("PAPER") || row.session.includes("LIVE") ? "ok" : "warn"},
+        {value: (row) => row.publicBook, className: (row) => row.publicBook.startsWith("LIVE") ? "ok" : "warn"},
+        {value: (row) => row.privateStream, className: (row) => row.privateStream.startsWith("LIVE") ? "ok" : "warn"},
+        {value: (row) => row.rtt, className: (row) => row.active && row.rtt.includes("under live") ? "ok" : "warn"},
+      ], "No venue catalog data.");
+      const activeCount = workers.filter((item) => item.state === "HEALTHY").length;
+      const savedCount = venueDefinitions.filter((venue) => venue.state && venue.state !== "NOT_CONFIGURED").length;
+      const operatorGate = state?.executionEnabled ? "operator live switch enabled" : "live orders disabled";
+      $("sessionWireSummary").textContent = active
+        ? `${state.mode?.toUpperCase() || "ENGINE"} session active · ${activeCount}/${workers.length} worker(s) healthy · ${savedCount} credential record(s) saved. ${operatorGate}. Per-venue health and per-trade gates still determine eligibility.`
+        : `${savedCount} credential record(s) saved; no engine WebSocket session is currently open. A credential check is a point-in-time probe, not a persistent socket. ${operatorGate}.`;
+    }
+    function renderTargetProgress(stats, mode) {
+      const target = Number(stats?.target_profit_usd);
+      const pnl = Number(stats?.pnl);
+      const hasTarget = Number.isFinite(target) && target > 0;
+      const realized = Number.isFinite(pnl) ? pnl : 0;
+      const progress = hasTarget
+        ? Math.min(100, Math.max(0, Number(stats?.target_progress_pct) || realized / target * 100))
+        : 0;
+      const attained = hasTarget && realized >= target;
+      $("targetProgressFill").style.width = `${progress}%`;
+      $("targetProgressFill").classList.toggle("attained", attained);
+      $("targetProgress").setAttribute("aria-valuenow", String(Math.round(progress)));
+      $("targetProgressText").textContent = hasTarget
+        ? `${mode === "paper" ? "SIMULATED" : "REALIZED"} session PnL $${currency(realized, 4)} of $${currency(target, 4)} target · ${progress.toFixed(1)}% · ${attained ? "TARGET ATTAINED" : "IN PROGRESS"}`
+        : "No profit target is set for this session.";
+    }
+    function renderRunAnalysis(state = latestEngineState, journal = latestJournalData) {
+      const stats = state?.stats;
+      if (!stats) {
+        $("runAnalysisSummary").textContent =
+          "No engine session is currently attached to this account. No exchange sockets are active from this browser session. Durable journal totals remain available below; public scanner snapshots are separate.";
+        return;
+      }
+      const workers = Array.isArray(stats.venues) ? stats.venues : [];
+      const active = ["STARTING", "RUNNING", "PREFLIGHTING", "STOPPING"].some(
+        (status) => String(state.status).toUpperCase().startsWith(status)
+      );
+      const subscriptions = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.subscribedSymbols) || 0), 0);
+      const received = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.booksReceived) || 0), 0);
+      const fresh = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.freshBooks) || 0), 0);
+      const stale = workers.reduce((sum, worker) =>
+        sum + (Number(worker.orderBookStreams?.staleBooks) || 0), 0);
+      const sessionId = stats.session_id;
+      const sessionTrades = (journal?.trades || []).filter((item) => item.session_id === sessionId);
+      const sessionOpportunities = (journal?.opportunities || []).filter((item) => item.session_id === sessionId);
+      const filled = sessionTrades.filter((item) => item.execution_status === "FILLED").length;
+      const rejected = sessionOpportunities.filter((item) =>
+        item.decision !== "APPROVED_BY_GATE" && item.decision !== "RANKED_NOT_SELECTED"
+      ).length;
+      const liveSwitch = state.executionEnabled ? "operator switches enabled (not a trade approval)" : "live order switches disabled";
+      const sessionState = active ? `${state.status} · ${String(state.mode).toUpperCase()}` : `${state.status} · session inactive`;
+      const feedState = active
+        ? `${fresh}/${subscriptions} subscribed symbols have a fresh received book across ${workers.length} engine venue(s) (${received} received, ${stale} stale)`
+        : "exchange streams are closed; any retained worker health values are last-session observations";
+      const journalTotal = journal && Number.isFinite(Number(journal.realizedNetPnl))
+        ? `$${currency(Number(journal.realizedNetPnl), 4)} realized net across durable sessions`
+        : "durable journal total unavailable";
+      const sessionCounts = `${stats.scans || 0} scan pass(es) · ${stats.signals || 0} signal(s) · ${stats.trades || 0} engine trade(s) · ${filled} filled record(s) in returned journal page · ${rejected} rejected opportunity record(s) in returned page`;
+      const target = Number(stats.target_profit_usd);
+      const targetLine = Number.isFinite(target) && target > 0
+        ? `Session PnL $${currency(Number(stats.pnl) || 0, 4)} / $${currency(target, 4)} target; target is a stop threshold after realized PnL, never a guarantee.`
+        : "No session profit target is configured.";
+      $("runAnalysisSummary").textContent =
+        `Snapshot ${new Date().toLocaleString()} · ${sessionState}. ${feedState}. ${sessionCounts}. ` +
+        `${targetLine} ${journalTotal}. ${liveSwitch}. ` +
+        `REST provides preflight/periodic RTT samples, not continuous REST books; only current per-order authorization can permit live execution.`;
+    }
+    function showRecovery(view, message = "") {
+      $("authForm").hidden = view !== "auth";
+      $("recoveryForm").hidden = view !== "recovery";
+      $("resetPasswordForm").hidden = view !== "reset";
+      $("authTitle").textContent = view === "recovery" ? "Recover your account"
+        : view === "reset" ? "Set a new password"
+        : signupMode ? "Create an application account" : "Sign in to your application account";
+      if (view === "recovery") $("recoveryStatus").textContent = message;
+      if (view === "reset") $("resetStatus").textContent = message;
+      $("accountPanel").open = true;
+    }
     function setSignedIn(user) {
       signedInUser = user || null;
+      if (user) signupMode = false;
       $("accountEmail").disabled = Boolean(user);
       $("passwordField").hidden = Boolean(user);
       $("confirmField").hidden = Boolean(user) || !signupMode;
+      $("rememberField").hidden = Boolean(user) || signupMode;
       $("loginButton").hidden = Boolean(user);
       $("signupButton").hidden = Boolean(user);
+      $("loginButton").textContent = signupMode ? "Create account" : "Sign in";
+      $("signupButton").textContent = signupMode ? "Already have an account? Sign in" : "Create account";
+      $("forgotPasswordButton").hidden = Boolean(user) || signupMode;
       $("logoutButton").hidden = !user;
       $("authTitle").textContent = user ? "Signed in as " + user.email : signupMode ? "Create an application account" : "Sign in to your application account";
       $("exchangeBox").hidden = !user;
@@ -334,6 +514,7 @@
         select.value = previous && venueDefinitions.some((venue) => venue.id === previous) ? previous : "binance";
         updateAuthModes();
         updateEngineChoices();
+        renderConnectionBoard();
       } catch (error) {
         $("exchangeStatus").textContent = error.message;
       }
@@ -395,6 +576,7 @@
       if (!signedInUser) return;
       try {
         const data = await control("/api/v1/engine/state");
+        latestEngineState = data;
         const stats = data.stats;
         $("engineStatus").textContent = stats
           ? data.status + (data.error ? " · preflight failed (" + data.error + ")" : "") + " · " + data.mode.toUpperCase() + " · scans " + stats.scans + " · signals " + stats.signals + " · trades " + stats.trades + " · net PnL $" + currency(stats.pnl, 4)
@@ -402,9 +584,12 @@
         $("engineDetails").textContent = stats ? JSON.stringify({equity: stats.equity, target_profit_usd: stats.target_profit_usd,
           target_progress_pct: stats.target_progress_pct, failed: stats.failed, rejects: stats.rejects, venues: stats.venues}, null, 2) : "";
         const active = ["starting", "running", "preflight", "stopping"].some((word) => data.status.toLowerCase().startsWith(word));
+        renderTargetProgress(stats, data.mode);
+        renderConnectionBoard(data);
         $("engineStop").disabled = !active;
         if (active && !engineTimer) engineTimer = setInterval(loadEngineState, 2500);
         if (!active && engineTimer) { clearInterval(engineTimer); engineTimer = null; }
+        await loadJournal();
       } catch (error) { $("engineStatus").textContent = error.message; }
     }
     async function loadCapitalSources() {
@@ -420,10 +605,30 @@
       if (!signedInUser) return;
       try {
         const data = await control("/api/v1/engine/journal");
+        latestJournalData = data;
         $("journalSummary").textContent = `Realized net PnL across saved engine sessions: $${currency(data.realizedNetPnl, 4)}`;
-        $("journalRows").textContent = data.trades.length
-          ? data.trades.map((item) => `${item.timestamp} · ${item.mode.toUpperCase()} · ${item.strategy} · ${item.exchange_a}${item.exchange_b ? " → " + item.exchange_b : ""} · ${item.execution_status} · net ${currency(item.net_pnl, 4)} USD · target ${currency(item.target_before, 4)} → ${currency(item.target_after, 4)}`).join("\n")
-          : "No journal entries yet.";
+        const trades = data.trades || [];
+        fillBoardRows($("journalRows"), trades, [
+          {value: (item) => item.timestamp},
+          {value: (item) => `${item.mode.toUpperCase()} · ${item.strategy}`},
+          {value: (item) => `${item.exchange_a}${item.exchange_b ? " → " + item.exchange_b : ""}`},
+          {value: (item) => `${item.execution_status} · ${item.risk_decision || "—"}`},
+          {value: (item) => `${currency(item.net_pnl, 4)} USD`, className: (item) => Number(item.net_pnl) >= 0 ? "ok" : "bad"},
+          {value: (item) => `${displayNumber(item.latency_ms)} / ${displayNumber(item.book_age_ms)} ms`},
+          {value: (item) => `${currency(item.target_before, 4)} → ${currency(item.target_after, 4)} USD`},
+        ], "No executions recorded.");
+        const opportunities = data.opportunities || [];
+        fillBoardRows($("opportunityRows"), opportunities, [
+          {value: (item) => item.timestamp},
+          {value: (item) => `${item.strategy} · ${item.symbol}`},
+          {value: (item) => `${item.exchange_a}${item.exchange_b ? " → " + item.exchange_b : ""}`},
+          {value: (item) => `${currency(item.requested_usd, 2)} USD`},
+          {value: (item) => `${currency(item.expected_net_usd, 4)} / ${currency(item.worst_case_net_usd, 4)} USD`},
+          {value: (item) => `${displayNumber(item.book_age_ms)} ms`},
+          {value: (item) => `${item.decision}${item.rejection_reason ? " · " + item.rejection_reason : ""}`,
+            className: (item) => item.decision === "APPROVED_BY_GATE" ? "ok" : "warn"},
+        ], "No engine opportunities recorded. The public scanner estimates are separate and do not submit orders.");
+        renderRunAnalysis();
       } catch (error) { $("journalRows").textContent = error.message; }
     }
     $("authForm").addEventListener("submit", async (event) => {
@@ -433,18 +638,66 @@
       try {
         const result = signupMode
           ? await control("/api/v1/auth/signup", {method: "POST", body: {email, password, password_confirmation: $("accountPasswordConfirm").value}})
-          : await control("/api/v1/auth/login", {method: "POST", body: {email, password}});
+          : await control("/api/v1/auth/login", {method: "POST", body: {email, password, remember_me: $("rememberMe").checked}});
         setSignedIn(result.user);
       } catch (error) { authMessage(error.message, true); }
     });
     $("signupButton").addEventListener("click", () => {
       signupMode = !signupMode;
+      $("authForm").hidden = false;
+      $("recoveryForm").hidden = true;
+      $("resetPasswordForm").hidden = true;
       $("confirmField").hidden = !signupMode;
+      $("accountPasswordConfirm").required = signupMode;
+      $("rememberField").hidden = signupMode;
+      $("forgotPasswordButton").hidden = signupMode;
       $("accountPassword").setAttribute("autocomplete", signupMode ? "new-password" : "current-password");
       $("authTitle").textContent = signupMode ? "Create an application account" : "Sign in to your application account";
       $("authStatus").textContent = signupMode ? "Use a unique password with at least 12 characters." : "Sign in with your application account.";
       $("loginButton").textContent = signupMode ? "Create account" : "Sign in";
       $("signupButton").textContent = signupMode ? "Already have an account? Sign in" : "Create account";
+    });
+    $("forgotPasswordButton").addEventListener("click", () => {
+      $("recoveryEmail").value = $("accountEmail").value.trim();
+      showRecovery("recovery");
+      $("recoveryEmail").focus();
+    });
+    $("cancelRecovery").addEventListener("click", () => showRecovery("auth"));
+    $("cancelReset").addEventListener("click", () => {
+      resetToken = null;
+      history.replaceState(null, "", location.pathname + location.search);
+      showRecovery("auth");
+    });
+    $("recoveryForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("recoveryStatus").textContent = "Requesting password-reset instructions…";
+      try {
+        const result = await control("/api/v1/auth/password-reset/request", {
+          method: "POST", body: {email: $("recoveryEmail").value.trim()}
+        });
+        $("recoveryStatus").textContent = result.message;
+      } catch (error) { $("recoveryStatus").textContent = error.message; }
+    });
+    $("resetPasswordForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const password = $("resetPassword").value;
+      if (password !== $("resetPasswordConfirm").value) {
+        $("resetStatus").textContent = "The passwords do not match.";
+        return;
+      }
+      try {
+        const result = await control("/api/v1/auth/password-reset/confirm", {
+          method: "POST", body: {
+            token: resetToken, password, password_confirmation: $("resetPasswordConfirm").value
+          }
+        });
+        resetToken = null;
+        $("resetPassword").value = "";
+        $("resetPasswordConfirm").value = "";
+        history.replaceState(null, "", location.pathname + location.search);
+        showRecovery("auth");
+        authMessage(result.message);
+      } catch (error) { $("resetStatus").textContent = error.message; }
     });
     $("logoutButton").addEventListener("click", async () => {
       try { await control("/api/v1/auth/logout", {method: "POST"}); }
@@ -521,7 +774,15 @@
       if (timer) clearInterval(timer);
       timer = $("auto").checked ? setInterval(() => scan(), 15000) : null;
     });
-    control("/api/v1/auth/me").then((data) => setSignedIn(data.user)).catch((error) => authMessage(error.message));
+    const resetParams = new URLSearchParams(location.hash.slice(1));
+    resetToken = resetParams.get("reset");
+    if (resetToken && /^[A-Za-z0-9_-]{32,128}$/.test(resetToken)) {
+      history.replaceState(null, "", location.pathname + location.search);
+      showRecovery("reset");
+    } else {
+      resetToken = null;
+      control("/api/v1/auth/me").then((data) => setSignedIn(data.user)).catch((error) => authMessage(error.message));
+    }
     scan();
     timer = $("auto").checked ? setInterval(() => scan(), 15000) : null;
   </script>

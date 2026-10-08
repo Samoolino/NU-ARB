@@ -3,6 +3,7 @@ exchange never blocks streaming or evaluation on another."""
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import time
 from contextlib import suppress
@@ -226,28 +227,68 @@ class ExchangeWorker:
 
     def health_snapshot(self) -> dict:
         now = time.monotonic()
+        books = self.md.books if self.md else {}
+        streamed_symbol_count = len(self.md.symbols) if self.md else 0
+        fresh_book_count = sum(
+            (now - book.recv) * 1000 <= self.cfg.max_book_age_ms
+            for book in books.values()
+        )
         latest = None
-        if self.md and self.md.books:
-            symbol, book = max(self.md.books.items(), key=lambda item: item[1].recv)
+        if books:
+            symbol, book = max(books.items(), key=lambda item: item[1].recv)
+            bids = book.bids[:self.cfg.depth]
+            asks = book.asks[:self.cfg.depth]
+            bid_depth = sum(float(price) * float(amount) for price, amount in bids
+                            if math.isfinite(float(price)) and math.isfinite(float(amount))
+                            and float(price) > 0 and float(amount) > 0)
+            ask_depth = sum(float(price) * float(amount) for price, amount in asks
+                            if math.isfinite(float(price)) and math.isfinite(float(amount))
+                            and float(price) > 0 and float(amount) > 0)
+            best_bid = book.bids[0][0] if book.bids else None
+            best_ask = book.asks[0][0] if book.asks else None
+            spread_bps = (
+                round((float(best_ask) / float(best_bid) - 1) * 10_000, 2)
+                if best_bid and best_ask and float(best_ask) >= float(best_bid) else None
+            )
             latest = {"symbol": symbol, "bestBid": book.bids[0][0] if book.bids else None,
                       "bestAsk": book.asks[0][0] if book.asks else None,
                       "receivedAtAgeMs": round(max(0.0, now - book.recv) * 1000, 1),
                       "exchangeTimestamp": book.timestamp_exchange, "sequence": book.sequence,
-                      "stale": (now - book.recv) * 1000 > self.cfg.max_book_age_ms}
+                      "sequenceAvailable": book.sequence is not None,
+                      "stale": (now - book.recv) * 1000 > self.cfg.max_book_age_ms,
+                      "maxBookAgeMs": self.cfg.max_book_age_ms,
+                      "depthLevels": {"bids": len(bids), "asks": len(asks)},
+                      "visibleDepthQuote": {"bids": round(bid_depth, 8), "asks": round(ask_depth, 8),
+                                            "currency": (symbol.split("/")[-1] if "/" in symbol else None)},
+                      "spreadBps": spread_bps}
         latency = self.lat.stats() if self.lat else {}
+        latency_sample_count = len(getattr(self.lat, "samples", ())) if self.lat else 0
+        latency_p95 = latency.get("p95")
+        latency_live_threshold = getattr(self.cfg, "max_rtt_ms", None)
         needs_private = self.live or self.x.require_private_stream
         private_age = ((now - self.private_last_message) * 1000
                        if self.private_last_message is not None else None)
         private_fresh = not needs_private or (self.private_stream_ready and private_age is not None and private_age <= 120_000)
         return {"exchange": self.id,
                 "state": "HEALTHY" if (latest is not None and not latest["stale"] and private_fresh and self.lat and self.lat.ok()) else "DEGRADED",
+                "orderBookStreams": {"subscribedSymbols": streamed_symbol_count,
+                                     "booksReceived": len(books),
+                                     "freshBooks": fresh_book_count,
+                                     "staleBooks": max(0, len(books) - fresh_book_count)},
                 "publicWebSocket": {"state": "LIVE" if latest is not None and not latest["stale"] else "STALE",
                                     "latestBook": latest},
                 "privateWebSocket": {"state": "NOT_REQUIRED" if not needs_private else "LIVE" if private_fresh else "STALE",
                                      "lastMessageAgeMs": round(private_age, 1) if private_age is not None else None,
                                      "error": self.private_stream_error},
-                "restLatencyMs": {"p50": round(latency.get("p50", 0), 1),
-                                  "p95": round(latency.get("p95", 0), 1),
+                "restLatencyMs": {"p50": round(latency["p50"], 1) if latency_sample_count else None,
+                                  "p95": round(latency_p95, 1) if latency_p95 is not None else None,
+                                  "samples": latency_sample_count,
+                                  "liveThresholdMs": latency_live_threshold,
+                                  "withinLiveThreshold": bool(
+                                      latency_sample_count and latency_live_threshold is not None
+                                      and latency_p95 is not None and latency_p95 <= latency_live_threshold
+                                  ),
+                                  "pauseThresholdMs": getattr(self.cfg, "pause_rtt_ms", None),
                                   "clockDriftMs": round(latency.get("skew", 0), 1)},
                 "verifiedStreamRequired": needs_private}
 

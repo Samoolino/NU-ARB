@@ -1,0 +1,1580 @@
+{
+  "auditType": "randomized_all_venue_public_feed_audit",
+  "authenticated": false,
+  "clarification": "This audit samples one current listed spot pair per venue and tests an actual REST order-book snapshot and WebSocket order-book event on that same pair. Its depth pilot validates visible levels and simulates a fixed 25-unit quote round trip within each individual book and samples three asynchronous CCXT-normalized WebSocket book updates (not raw exchange delta frames) for cadence and sequence monotonicity where available. Local delivery latency is observational and is not exchange-side latency certification. This is not cross-venue execution, chain-settlement verification, or profit assurance. It does not establish account authorization, available balances, private stream health, fee tier, executable cross-venue depth, matched asset identity, settlement routes, execution success, or guaranteed profit.",
+  "depthPilot": {
+    "chainSettlementVerified": false,
+    "minimumLevelsPerSide": 3,
+    "notionalQuote": 25.0,
+    "ordersSubmitted": false,
+    "profitAssurance": false,
+    "requiresFinitePositiveSortedLevels": true,
+    "scope": "single-venue-book-depth-and-immediate-round-trip-simulation",
+    "sources": [
+      "rest",
+      "websocket"
+    ],
+    "websocketUpdateSampleCount": 3,
+    "websocketUpdateSemantics": "ccxt_normalized_watch_order_book_updates_not_raw_exchange_delta_frames",
+    "websocketUpdateTimeoutSeconds": 8
+  },
+  "generatedAtUtc": "2026-10-08T02:42:56.412376+00:00",
+  "latencyMeasurement": {
+    "clock": "local_monotonic",
+    "exchangeLatencyCertified": false,
+    "fields": [
+      "marketLoadMs",
+      "restRttMs",
+      "websocketFirstBookMs",
+      "depthPilot.websocketDepthUpdates.updateIntervalMs.p50",
+      "depthPilot.websocketDepthUpdates.updateIntervalMs.p95",
+      "depthPilot.websocketDepthUpdates.deliveryCallLatencyMs.p50",
+      "depthPilot.websocketDepthUpdates.deliveryCallLatencyMs.p95"
+    ],
+    "liveLatencyGatePassed": false
+  },
+  "liveEngageable": false,
+  "liveModeState": "BLOCKED_REQUIRED_EVIDENCE_MISSING",
+  "ordersSubmitted": false,
+  "persistenceValidation": {
+    "artifactPaths": [
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\randomized-venue-feed-audit-20261008T024256Z.json",
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\randomized-venue-feed-audit-latest.json"
+    ],
+    "method": "atomic_write_then_json_readback",
+    "validated": true
+  },
+  "priceDifferenceProfitAssurance": false,
+  "schemaVersion": 1,
+  "scope": "unauthenticated_public_spot_market_data_only",
+  "selection": {
+    "method": "random active spot pair, preferring USD stablecoin quotes",
+    "onePairPerVenue": true,
+    "seed": 15450759896961106479,
+    "venueSeeds": {
+      "binance": 7483167988709606871,
+      "bingx": 14974769917814171837,
+      "bitfinex": 9151891706110048328,
+      "bitget": 16063941404364475547,
+      "bitmart": 4088372230131581695,
+      "bitstamp": 6119143154085777605,
+      "bybit": 3982039942522321560,
+      "coinbase": 16137594700723003250,
+      "coinex": 5937237950846553772,
+      "cryptocom": 3764365640087093483,
+      "gateio": 2219576508839790327,
+      "gemini": 2434886303496737870,
+      "htx": 17774146710488883842,
+      "kraken": 2974709227970470065,
+      "kucoin": 2550960956813855018,
+      "lbank": 5993136209966186438,
+      "mexc": 4264315973848504733,
+      "okx": 345678474449226765,
+      "upbit": 10470062882713478589,
+      "whitebit": 2722263610294316229
+    }
+  },
+  "venues": [
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "binance",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": true,
+        "profitAssurance": false,
+        "quoteCurrency": "USDC",
+        "rest": {
+          "bestAsk": 0.00457,
+          "bestBid": 0.00456,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -21.8818,
+            "grossPnlQuote": -0.054704595186,
+            "includesFees": false
+          },
+          "spreadBps": 21.9298,
+          "visibleDepthQuote": 2589.9728
+        },
+        "websocket": {
+          "bestAsk": 0.00457,
+          "bestBid": 0.00456,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -21.8818,
+            "grossPnlQuote": -0.054704595186,
+            "includesFees": false
+          },
+          "spreadBps": 21.9298,
+          "visibleDepthQuote": 2708.09048
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": 104.174,
+            "p95": 5023.871
+          },
+          "distinctUpdateEvents": 3,
+          "events": [
+            {
+              "askLevels": 5,
+              "bestAsk": 0.00457,
+              "bestBid": 0.00456,
+              "bidLevels": 5,
+              "elapsedMs": 5023.873,
+              "sequence": "39646282"
+            },
+            {
+              "askLevels": 5,
+              "bestAsk": 0.00457,
+              "bestBid": 0.00456,
+              "bidLevels": 5,
+              "elapsedMs": 5024.719,
+              "sequence": "39646283"
+            },
+            {
+              "askLevels": 5,
+              "bestAsk": 0.00457,
+              "bestBid": 0.00456,
+              "bidLevels": 5,
+              "elapsedMs": 5128.944,
+              "sequence": "39646284"
+            }
+          ],
+          "reason": null,
+          "receivedUpdates": 3,
+          "requestedUpdates": 3,
+          "sequenceAvailableForAllUpdates": true,
+          "sequenceMonotonic": true,
+          "updateIntervalMs": {
+            "p50": 0.846,
+            "p95": 104.225
+          },
+          "verified": true
+        }
+      },
+      "exchangeTimestampMs": null,
+      "liveBlockers": [
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 13149.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "KAT",
+        "contract": false,
+        "quote": "USDC",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 2358.0,
+      "samplePoolCount": 769,
+      "sequence": 39646281,
+      "spotMarketCount": 1375,
+      "symbol": "KAT/USDC",
+      "venue": "binance",
+      "verified": true,
+      "websocketFirstBookMs": 3676.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "bybit",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": true,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "rest": {
+          "bestAsk": 0.04685,
+          "bestBid": 0.04675,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -21.3447,
+            "grossPnlQuote": -0.053361792956,
+            "includesFees": false
+          },
+          "spreadBps": 21.3904,
+          "visibleDepthQuote": 953.209562
+        },
+        "websocket": {
+          "bestAsk": 0.04711,
+          "bestBid": 0.04692,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 50,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -40.3311,
+            "grossPnlQuote": -0.100827849713,
+            "includesFees": false
+          },
+          "spreadBps": 40.4945,
+          "visibleDepthQuote": 5895.592795
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": 125.964,
+            "p95": 1132.575
+          },
+          "distinctUpdateEvents": 3,
+          "events": [
+            {
+              "askLevels": 50,
+              "bestAsk": 0.04685,
+              "bestBid": 0.04675,
+              "bidLevels": 50,
+              "elapsedMs": 1132.577,
+              "sequence": null
+            },
+            {
+              "askLevels": 50,
+              "bestAsk": 0.0469,
+              "bestBid": 0.04685,
+              "bidLevels": 50,
+              "elapsedMs": 1258.61,
+              "sequence": null
+            },
+            {
+              "askLevels": 50,
+              "bestAsk": 0.04711,
+              "bestBid": 0.04692,
+              "bidLevels": 50,
+              "elapsedMs": 1315.615,
+              "sequence": null
+            }
+          ],
+          "reason": null,
+          "receivedUpdates": 3,
+          "requestedUpdates": 3,
+          "sequenceAvailableForAllUpdates": false,
+          "sequenceMonotonic": null,
+          "updateIntervalMs": {
+            "p50": 57.005,
+            "p95": 126.034
+          },
+          "verified": true
+        }
+      },
+      "exchangeTimestampMs": 1791427295384,
+      "liveBlockers": [
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 16439.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "ZKP",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 457.0,
+      "samplePoolCount": 477,
+      "sequence": null,
+      "spotMarketCount": 530,
+      "symbol": "ZKP/USDT",
+      "venue": "bybit",
+      "verified": true,
+      "websocketFirstBookMs": 2223.0,
+      "websocketLevels": {
+        "asks": 50,
+        "bids": 50
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "okx",
+      "failedStage": "market_discovery",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:market_discovery:RequestTimeout: okx GET https://www.okx.com/api/v5/public/instruments?instType=SPOT",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: okx GET https://www.okx.com/api/v5/public/instruments?instType=SPOT",
+      "restOk": false,
+      "venue": "okx",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "kucoin",
+      "failedStage": "market_discovery",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:market_discovery:RequestTimeout: kucoin GET https://api.kucoin.com/api/v3/currencies",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: kucoin GET https://api.kucoin.com/api/v3/currencies",
+      "restOk": false,
+      "venue": "kucoin",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "gate",
+      "failedStage": "market_discovery",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:market_discovery:TimeoutError: [redacted]",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "TimeoutError: [redacted]",
+      "restOk": false,
+      "venue": "gateio",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "bitget",
+      "failedStage": "websocket_orderbook",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:websocket_orderbook:TimeoutError: [redacted]",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 9649.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "RDYNF",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "TimeoutError: [redacted]",
+      "restLevels": {
+        "asks": 0,
+        "bids": 0
+      },
+      "restOk": false,
+      "restRttMs": 1416.0,
+      "samplePoolCount": 3354,
+      "spotMarketCount": 3386,
+      "symbol": "RDYNF/USDT",
+      "venue": "bitget",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "kraken",
+      "failedStage": "market_discovery",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:market_discovery:RequestTimeout: kraken GET https://api.kraken.com/0/public/Assets",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: kraken GET https://api.kraken.com/0/public/Assets",
+      "restOk": false,
+      "venue": "kraken",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "coinbase",
+      "failedStage": "market_discovery",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:market_discovery:RequestTimeout: coinbase GET https://api.coinbase.com/v2/currencies",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: coinbase GET https://api.coinbase.com/v2/currencies",
+      "restOk": false,
+      "venue": "coinbase",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "mexc",
+      "failedStage": "websocket_orderbook",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:websocket_orderbook:TimeoutError: [redacted]",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 5897.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "QNT",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "TimeoutError: [redacted]",
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 5893.0,
+      "samplePoolCount": 1650,
+      "spotMarketCount": 1826,
+      "symbol": "QNT/USDT",
+      "venue": "mexc",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "htx",
+      "failedStage": "websocket_orderbook",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:websocket_orderbook:TimeoutError: [redacted]",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 10790.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "AIOZ",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "TimeoutError: [redacted]",
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 715.0,
+      "samplePoolCount": 584,
+      "spotMarketCount": 596,
+      "symbol": "AIOZ/USDT",
+      "venue": "htx",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "bitfinex",
+      "exchangeTimestampMs": null,
+      "failedStage": "websocket_depth_updates",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 4951.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "USDR",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "ValueError: too many values to unpack (expected 2)",
+      "restLevels": {
+        "asks": 7,
+        "bids": 8
+      },
+      "restOk": true,
+      "restRttMs": 994.0,
+      "samplePoolCount": 147,
+      "sequence": null,
+      "spotMarketCount": 194,
+      "symbol": "USDR/USDT",
+      "venue": "bitfinex",
+      "verified": true,
+      "websocketFirstBookMs": 1846.0,
+      "websocketLevels": {
+        "asks": 7,
+        "bids": 7
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "cryptocom",
+      "failedStage": "market_discovery",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:market_discovery:RequestTimeout: cryptocom GET https://api.crypto.com/exchange/v1/public/get-instruments",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: cryptocom GET https://api.crypto.com/exchange/v1/public/get-instruments",
+      "restOk": false,
+      "venue": "cryptocom",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "coinex",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": false,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "rest": {
+          "bestAsk": 0.0,
+          "bestBid": 0.0,
+          "bookStructureValid": false,
+          "depthValidated": false,
+          "levelsPerSide": 0,
+          "reason": "empty_depth",
+          "simulatedImmediateRoundTrip": {
+            "completed": false,
+            "grossPnlBps": null,
+            "grossPnlQuote": null,
+            "includesFees": false
+          },
+          "spreadBps": 0.0,
+          "visibleDepthQuote": 0.0
+        },
+        "websocket": {
+          "bestAsk": 0.0,
+          "bestBid": 0.0,
+          "bookStructureValid": false,
+          "depthValidated": false,
+          "levelsPerSide": 0,
+          "reason": "empty_depth",
+          "simulatedImmediateRoundTrip": {
+            "completed": false,
+            "grossPnlBps": null,
+            "grossPnlQuote": null,
+            "includesFees": false
+          },
+          "spreadBps": 0.0,
+          "visibleDepthQuote": 0.0
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": null,
+            "p95": null
+          },
+          "distinctUpdateEvents": 0,
+          "events": [],
+          "reason": "TimeoutError",
+          "receivedUpdates": 0,
+          "requestedUpdates": 3,
+          "sequenceMonotonic": true,
+          "updateIntervalMs": {
+            "p50": null,
+            "p95": null
+          },
+          "verified": false
+        }
+      },
+      "exchangeTimestampMs": 1791427358795,
+      "failedStage": "book_validation",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:book_validation:REST_and_WebSocket_must_both_have_bid_and_ask_depth",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 5764.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "AVA",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "REST_and_WebSocket_must_both_have_bid_and_ask_depth",
+      "restLevels": {
+        "asks": 0,
+        "bids": 0
+      },
+      "restOk": false,
+      "restRttMs": 2058.0,
+      "samplePoolCount": 715,
+      "sequence": null,
+      "spotMarketCount": 848,
+      "symbol": "AVA/USDT",
+      "venue": "coinex",
+      "verified": false,
+      "websocketFirstBookMs": 2453.0,
+      "websocketLevels": {
+        "asks": 0,
+        "bids": 0
+      },
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "bitstamp",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": true,
+        "profitAssurance": false,
+        "quoteCurrency": "USD",
+        "rest": {
+          "bestAsk": 0.1333,
+          "bestBid": 0.13307,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 10,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -21.4209,
+            "grossPnlQuote": -0.053552262342,
+            "includesFees": false
+          },
+          "spreadBps": 17.2841,
+          "visibleDepthQuote": 15995.174693599998
+        },
+        "websocket": {
+          "bestAsk": 0.13336,
+          "bestBid": 0.13312,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 9,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -23.679,
+            "grossPnlQuote": -0.059197594243,
+            "includesFees": false
+          },
+          "spreadBps": 18.0288,
+          "visibleDepthQuote": 15979.920581099997
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": 602.198,
+            "p95": 1023.38
+          },
+          "distinctUpdateEvents": 3,
+          "events": [
+            {
+              "askLevels": 9,
+              "bestAsk": 0.13341,
+              "bestBid": 0.13312,
+              "bidLevels": 8,
+              "elapsedMs": 1023.381,
+              "sequence": "1791427363157785"
+            },
+            {
+              "askLevels": 9,
+              "bestAsk": 0.13341,
+              "bestBid": 0.13312,
+              "bidLevels": 9,
+              "elapsedMs": 1607.406,
+              "sequence": "1791427363760157"
+            },
+            {
+              "askLevels": 10,
+              "bestAsk": 0.13336,
+              "bestBid": 0.13312,
+              "bidLevels": 9,
+              "elapsedMs": 2209.643,
+              "sequence": "1791427364362452"
+            }
+          ],
+          "reason": null,
+          "receivedUpdates": 3,
+          "requestedUpdates": 3,
+          "sequenceAvailableForAllUpdates": true,
+          "sequenceMonotonic": true,
+          "updateIntervalMs": {
+            "p50": 584.026,
+            "p95": 602.237
+          },
+          "verified": true
+        }
+      },
+      "exchangeTimestampMs": 1791427361279,
+      "liveBlockers": [
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 4694.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "AVNT",
+        "contract": false,
+        "quote": "USD",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 10,
+        "bids": 10
+      },
+      "restOk": true,
+      "restRttMs": 260.0,
+      "samplePoolCount": 127,
+      "sequence": 1791427361279864,
+      "spotMarketCount": 250,
+      "symbol": "AVNT/USD",
+      "venue": "bitstamp",
+      "verified": true,
+      "websocketFirstBookMs": 8487.0,
+      "websocketLevels": {
+        "asks": 9,
+        "bids": 8
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "gemini",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": true,
+        "profitAssurance": false,
+        "quoteCurrency": "USD",
+        "rest": {
+          "bestAsk": 0.049,
+          "bestBid": 0.0489,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -20.4082,
+            "grossPnlQuote": -0.051020408163,
+            "includesFees": false
+          },
+          "spreadBps": 20.4499,
+          "visibleDepthQuote": 5055.458765258
+        },
+        "websocket": {
+          "bestAsk": 0.049,
+          "bestBid": 0.0489,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 10,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -20.4082,
+            "grossPnlQuote": -0.051020408163,
+            "includesFees": false
+          },
+          "spreadBps": 20.4499,
+          "visibleDepthQuote": 5157.5348652455
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": 0.285,
+            "p95": 192.125
+          },
+          "distinctUpdateEvents": 2,
+          "events": [
+            {
+              "askLevels": 171,
+              "bestAsk": 0.049,
+              "bestBid": 0.0489,
+              "bidLevels": 10,
+              "elapsedMs": 192.127,
+              "sequence": null
+            },
+            {
+              "askLevels": 171,
+              "bestAsk": 0.049,
+              "bestBid": 0.0489,
+              "bidLevels": 10,
+              "elapsedMs": 192.464,
+              "sequence": null
+            },
+            {
+              "askLevels": 171,
+              "bestAsk": 0.049,
+              "bestBid": 0.0489,
+              "bidLevels": 10,
+              "elapsedMs": 192.633,
+              "sequence": null
+            }
+          ],
+          "reason": null,
+          "receivedUpdates": 3,
+          "requestedUpdates": 3,
+          "sequenceAvailableForAllUpdates": false,
+          "sequenceMonotonic": null,
+          "updateIntervalMs": {
+            "p50": 0.169,
+            "p95": 0.337
+          },
+          "verified": true
+        }
+      },
+      "exchangeTimestampMs": null,
+      "liveBlockers": [
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 4780.0,
+      "marketMetadata": {
+        "active": null,
+        "base": "POPCAT",
+        "contract": false,
+        "quote": "USD",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 789.0,
+      "samplePoolCount": 237,
+      "sequence": null,
+      "spotMarketCount": 332,
+      "symbol": "POPCAT/USD",
+      "venue": "gemini",
+      "verified": true,
+      "websocketFirstBookMs": 2247.0,
+      "websocketLevels": {
+        "asks": 171,
+        "bids": 10
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "bingx",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": false,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "rest": {
+          "bestAsk": 0.00911,
+          "bestBid": 0.00908,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -37.8331,
+            "grossPnlQuote": -0.094582794298,
+            "includesFees": false
+          },
+          "spreadBps": 33.0396,
+          "visibleDepthQuote": 8243.4796257
+        },
+        "websocket": {
+          "bestAsk": 0.00911,
+          "bestBid": 0.00908,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 50,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -37.8331,
+            "grossPnlQuote": -0.094582794298,
+            "includesFees": false
+          },
+          "spreadBps": 33.0396,
+          "visibleDepthQuote": 35262.1224107
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": 5290.765,
+            "p95": 5290.765
+          },
+          "distinctUpdateEvents": 1,
+          "events": [
+            {
+              "askLevels": 100,
+              "bestAsk": 0.00911,
+              "bestBid": 0.00908,
+              "bidLevels": 100,
+              "elapsedMs": 5290.766,
+              "sequence": "1843129614"
+            }
+          ],
+          "reason": "TimeoutError",
+          "receivedUpdates": 1,
+          "requestedUpdates": 3,
+          "sequenceMonotonic": true,
+          "updateIntervalMs": {
+            "p50": null,
+            "p95": null
+          },
+          "verified": false
+        }
+      },
+      "exchangeTimestampMs": 1791427362339,
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 7362.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "XAI",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 479.0,
+      "samplePoolCount": 610,
+      "sequence": 1843129612,
+      "spotMarketCount": 611,
+      "symbol": "XAI/USDT",
+      "venue": "bingx",
+      "verified": true,
+      "websocketFirstBookMs": 5906.0,
+      "websocketLevels": {
+        "asks": 100,
+        "bids": 100
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "lbank",
+      "failedStage": "websocket_orderbook",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:websocket_orderbook:RequestTimeout: Connection timeout",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 3710.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "YOLO",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "RequestTimeout: Connection timeout",
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 852.0,
+      "samplePoolCount": 1351,
+      "spotMarketCount": 1380,
+      "symbol": "YOLO/USDT",
+      "venue": "lbank",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "whitebit",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": true,
+        "profitAssurance": false,
+        "quoteCurrency": "USDC",
+        "rest": {
+          "bestAsk": 0.20075,
+          "bestBid": 0.2005,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -13.0261,
+            "grossPnlQuote": -0.032565240349,
+            "includesFees": false
+          },
+          "spreadBps": 12.4688,
+          "visibleDepthQuote": 1973.47062
+        },
+        "websocket": {
+          "bestAsk": 0.20074,
+          "bestBid": 0.2005,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -12.5286,
+            "grossPnlQuote": -0.031321585334,
+            "includesFees": false
+          },
+          "spreadBps": 11.9701,
+          "visibleDepthQuote": 2090.939112
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": 1485.841,
+            "p95": 6910.939
+          },
+          "distinctUpdateEvents": 3,
+          "events": [
+            {
+              "askLevels": 5,
+              "bestAsk": 0.20081,
+              "bestBid": 0.2005,
+              "bidLevels": 5,
+              "elapsedMs": 6910.94,
+              "sequence": null
+            },
+            {
+              "askLevels": 5,
+              "bestAsk": 0.20074,
+              "bestBid": 0.2005,
+              "bidLevels": 5,
+              "elapsedMs": 7218.314,
+              "sequence": null
+            },
+            {
+              "askLevels": 5,
+              "bestAsk": 0.20074,
+              "bestBid": 0.2005,
+              "bidLevels": 5,
+              "elapsedMs": 8704.219,
+              "sequence": null
+            }
+          ],
+          "reason": null,
+          "receivedUpdates": 3,
+          "requestedUpdates": 3,
+          "sequenceAvailableForAllUpdates": false,
+          "sequenceMonotonic": null,
+          "updateIntervalMs": {
+            "p50": 307.375,
+            "p95": 1485.905
+          },
+          "verified": true
+        }
+      },
+      "exchangeTimestampMs": null,
+      "liveBlockers": [
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 1951.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "XLM",
+        "contract": false,
+        "quote": "USDC",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 192.0,
+      "samplePoolCount": 484,
+      "sequence": null,
+      "spotMarketCount": 800,
+      "symbol": "XLM/USDC",
+      "venue": "whitebit",
+      "verified": true,
+      "websocketFirstBookMs": 1536.0,
+      "websocketLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "websocketOk": true
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": false,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "bitmart",
+      "failedStage": "adapter_resolution",
+      "liveBlockers": [
+        "asynchronous_websocket_depth_updates_not_verified",
+        "public_depth_strategy_pilot_not_validated",
+        "feed_failure:adapter_resolution:CCXT Pro adapter unavailable: bitmart",
+        "random_pair_public_websocket_orderbook_not_verified",
+        "random_pair_public_rest_orderbook_not_verified",
+        "configured_ccxt_pro_adapter_unavailable",
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "reason": "CCXT Pro adapter unavailable: bitmart",
+      "restOk": false,
+      "venue": "bitmart",
+      "verified": false,
+      "websocketOk": false
+    },
+    {
+      "adapter": "ccxt_pro",
+      "adapterConstructorAvailable": true,
+      "authenticated": false,
+      "authenticatedAccountVerified": false,
+      "balancesVerified": false,
+      "ccxtId": "upbit",
+      "depthPilot": {
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "ordersSubmitted": false,
+        "passed": true,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "rest": {
+          "bestAsk": 2582.42,
+          "bestBid": 2582.06,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 5,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -3.0662,
+            "grossPnlQuote": -0.007665405047,
+            "includesFees": false
+          },
+          "spreadBps": 1.3942,
+          "visibleDepthQuote": 100.2242789632
+        },
+        "websocket": {
+          "bestAsk": 2582.42,
+          "bestBid": 2582.06,
+          "bookStructureValid": true,
+          "depthValidated": true,
+          "levelsPerSide": 15,
+          "reason": "depth_validated",
+          "simulatedImmediateRoundTrip": {
+            "completed": true,
+            "grossPnlBps": -3.0662,
+            "grossPnlQuote": -0.007665405047,
+            "includesFees": false
+          },
+          "spreadBps": 1.3942,
+          "visibleDepthQuote": 9484.5526506622
+        },
+        "websocketDepthUpdates": {
+          "deliveryCallLatencyMs": {
+            "p50": 124.419,
+            "p95": 203.376
+          },
+          "distinctUpdateEvents": 3,
+          "events": [
+            {
+              "askLevels": 15,
+              "bestAsk": 2582.42,
+              "bestBid": 2582.06,
+              "bidLevels": 15,
+              "elapsedMs": 124.42,
+              "sequence": null
+            },
+            {
+              "askLevels": 15,
+              "bestAsk": 2582.42,
+              "bestBid": 2582.06,
+              "bidLevels": 15,
+              "elapsedMs": 224.014,
+              "sequence": null
+            },
+            {
+              "askLevels": 15,
+              "bestAsk": 2582.42,
+              "bestBid": 2582.06,
+              "bidLevels": 15,
+              "elapsedMs": 427.467,
+              "sequence": null
+            }
+          ],
+          "reason": null,
+          "receivedUpdates": 3,
+          "requestedUpdates": 3,
+          "sequenceAvailableForAllUpdates": false,
+          "sequenceMonotonic": null,
+          "updateIntervalMs": {
+            "p50": 99.594,
+            "p95": 203.452
+          },
+          "verified": true
+        }
+      },
+      "exchangeTimestampMs": 1791427369323,
+      "liveBlockers": [
+        "authenticated_account_scope_not_verified",
+        "available_balance_and_order_reservations_not_verified",
+        "private_user_stream_not_verified",
+        "spot_trade_permission_and_withdrawal_scope_not_verified",
+        "ioc_route_market_minimums_and_actual_fee_tier_not_verified",
+        "asset_identity_and_settlement_network_route_not_verified",
+        "risk_gate_not_evaluated_with_authenticated_state"
+      ],
+      "liveEngageable": false,
+      "liveExecutionRouteVerified": false,
+      "marketLoadMs": 2304.0,
+      "marketMetadata": {
+        "active": true,
+        "base": "ETH",
+        "contract": false,
+        "quote": "USDT",
+        "spot": true
+      },
+      "ordersSubmitted": false,
+      "permissionsVerified": false,
+      "privateStreamVerified": false,
+      "restLevels": {
+        "asks": 5,
+        "bids": 5
+      },
+      "restOk": true,
+      "restRttMs": 531.0,
+      "samplePoolCount": 241,
+      "sequence": null,
+      "spotMarketCount": 862,
+      "symbol": "ETH/USDT",
+      "venue": "upbit",
+      "verified": true,
+      "websocketFirstBookMs": 820.0,
+      "websocketLevels": {
+        "asks": 15,
+        "bids": 15
+      },
+      "websocketOk": true
+    }
+  ],
+  "withdrawalsOrTransfersSubmitted": false
+}

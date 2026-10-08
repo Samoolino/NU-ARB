@@ -5,14 +5,18 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import queue
 import secrets
+import smtplib
 import sqlite3
 import time
+from email.message import EmailMessage
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote, urlsplit
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -34,7 +38,12 @@ from arbx.hybrid.adapters import ccxt_transport_config, safe_ccxt_error
 APP_DB = Path(os.getenv("ARBX_APP_DB", "arbx_app.sqlite3"))
 SESSION_COOKIE = "arbx_session"
 SESSION_TTL = 60 * 60 * 24 * 7
+PASSWORD_RESET_TTL = 30 * 60
+PASSWORD_RESET_COOLDOWN = 60
 VERIFICATION_TTL_SECONDS = 5 * 60
+logger = logging.getLogger(__name__)
+
+
 def _normalize_auth_mode(exchange_id: str, auth_mode: str) -> str:
     mode = (auth_mode or "").strip().lower()
     if not mode:
@@ -181,6 +190,12 @@ def _connect():
       CREATE TABLE IF NOT EXISTS sessions (
         token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS password_reset_requests (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        requested_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS exchange_credentials (
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, exchange_id TEXT NOT NULL,
         encrypted_credentials BLOB NOT NULL, auth_mode TEXT NOT NULL, state TEXT NOT NULL,
@@ -232,12 +247,26 @@ class Signup(BaseModel):
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
     password: str = Field(min_length=12, max_length=256)
     password_confirmation: str = Field(min_length=12, max_length=256)
+    remember_me: bool = False
 
 
 class Login(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
     password: str = Field(min_length=1, max_length=256)
+    remember_me: bool = False
+
+
+class PasswordResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
+
+
+class PasswordResetComplete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=32, max_length=128)
+    password: str = Field(min_length=12, max_length=256)
+    password_confirmation: str = Field(min_length=12, max_length=256)
 
 
 class ExchangeConnect(BaseModel):
@@ -419,13 +448,81 @@ def _verification_is_fresh(verified_at: str | None, *, now: float | None = None)
     return 0 <= age <= VERIFICATION_TTL_SECONDS
 
 
-def _new_session(db, user_id: str, response: Response):
+def _new_session(db, user_id: str, response: Response, *, remember_me: bool = False):
     token = secrets.token_urlsafe(32)
     db.execute("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)",
                (hashlib.sha256(token.encode()).hexdigest(), user_id, int(time.time()) + SESSION_TTL))
     db.commit()
     response.set_cookie(SESSION_COOKIE, token, httponly=True, secure=os.getenv("APP_SECURE_COOKIE", "1") == "1",
-                        samesite="lax", max_age=SESSION_TTL, path="/")
+                        samesite="lax", max_age=SESSION_TTL if remember_me else None, path="/")
+
+
+def _password_reset_mail_config() -> dict[str, str | int | bool]:
+    host = os.getenv("CONTROL_EMAIL_HOST", "").strip()
+    sender = os.getenv("CONTROL_EMAIL_FROM", "").strip()
+    public_url = os.getenv("APP_PUBLIC_URL", "").strip()
+    if not host or not sender or not public_url:
+        raise RuntimeError("password recovery email is not configured")
+    try:
+        port = int(os.getenv("CONTROL_EMAIL_PORT", "587"))
+    except ValueError as exc:
+        raise RuntimeError("password recovery email configuration is invalid") from exc
+    if not 1 <= port <= 65535:
+        raise RuntimeError("password recovery email configuration is invalid")
+    try:
+        parsed_url = urlsplit(public_url)
+        hostname = parsed_url.hostname
+        parsed_url.port
+    except ValueError as exc:
+        raise RuntimeError("APP_PUBLIC_URL must be a valid HTTPS application origin") from exc
+    secure_origin = parsed_url.scheme == "https"
+    local_origin = parsed_url.scheme == "http" and hostname in {"localhost", "127.0.0.1"}
+    if (not (secure_origin or local_origin) or not hostname or parsed_url.username or parsed_url.password
+            or parsed_url.query or parsed_url.fragment):
+        raise RuntimeError("APP_PUBLIC_URL must be an HTTPS application origin")
+    username = os.getenv("CONTROL_EMAIL_USERNAME", "")
+    password = os.getenv("CONTROL_EMAIL_PASSWORD", "")
+    if bool(username) != bool(password):
+        raise RuntimeError("email username and password must be configured together")
+    use_ssl = os.getenv("CONTROL_EMAIL_USE_SSL", "0") == "1"
+    starttls = os.getenv("CONTROL_EMAIL_STARTTLS", "1") == "1"
+    if use_ssl == starttls:
+        raise RuntimeError("configure exactly one secure SMTP mode: SSL or STARTTLS")
+    return {
+        "host": host,
+        "port": port,
+        "sender": sender,
+        "app_url": public_url.rstrip("/"),
+        "username": username,
+        "password": password,
+        "use_ssl": use_ssl,
+        "starttls": starttls,
+    }
+
+
+def _send_password_reset_email(recipient: str, token: str) -> None:
+    config = _password_reset_mail_config()
+    message = EmailMessage()
+    message["Subject"] = "Reset your NU-ARB account password"
+    message["From"] = str(config["sender"])
+    message["To"] = recipient
+    reset_url = f'{config["app_url"]}/#reset={quote(token, safe="")}'
+    message.set_content(
+        "A password reset was requested for your NU-ARB account.\n\n"
+        f"Use this one-time link within 30 minutes:\n{reset_url}\n\n"
+        "If you did not request this, you can ignore this message."
+    )
+    timeout = 10
+    if config["use_ssl"]:
+        client = smtplib.SMTP_SSL(str(config["host"]), int(config["port"]), timeout=timeout)
+    else:
+        client = smtplib.SMTP(str(config["host"]), int(config["port"]), timeout=timeout)
+    with client:
+        if config["starttls"]:
+            client.starttls()
+        if config["username"]:
+            client.login(str(config["username"]), str(config["password"]))
+        client.send_message(message)
 
 
 def _current_user(request: Request, db: sqlite3.Connection):
@@ -476,7 +573,7 @@ def signup(payload: Signup, response: Response):
     try:
         db.execute("INSERT INTO users(id,email,salt,password_hash,created_at) VALUES(?,?,?,?,?)",
                    (user_id, payload.email.lower(), salt, digest, datetime.now(timezone.utc).isoformat()))
-        db.commit(); _new_session(db, user_id, response)
+        db.commit(); _new_session(db, user_id, response, remember_me=payload.remember_me)
     except sqlite3.IntegrityError as exc:
         raise HTTPException(409, "An account with this email already exists") from exc
     finally:
@@ -492,10 +589,89 @@ def login(payload: Login, response: Response):
         supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
         if not row or not hmac.compare_digest(supplied, row["password_hash"]):
             raise HTTPException(401, "Email or password is incorrect")
-        _new_session(db, row["id"], response)
+        _new_session(db, row["id"], response, remember_me=payload.remember_me)
         return {"user": {"id": row["id"], "email": row["email"]}}
     finally:
         db.close()
+
+
+@app.post("/api/v1/auth/password-reset/request", dependencies=[Depends(_proxy_auth)])
+def request_password_reset(payload: PasswordResetRequest):
+    try:
+        _password_reset_mail_config()
+    except RuntimeError as exc:
+        raise HTTPException(503, "Password recovery is not configured on this service") from exc
+
+    db = _connect()
+    try:
+        normalized_email = payload.email.lower()
+        row = db.execute("SELECT id FROM users WHERE email=?", (normalized_email,)).fetchone()
+        if row:
+            user_id = row["id"]
+            now = int(time.time())
+            previous = db.execute(
+                "SELECT requested_at FROM password_reset_requests WHERE user_id=?", (user_id,)
+            ).fetchone()
+            if not previous or now - previous["requested_at"] >= PASSWORD_RESET_COOLDOWN:
+                token = secrets.token_urlsafe(32)
+                token_hash = hashlib.sha256(token.encode()).hexdigest()
+                db.execute("DELETE FROM password_reset_tokens WHERE user_id=?", (user_id,))
+                db.execute(
+                    "INSERT INTO password_reset_tokens(token_hash,user_id,expires_at) VALUES(?,?,?)",
+                    (token_hash, user_id, now + PASSWORD_RESET_TTL),
+                )
+                db.execute(
+                    "INSERT OR REPLACE INTO password_reset_requests(user_id,requested_at) VALUES(?,?)",
+                    (user_id, now),
+                )
+                db.commit()
+                try:
+                    _send_password_reset_email(normalized_email, token)
+                except Exception as exc:
+                    logger.warning("Password reset email delivery failed (%s)", type(exc).__name__)
+                    db.execute("DELETE FROM password_reset_tokens WHERE token_hash=?", (token_hash,))
+                    db.execute("DELETE FROM password_reset_requests WHERE user_id=?", (user_id,))
+                    db.commit()
+    finally:
+        db.close()
+    return {"message": "If an account matches that email, password-reset instructions will be sent."}
+
+
+@app.post("/api/v1/auth/password-reset/confirm", dependencies=[Depends(_proxy_auth)])
+def complete_password_reset(payload: PasswordResetComplete):
+    global engine_phase, engine_stop_requested
+    if payload.password != payload.password_confirmation:
+        raise HTTPException(422, "Passwords do not match")
+    token_hash = hashlib.sha256(payload.token.encode()).hexdigest()
+    now = int(time.time())
+    db = _connect()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT user_id FROM password_reset_tokens WHERE token_hash=? AND expires_at>=?",
+            (token_hash, now),
+        ).fetchone()
+        if not row:
+            db.rollback()
+            raise HTTPException(400, "This password-reset link is invalid or expired")
+        if row["user_id"] == engine_owner_id and engine_task is not None and not engine_task.done():
+            engine_stop_requested = True
+            if engine_phase in ("PREFLIGHTING", "STARTING"):
+                engine_phase = "STOPPING"
+            if engine_hub is not None:
+                engine_hub.request_stop()
+            db.rollback()
+            raise HTTPException(409, "The active engine is stopping. Retry the password reset after it stops.")
+        salt = secrets.token_bytes(16)
+        digest = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), salt, 310_000)
+        db.execute("UPDATE users SET salt=?,password_hash=? WHERE id=?", (salt, digest, row["user_id"]))
+        db.execute("DELETE FROM password_reset_tokens WHERE user_id=?", (row["user_id"],))
+        db.execute("DELETE FROM password_reset_requests WHERE user_id=?", (row["user_id"],))
+        db.execute("DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
+        db.commit()
+    finally:
+        db.close()
+    return {"message": "Password updated. Sign in again with your new password."}
 
 
 @app.post("/api/v1/auth/logout", dependencies=[Depends(_proxy_auth)])
@@ -720,7 +896,8 @@ def engine_journal(request: Request):
         db.close()
     journal_path = APP_DB.parent / f"engine_{uid}.sqlite3"
     if not journal_path.exists():
-        return {"trades": [], "realizedNetPnl": 0.0, "scope": "all durable engine sessions"}
+        return {"trades": [], "opportunities": [], "realizedNetPnl": 0.0,
+                "scope": "all durable engine sessions"}
     journal_db = sqlite3.connect(f"file:{journal_path.as_posix()}?mode=ro", uri=True, timeout=5)
     journal_db.row_factory = sqlite3.Row
     try:
@@ -733,10 +910,20 @@ def engine_journal(request: Request):
             "latency_ms,book_age_ms,execution_status,verification_status,risk_decision,failure_reason,"
             "target_before,target_after,cumulative_realized_pnl FROM trades ORDER BY id DESC LIMIT 100"
         ).fetchall()
-        return {"trades": [dict(record) for record in records], "realizedNetPnl": float(total),
+        opportunities = journal_db.execute(
+            "SELECT id,session_id,timestamp,mode,strategy,exchange_a,exchange_b,symbol,requested_usd,"
+            "expected_net_usd,worst_case_net_usd,expected_net_bps,worst_case_net_bps,book_age_ms,"
+            "decision,rejection_reason,evidence FROM opportunities ORDER BY id DESC LIMIT 25"
+        ).fetchall()
+        opportunity_rows = [dict(record) for record in opportunities]
+        for opportunity in opportunity_rows:
+            opportunity["evidence"] = json.loads(opportunity["evidence"])
+        return {"trades": [dict(record) for record in records], "opportunities": opportunity_rows,
+                "realizedNetPnl": float(total),
                 "scope": "all durable engine sessions"}
     except sqlite3.OperationalError:
-        return {"trades": [], "realizedNetPnl": 0.0, "scope": "all durable engine sessions"}
+        return {"trades": [], "opportunities": [], "realizedNetPnl": 0.0,
+                "scope": "all durable engine sessions"}
     finally:
         journal_db.close()
 

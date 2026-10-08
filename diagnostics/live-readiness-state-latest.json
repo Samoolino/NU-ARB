@@ -1,0 +1,1328 @@
+{
+  "blockingReasons": [
+    "two_distinct_fresh_account_certified_venues_required_for_cross_exchange_live",
+    "balances_private_stream_execution_route_and_runtime_risk_are_not_consumed_by_this_report",
+    "no_strategy_is_declared_live_engagement_verified_by_catalog_or_public_feed_evidence"
+  ],
+  "clarification": "Strategy catalog membership, static execution code, and public feed checks do not verify a live connection. Per-account balances, private streams, permissions, market-specific IOC routes, fees, risk approval, and fresh same-pair data must be certified independently. This report is observational and cannot authorize orders.",
+  "credentialsRead": false,
+  "evidenceFreshnessSeconds": 900,
+  "evidenceSources": {
+    "authenticatedSamePairFeedValidation": {
+      "ageSeconds": null,
+      "generatedAtUtc": null,
+      "status": "MISSING"
+    },
+    "permissionRevalidation": {
+      "ageSeconds": null,
+      "generatedAtUtc": null,
+      "status": "MISSING"
+    },
+    "randomizedPublicFeedAudit": {
+      "ageSeconds": 259.7,
+      "generatedAtUtc": "2026-10-08T02:42:56.412376+00:00",
+      "status": "FRESH"
+    }
+  },
+  "generatedAtUtc": "2026-10-08T02:47:16.146618+00:00",
+  "liveCandidateVenues": [
+    "binance",
+    "bybit",
+    "kucoin"
+  ],
+  "liveEngageable": false,
+  "liveModeRequirement": {
+    "authorized": false,
+    "blockingReasons": [
+      "two_distinct_fresh_account_certified_venues_required_for_cross_exchange_live",
+      "balances_private_stream_execution_route_and_runtime_risk_are_not_consumed_by_this_report",
+      "no_strategy_is_declared_live_engagement_verified_by_catalog_or_public_feed_evidence"
+    ],
+    "currentlyVerifiedVenues": [],
+    "eligibleVenueCandidates": [
+      "binance",
+      "bybit",
+      "kucoin"
+    ],
+    "explanation": "This is the persisted target policy, not a switch that enables trading. Public feed success cannot substitute for account, balance, private-stream, execution-route, settlement, or risk evidence.",
+    "minimumDistinctLiveEligibleVenues": 2,
+    "ordersEnabled": false,
+    "readinessState": "BLOCKED_LIVE_EVIDENCE_MISSING",
+    "requiredEvidence": [
+      "fresh_public_rest_and_websocket_books",
+      "fresh_public_orderbook_depth_and_simulation",
+      "multi_sample_runtime_live_latency_gate",
+      "fresh_account_permission_revalidation",
+      "authenticated_same_pair_rest_and_websocket_books",
+      "available_balances_and_order_reservations",
+      "private_user_stream",
+      "market_specific_ioc_execution_route_and_fee_tier",
+      "asset_identity_and_settlement_route",
+      "runtime_risk_and_capital_approval"
+    ],
+    "requiredStrategy": "cross_exchange",
+    "targetMode": "live"
+  },
+  "ordersSubmitted": false,
+  "persistenceValidation": {
+    "artifactPaths": [
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\live-readiness-state-20261008T024716Z.json",
+      "C:\\Users\\saME\\NU-ARB\\diagnostics\\live-readiness-state-latest.json"
+    ],
+    "method": "atomic_write_then_json_readback",
+    "validated": true
+  },
+  "qualifiedLiveVenueCount": 0,
+  "readinessState": "BLOCKED_LIVE_EVIDENCE_MISSING",
+  "schemaVersion": 1,
+  "strategies": [
+    {
+      "blockers": [
+        "fresh_per_account_permission_feed_balance_stream_and_route_certification_required",
+        "live_execution_switches_are_not_readiness_evidence"
+      ],
+      "connectionRequirements": [
+        "two_distinct_fresh_live_eligible_venues",
+        "prefunded_quote_and_base_inventory",
+        "private_and_public_streams",
+        "certified_ioc_route",
+        "BOT_CROSS_LIVE=1"
+      ],
+      "connectionState": "BLOCKED_NO_FRESH_LIVE_VENUE_CERTIFICATION",
+      "executionGateStrategy": "cross",
+      "id": "cross_exchange",
+      "implementation": "implemented",
+      "kind": "execution_strategy",
+      "liveEngagementVerified": false,
+      "livePath": "implemented_fail_closed"
+    },
+    {
+      "blockers": [
+        "fresh_per_account_permission_feed_balance_stream_and_route_certification_required",
+        "live_execution_switches_are_not_readiness_evidence"
+      ],
+      "connectionRequirements": [
+        "one_fresh_live_eligible_venue",
+        "three_active_spot_markets",
+        "prefunded_cycle_inventory",
+        "private_and_public_streams",
+        "certified_ioc_route",
+        "BOT_TRIANGULAR_LIVE=1"
+      ],
+      "connectionState": "BLOCKED_NO_FRESH_LIVE_VENUE_CERTIFICATION",
+      "executionGateStrategy": "triangular",
+      "id": "triangular_intra_exchange",
+      "implementation": "implemented",
+      "kind": "execution_strategy",
+      "liveEngagementVerified": false,
+      "livePath": "implemented_fail_closed"
+    },
+    {
+      "blockers": [
+        "capital_policy_does_not_submit_orders"
+      ],
+      "connectionRequirements": [
+        "known_realized_pnl",
+        "risk_gate_approval"
+      ],
+      "connectionState": "NOT_AN_EXECUTION_STRATEGY",
+      "executionGateStrategy": null,
+      "id": "dca_profit_compounding",
+      "implementation": "implemented_policy_not_strategy",
+      "kind": "capital_policy",
+      "liveEngagementVerified": false,
+      "livePath": "policy_only"
+    },
+    {
+      "blockers": [
+        "helper_calculation_is_not_a_separately_certified_execution_path"
+      ],
+      "connectionRequirements": [
+        "cross_exchange_route_must_be_independently_certified"
+      ],
+      "connectionState": "NO_DEDICATED_LIVE_ROUTE",
+      "executionGateStrategy": "cross",
+      "id": "stablecoin_arbitrage",
+      "implementation": "helper_only",
+      "kind": "opportunity_calculation",
+      "liveEngagementVerified": false,
+      "livePath": "no_dedicated_route"
+    },
+    {
+      "blockers": [
+        "catalog_label_has_no_distinct_multi_exchange_triangular_executor"
+      ],
+      "connectionRequirements": [],
+      "connectionState": "UNSUPPORTED_DISTINCT_EXECUTION_PATH",
+      "executionGateStrategy": null,
+      "id": "triangular_multi_exchange",
+      "implementation": "no_distinct_execution_path",
+      "kind": "catalog_label",
+      "liveEngagementVerified": false,
+      "livePath": "unsupported"
+    },
+    {
+      "blockers": [
+        "spot_is_a_market_type_not_an_opportunity_strategy"
+      ],
+      "connectionRequirements": [],
+      "connectionState": "NOT_AN_ARBITRAGE_STRATEGY",
+      "executionGateStrategy": null,
+      "id": "spot",
+      "implementation": "market_type_not_strategy",
+      "kind": "market_type",
+      "liveEngagementVerified": false,
+      "livePath": "not_applicable"
+    }
+  ],
+  "transfersSubmitted": false,
+  "venues": [
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 13149.0,
+        "restRttMs": 2358.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 104.174,
+          "p95": 5023.871
+        },
+        "websocketFirstBookMs": 3676.0,
+        "websocketUpdateIntervalMs": {
+          "p50": 0.846,
+          "p95": 104.225
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": true,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": true,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USDC",
+        "restBookStructureValid": true,
+        "restDepthValidated": true,
+        "status": "VERIFIED",
+        "verified": true,
+        "websocketBookStructureValid": true,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 104.174,
+          "p95": 5023.871
+        },
+        "websocketDepthValidated": true,
+        "websocketUpdateIntervalMs": {
+          "p50": 0.846,
+          "p95": 104.225
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "binance"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 16439.0,
+        "restRttMs": 457.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 125.964,
+          "p95": 1132.575
+        },
+        "websocketFirstBookMs": 2223.0,
+        "websocketUpdateIntervalMs": {
+          "p50": 57.005,
+          "p95": 126.034
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": true,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": true,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "restBookStructureValid": true,
+        "restDepthValidated": true,
+        "status": "VERIFIED",
+        "verified": true,
+        "websocketBookStructureValid": true,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 125.964,
+          "p95": 1132.575
+        },
+        "websocketDepthValidated": true,
+        "websocketUpdateIntervalMs": {
+          "p50": 57.005,
+          "p95": 126.034
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "bybit"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": null,
+        "restRttMs": null,
+        "restRttSampleCount": 0,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "okx"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": null,
+        "restRttMs": null,
+        "restRttSampleCount": 0,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": true,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "kucoin"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": null,
+        "restRttMs": null,
+        "restRttSampleCount": 0,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "gateio"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 9649.0,
+        "restRttMs": 1416.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "bitget"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": null,
+        "restRttMs": null,
+        "restRttSampleCount": 0,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "kraken"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": null,
+        "restRttMs": null,
+        "restRttSampleCount": 0,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "coinbase"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 5897.0,
+        "restRttMs": 5893.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "mexc"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 10790.0,
+        "restRttMs": 715.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "htx"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 4951.0,
+        "restRttMs": 994.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": 1846.0,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "bitfinex"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": null,
+        "restRttMs": null,
+        "restRttSampleCount": 0,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "cryptocom"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_failed",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 5764.0,
+        "restRttMs": 2058.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": null,
+          "p95": null
+        },
+        "websocketFirstBookMs": 2453.0,
+        "websocketUpdateIntervalMs": {
+          "p50": null,
+          "p95": null
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": false,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "restBookStructureValid": false,
+        "restDepthValidated": false,
+        "status": "FAILED",
+        "verified": false,
+        "websocketBookStructureValid": false,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": null,
+          "p95": null
+        },
+        "websocketDepthValidated": false,
+        "websocketUpdateIntervalMs": {
+          "p50": null,
+          "p95": null
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "coinex"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 4694.0,
+        "restRttMs": 260.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 602.198,
+          "p95": 1023.38
+        },
+        "websocketFirstBookMs": 8487.0,
+        "websocketUpdateIntervalMs": {
+          "p50": 584.026,
+          "p95": 602.237
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": true,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USD",
+        "restBookStructureValid": true,
+        "restDepthValidated": true,
+        "status": "VERIFIED",
+        "verified": true,
+        "websocketBookStructureValid": true,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 602.198,
+          "p95": 1023.38
+        },
+        "websocketDepthValidated": true,
+        "websocketUpdateIntervalMs": {
+          "p50": 584.026,
+          "p95": 602.237
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "bitstamp"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 4780.0,
+        "restRttMs": 789.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 0.285,
+          "p95": 192.125
+        },
+        "websocketFirstBookMs": 2247.0,
+        "websocketUpdateIntervalMs": {
+          "p50": 0.169,
+          "p95": 0.337
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": true,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USD",
+        "restBookStructureValid": true,
+        "restDepthValidated": true,
+        "status": "VERIFIED",
+        "verified": true,
+        "websocketBookStructureValid": true,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 0.285,
+          "p95": 192.125
+        },
+        "websocketDepthValidated": true,
+        "websocketUpdateIntervalMs": {
+          "p50": 0.169,
+          "p95": 0.337
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "gemini"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_orderbook_depth_failed",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 7362.0,
+        "restRttMs": 479.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 5290.765,
+          "p95": 5290.765
+        },
+        "websocketFirstBookMs": 5906.0,
+        "websocketUpdateIntervalMs": {
+          "p50": null,
+          "p95": null
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": false,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "restBookStructureValid": true,
+        "restDepthValidated": true,
+        "status": "FAILED",
+        "verified": false,
+        "websocketBookStructureValid": true,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 5290.765,
+          "p95": 5290.765
+        },
+        "websocketDepthValidated": true,
+        "websocketUpdateIntervalMs": {
+          "p50": null,
+          "p95": null
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "bingx"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 3710.0,
+        "restRttMs": 852.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "lbank"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 1951.0,
+        "restRttMs": 192.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 1485.841,
+          "p95": 6910.939
+        },
+        "websocketFirstBookMs": 1536.0,
+        "websocketUpdateIntervalMs": {
+          "p50": 307.375,
+          "p95": 1485.905
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": true,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USDC",
+        "restBookStructureValid": true,
+        "restDepthValidated": true,
+        "status": "VERIFIED",
+        "verified": true,
+        "websocketBookStructureValid": true,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 1485.841,
+          "p95": 6910.939
+        },
+        "websocketDepthValidated": true,
+        "websocketUpdateIntervalMs": {
+          "p50": 307.375,
+          "p95": 1485.905
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "whitebit"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "fresh_public_rest_and_websocket_books_failed",
+        "fresh_public_orderbook_depth_not_recorded",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": null,
+        "restRttMs": null,
+        "restRttSampleCount": 0,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": null,
+        "websocketFirstBookMs": null,
+        "websocketUpdateIntervalMs": null
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "FAILED",
+        "verified": false
+      },
+      "publicOrderbookDepth": {
+        "status": "NOT_RECORDED",
+        "verified": false
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "bitmart"
+    },
+    {
+      "accountBalancesVerified": false,
+      "authenticatedSamePairFeeds": {
+        "status": "MISSING",
+        "verified": false
+      },
+      "blockers": [
+        "venue_not_in_strict_live_permission_candidate_policy",
+        "multi_sample_runtime_live_latency_gate_not_verified",
+        "fresh_account_permission_evidence_missing",
+        "fresh_authenticated_same_pair_rest_websocket_missing",
+        "authenticated_balance_and_reservations_not_verified_by_readiness_report",
+        "private_user_stream_not_verified_by_readiness_report",
+        "ioc_execution_route_not_certified_by_readiness_report",
+        "risk_and_capital_approval_not_verified_by_readiness_report"
+      ],
+      "executionRouteVerified": false,
+      "latencyEvidence": {
+        "liveLatencyGatePassed": false,
+        "marketDiscoveryMs": 2304.0,
+        "restRttMs": 531.0,
+        "restRttSampleCount": 1,
+        "status": "OBSERVED_ONLY",
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 124.419,
+          "p95": 203.376
+        },
+        "websocketFirstBookMs": 820.0,
+        "websocketUpdateIntervalMs": {
+          "p50": 99.594,
+          "p95": 203.452
+        }
+      },
+      "liveEligible": false,
+      "livePermissionCandidate": false,
+      "permissionEvidence": {
+        "blockers": [],
+        "liveEligible": false,
+        "status": "MISSING",
+        "verified": false
+      },
+      "privateStreamVerified": false,
+      "publicFeed": {
+        "status": "VERIFIED",
+        "verified": true
+      },
+      "publicOrderbookDepth": {
+        "asynchronousWebsocketUpdatesVerified": true,
+        "chainSettlementVerified": false,
+        "notionalQuote": 25.0,
+        "profitAssurance": false,
+        "quoteCurrency": "USDT",
+        "restBookStructureValid": true,
+        "restDepthValidated": true,
+        "status": "VERIFIED",
+        "verified": true,
+        "websocketBookStructureValid": true,
+        "websocketDeliveryCallLatencyMs": {
+          "p50": 124.419,
+          "p95": 203.376
+        },
+        "websocketDepthValidated": true,
+        "websocketUpdateIntervalMs": {
+          "p50": 99.594,
+          "p95": 203.452
+        }
+      },
+      "riskAndCapitalApproved": false,
+      "venue": "upbit"
+    }
+  ]
+}

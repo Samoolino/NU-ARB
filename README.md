@@ -16,6 +16,10 @@ For Vercel, keep the **Other** Framework Preset (`framework: null` in `vercel.js
 
 The account panel creates accounts and verifies saved exchange credentials using authenticated REST, an actual private `watchBalance` WebSocket event, and a live public order-book WebSocket message. Scanner eligibility requires both account REST and private/public WebSocket checks. The control service also exposes paper/live engine controls backed by the existing Python risk gates and SQLite execution journal. Live order submission is operator-disabled by default and currently eligible only for Binance keys whose signed permissions response proves spot trading enabled, withdrawals/transfers disabled, IP restriction enabled, and whose private stream passes fresh preflight. No order is placed by the permission check itself.
 
+During an authenticated engine session, the Python worker subscribes to discovered/configured spot symbols with `watch_order_book` and evaluates changed books; cross-venue ranking compares both buy/sell directions using depth-aware expected and worst-case net PnL. This is not a subscription to every symbol listed by every exchange. REST is used for preflight and periodic server-time RTT sampling, not as a continuous parallel order-book feed; the public REST scanner is a separate snapshot flow. The account dashboard's **Run analysis** reports the engine snapshot, subscribed/received/fresh book counts, scan and trade counters, and durable journal totals. The dashboard polls the control API; it does not own exchange connections. SQLite stores opportunity and execution records, while a live profit target is a realized-PnL stop threshold—not a profit guarantee. Main implementation: `arb_bot/arbx/market.py`, `worker.py`, `hub.py`, `execute.py`, `journal.py`, and `web_api.py`; UI: `index.html` and `public/index.html`.
+
+The repository-side code/persistence review is saved at [`diagnostics/engine-feed-persistence-analysis-latest.json`](diagnostics/engine-feed-persistence-analysis-latest.json). It is not a live venue certification; it records that no credentials were read and no orders were submitted.
+
 ### Enable the account panel
 
 See [the exchange support matrix](EXCHANGE_SUPPORT.md) for the credential fields, verification evidence, and venue-specific live-trading limits. Adapter availability and successful authentication are checked at runtime; a venue name in the picker is not a completed integration.
@@ -26,9 +30,13 @@ Set these Railway service variables:
 
 - `ARBX_APP_DB=/data/arbx_app.sqlite3`.
 - `APP_SECURE_COOKIE=1`.
+- `APP_PUBLIC_URL`: the public HTTPS dashboard origin used to create password-reset links.
+- `CONTROL_EMAIL_HOST`, `CONTROL_EMAIL_PORT`, and `CONTROL_EMAIL_FROM`: the SMTP sender for account recovery. Supply `CONTROL_EMAIL_USERNAME` and `CONTROL_EMAIL_PASSWORD` only when the provider requires authentication. Use `CONTROL_EMAIL_USE_SSL=1` for implicit TLS, or leave it `0` and keep `CONTROL_EMAIL_STARTTLS=1` for STARTTLS. Recovery is unavailable until these settings are valid; set them only on the persistent control service, never in Vercel or source control.
 - `ENGINE_PROXY_TOKEN`: a long random service-to-service secret.
 - `CREDENTIAL_ENCRYPTION_KEY`: a stable 32-byte key encoded as 64 hex characters. Generate with `python -c "import secrets; print(secrets.token_hex(32))"` and back it up offline. Do not rotate it after credentials have been stored unless you migrate those credentials; changing it makes them unreadable.
 - `ARBX_LIVE_TRADING_ENABLED=0` initially. Keep it disabled until HTTPS, storage, exchange permissions, and the live preflight are verified.
+
+Account signup requires a verified-format email address and matching passwords of at least 12 characters. Sign-in cookies are session-only by default; selecting **Remember me** persists the browser cookie for the existing seven-day server session limit. Password-reset requests use neutral responses, one-time hashed tokens that expire after 30 minutes, per-account request cooldowns, and revoke existing sessions after a successful reset. Exchange credential, balance, and engine controls remain account-authenticated; account signup does not grant live-trading permission.
 
 In Vercel Production, set `ARBX_CONTROL_API_URL` to the Railway HTTPS origin (for example `https://arb-control-production.up.railway.app`) and set `ENGINE_PROXY_TOKEN` to the same sensitive secret used in Railway. Redeploy after setting these variables. Keep Preview disconnected from production secrets; use a separate test service and token if account flows need Preview testing.
 

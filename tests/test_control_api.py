@@ -2,6 +2,7 @@ import os
 import pathlib
 import sys
 import asyncio
+import hashlib
 import json
 import time
 import threading
@@ -77,6 +78,56 @@ class ControlApiTests(unittest.TestCase):
             })
             self.assertEqual(engine_start.status_code, 422)
 
+    def test_engine_journal_includes_persisted_opportunities(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "journal-opportunities@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200, signup.text)
+        db = web_api._connect()
+        try:
+            uid = db.execute(
+                "SELECT id FROM users WHERE email=?",
+                ("journal-opportunities@example.com",),
+            ).fetchone()[0]
+        finally:
+            db.close()
+
+        from arbx.journal import TradeJournal
+
+        journal_path = web_api.APP_DB.parent / f"engine_{uid}.sqlite3"
+        journal = TradeJournal(journal_path)
+        journal.append_opportunity({
+            "session_id": "dashboard-test",
+            "mode": "paper",
+            "strategy": "cross_exchange",
+            "exchange_a": "binance",
+            "exchange_b": "bybit",
+            "symbol": "BTC/USDT",
+            "requested_usd": 10.0,
+            "expected_net_usd": 0.05,
+            "worst_case_net_usd": 0.02,
+            "expected_net_bps": 50.0,
+            "worst_case_net_bps": 20.0,
+            "book_age_ms": 15.0,
+            "decision": "REJECTED_BY_GATE",
+            "rejection_reason": "test_gate",
+            "evidence": {"bookSequence": 12},
+        })
+        journal.close()
+        try:
+            response = self.client.get("/api/v1/engine/journal", headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            opportunities = response.json()["opportunities"]
+            self.assertEqual(len(opportunities), 1)
+            self.assertEqual(opportunities[0]["symbol"], "BTC/USDT")
+            self.assertEqual(opportunities[0]["evidence"]["bookSequence"], 12)
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                candidate = pathlib.Path(str(journal_path) + suffix)
+                if candidate.exists():
+                    candidate.unlink()
+
     def setUp(self):
         self.db_path = pathlib.Path(__file__).resolve().parent / ".control-test.sqlite3"
         for suffix in ("", "-wal", "-shm"):
@@ -115,8 +166,199 @@ class ControlApiTests(unittest.TestCase):
             "password_confirmation": "very-long-test-password",
         })
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn("max-age=", response.headers["set-cookie"].lower())
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).json()["user"]["email"], "person@example.com")
         self.assertEqual(self.client.get("/healthz").status_code, 200)
+
+    def test_remember_me_makes_login_cookie_persistent(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "remember@example.com", "password": "very-long-test-password",
+            "password_confirmation": "very-long-test-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        self.client.post("/api/v1/auth/logout", headers=self.headers)
+
+        response = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "remember@example.com", "password": "very-long-test-password", "remember_me": True,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f"max-age={web_api.SESSION_TTL}", response.headers["set-cookie"].lower())
+
+    def test_password_reset_is_neutral_single_use_and_revokes_sessions(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "reset@example.com", "password": "old-long-test-password",
+            "password_confirmation": "old-long-test-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        with patch.dict(os.environ, {
+            "APP_PUBLIC_URL": "https://dashboard.example",
+            "CONTROL_EMAIL_HOST": "smtp.example",
+            "CONTROL_EMAIL_FROM": "NU-ARB <no-reply@example.com>",
+        }, clear=False), patch.object(web_api, "_send_password_reset_email") as send_email:
+            response = self.client.post("/api/v1/auth/password-reset/request", headers=self.headers, json={
+                "email": "reset@example.com",
+            })
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {
+                "message": "If an account matches that email, password-reset instructions will be sent.",
+            })
+            send_email.assert_called_once()
+            token = send_email.call_args.args[1]
+            repeated = self.client.post("/api/v1/auth/password-reset/request", headers=self.headers, json={
+                "email": "reset@example.com",
+            })
+            self.assertEqual(repeated.json(), response.json())
+            send_email.assert_called_once()
+
+            unknown = self.client.post("/api/v1/auth/password-reset/request", headers=self.headers, json={
+                "email": "unknown@example.com",
+            })
+            self.assertEqual(unknown.status_code, 200)
+            self.assertEqual(unknown.json(), response.json())
+
+            db = web_api._connect()
+            try:
+                stored = db.execute(
+                    "SELECT token_hash FROM password_reset_tokens"
+                ).fetchone()
+                self.assertEqual(stored["token_hash"], hashlib.sha256(token.encode()).hexdigest())
+                self.assertNotIn(token, stored["token_hash"])
+            finally:
+                db.close()
+
+            completed = self.client.post("/api/v1/auth/password-reset/confirm", headers=self.headers, json={
+                "token": token, "password": "new-long-test-password",
+                "password_confirmation": "new-long-test-password",
+            })
+            self.assertEqual(completed.status_code, 200, completed.text)
+            self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 401)
+            reused = self.client.post("/api/v1/auth/password-reset/confirm", headers=self.headers, json={
+                "token": token, "password": "other-long-test-password",
+                "password_confirmation": "other-long-test-password",
+            })
+            self.assertEqual(reused.status_code, 400)
+
+            old_login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+                "email": "reset@example.com", "password": "old-long-test-password",
+            })
+            self.assertEqual(old_login.status_code, 401)
+            new_login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+                "email": "reset@example.com", "password": "new-long-test-password",
+            })
+            self.assertEqual(new_login.status_code, 200)
+
+    def test_password_reset_reports_missing_mail_configuration(self):
+        with patch.dict(os.environ, {
+            "APP_PUBLIC_URL": "", "CONTROL_EMAIL_HOST": "", "CONTROL_EMAIL_FROM": "",
+        }, clear=False):
+            response = self.client.post("/api/v1/auth/password-reset/request", headers=self.headers, json={
+                "email": "nobody@example.com",
+            })
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("not configured", response.json()["detail"])
+
+    def test_password_reset_email_uses_configured_starttls_and_fragment_token(self):
+        class SMTPStub:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def starttls(self):
+                self.starttls_called = True
+
+            def send_message(self, message):
+                self.message = message
+
+        smtp = SMTPStub()
+        with patch.dict(os.environ, {
+            "APP_PUBLIC_URL": "https://dashboard.example",
+            "CONTROL_EMAIL_HOST": "smtp.example",
+            "CONTROL_EMAIL_PORT": "587",
+            "CONTROL_EMAIL_FROM": "NU-ARB <no-reply@example.com>",
+            "CONTROL_EMAIL_USERNAME": "",
+            "CONTROL_EMAIL_PASSWORD": "",
+            "CONTROL_EMAIL_USE_SSL": "0",
+            "CONTROL_EMAIL_STARTTLS": "1",
+        }, clear=False), patch.object(web_api.smtplib, "SMTP", return_value=smtp) as smtp_factory:
+            web_api._send_password_reset_email("person@example.com", "token_value-12345678901234567890")
+
+        smtp_factory.assert_called_once_with("smtp.example", 587, timeout=10)
+        self.assertTrue(smtp.starttls_called)
+        self.assertEqual(smtp.message["To"], "person@example.com")
+        self.assertIn(
+            "https://dashboard.example/#reset=token_value-12345678901234567890",
+            smtp.message.get_content(),
+        )
+
+    def test_password_reset_mail_failure_is_neutral_and_removes_token(self):
+        self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "mail-failure@example.com", "password": "very-long-test-password",
+            "password_confirmation": "very-long-test-password",
+        })
+        with patch.dict(os.environ, {
+            "APP_PUBLIC_URL": "https://dashboard.example",
+            "CONTROL_EMAIL_HOST": "smtp.example",
+            "CONTROL_EMAIL_FROM": "NU-ARB <no-reply@example.com>",
+        }, clear=False), patch.object(
+            web_api, "_send_password_reset_email", side_effect=OSError("mail server unavailable")
+        ):
+            response = self.client.post("/api/v1/auth/password-reset/request", headers=self.headers, json={
+                "email": "mail-failure@example.com",
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "If an account matches that email, password-reset instructions will be sent.",
+        )
+        db = web_api._connect()
+        try:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM password_reset_tokens").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM password_reset_requests").fetchone()[0], 0)
+        finally:
+            db.close()
+
+    def test_password_reset_requests_engine_stop_before_revoking_owner_session(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "active-reset@example.com", "password": "very-long-test-password",
+            "password_confirmation": "very-long-test-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        with patch.dict(os.environ, {
+            "APP_PUBLIC_URL": "https://dashboard.example",
+            "CONTROL_EMAIL_HOST": "smtp.example",
+            "CONTROL_EMAIL_FROM": "NU-ARB <no-reply@example.com>",
+        }, clear=False), patch.object(web_api, "_send_password_reset_email") as send_email:
+            self.client.post("/api/v1/auth/password-reset/request", headers=self.headers, json={
+                "email": "active-reset@example.com",
+            })
+
+        class ActiveTask:
+            @staticmethod
+            def done():
+                return False
+
+        class ActiveHub:
+            requested_stop = False
+
+            def request_stop(self):
+                self.requested_stop = True
+
+        hub = ActiveHub()
+        with patch.object(web_api, "engine_owner_id", signup.json()["user"]["id"]), \
+             patch.object(web_api, "engine_task", ActiveTask()), \
+             patch.object(web_api, "engine_hub", hub), \
+             patch.object(web_api, "engine_phase", "RUNNING"), \
+             patch.object(web_api, "engine_stop_requested", False):
+            response = self.client.post("/api/v1/auth/password-reset/confirm", headers=self.headers, json={
+                "token": send_email.call_args.args[1], "password": "new-long-test-password",
+                "password_confirmation": "new-long-test-password",
+            })
+            self.assertEqual(response.status_code, 409)
+            self.assertTrue(hub.requested_stop)
+            self.assertTrue(web_api.engine_stop_requested)
+            self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 200)
 
     def test_live_engine_is_operator_disabled_by_default(self):
         response = self.client.post("/api/v1/engine/start", headers=self.headers, json={
