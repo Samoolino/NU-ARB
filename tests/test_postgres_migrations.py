@@ -22,10 +22,14 @@ def test_database_url_accepts_postgres_schemes():
     assert _database_url("postgres://user:pass@localhost/db").startswith("postgres://")
 
 
-def test_migration_inventory_is_sorted_and_includes_audit_schema():
+def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schemas():
     files = _migration_files()
     assert files == sorted(files)
-    assert [p.name for p in files] == ["001_initial_schema.sql", "002_plugin_audit.sql"]
+    assert [p.name for p in files] == [
+        "001_initial_schema.sql",
+        "002_plugin_audit.sql",
+        "003_control_api_schema.sql",
+    ]
     sql = files[0].read_text(encoding="utf-8")
     assert "provider_evidence" in sql
     assert "encrypted_payload BYTEA NOT NULL" in sql
@@ -34,6 +38,10 @@ def test_migration_inventory_is_sorted_and_includes_audit_schema():
     assert "CREATE TABLE IF NOT EXISTS plugin_audit_log" in audit_sql
     assert "payload_sha256" in audit_sql
     assert "payload JSON" not in audit_sql
+    control_api_sql = files[2].read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS control_api_users" in control_api_sql
+    assert "CREATE TABLE IF NOT EXISTS control_api_sessions" in control_api_sql
+    assert "CREATE TABLE IF NOT EXISTS control_api_exchange_credentials" in control_api_sql
 
 
 def test_migration_inventory_rejects_duplicate_versions(tmp_path: Path):
