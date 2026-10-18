@@ -6,11 +6,12 @@ Scope: Control API identity, sessions, and encrypted exchange-credential metadat
 
 ## Current verified state
 
-- The latest commit `d08fa8aee84bc57a3214375b94819f97eb8c4b3d` passed both [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39117161133) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39117158309).
+- The latest safety-test commit `9ac2555893a136ec80e2249fc1a892e1303e67ee` passed both [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39117884138) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39117884144).
 - `ControlPlaneStore` and PostgreSQL schema migrations exist.
 - Atomic account-plus-initial-session persistence is implemented in `ControlPlaneStore.create_user_with_session(...)`; tests cover successful creation and rollback when session insertion fails.
 - FastAPI routes in `arb_bot/arbx/web_api.py` still use the legacy SQLite schema through `_connect()`.
 - Selecting `ARBX_STORAGE_BACKEND=postgres` intentionally returns HTTP 503 for route requests; do not remove this guard until route parity is tested.
+- The fail-closed regression test proves that the current unwired routes return sanitized HTTP 503 for configured PostgreSQL without creating a SQLite fallback database.
 - The passing workflows validate the committed foundation and regression tests; they do **not** prove the public API routes are PostgreSQL-backed.
 - No production migration, deployment, credential import, or live execution is authorized by this plan.
 
@@ -74,7 +75,7 @@ The fail-closed guard stays enabled if any gate is incomplete or any test is ski
 
 - [ ] API/store integration tests written first and demonstrated to fail against the current unwired routes.
 - [x] Atomic store-level account/session transaction and rollback tests implemented.
-- [x] Foundation CI workflows passed for commit `d08fa8aee84bc57a3214375b94819f97eb8c4b3d`.
+- [x] Foundation and fail-closed safety CI workflows passed for commit `9ac2555893a136ec80e2249fc1a892e1303e67ee`.
 - [ ] Route adapter implemented with transaction and error parity.
 - [ ] SQLite and disposable PostgreSQL contract suites pass.
 - [ ] No route-level legacy persistence paths remain for the migrated entities.
