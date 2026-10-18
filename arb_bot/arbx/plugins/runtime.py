@@ -13,6 +13,10 @@ class PluginPermission:
     scope: str = "evidence:read"
 
 class PluginPermissionError(PermissionError): pass
+
+class AuditPersistenceError(RuntimeError):
+    \"\"\"Raised when durable audit storage fails; evidence is not returned.\"\"\"
+
 AuditWriter = Callable[[dict], Awaitable[None]]
 
 class PluginRunner:
@@ -44,6 +48,8 @@ class PluginRunner:
                 payload_hash = hashlib.sha256(raw).hexdigest()
             await self._audit("completed", provider_name, request, scope, int((time.monotonic()-started)*1000), evidence.status.value, payload_hash)
             return evidence
+        except AuditPersistenceError:
+            raise
         except asyncio.TimeoutError:
             elapsed = int((time.monotonic()-started)*1000)
             await self._audit("timeout", provider_name, request, scope, elapsed, "timeout", None)
