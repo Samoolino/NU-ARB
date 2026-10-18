@@ -354,3 +354,24 @@ def test_credential_listing_is_scoped_to_requesting_user(tmp_path):
     assert [row["exchange_id"] for row in store.list_credentials("owner-user")] == ["binance"]
     assert [row["exchange_id"] for row in store.list_credentials("other-user")] == ["bybit"]
     assert store.list_credentials("missing-user") == []
+
+def test_credential_listing_is_sorted_stably_by_exchange_id(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "credential-list-order.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="ordered-user", email="ordered@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    for exchange_id in ("kraken", "binance", "coinbase"):
+        store.save_credentials(
+            user_id="ordered-user", exchange_id=exchange_id,
+            encrypted_credentials=(exchange_id + "-cipher").encode(),
+            auth_mode="test", state="NOT_VERIFIED", last_verified=None,
+            verification_json="{}",
+        )
+
+    assert [row["exchange_id"] for row in store.list_credentials("ordered-user")] == [
+        "binance", "coinbase", "kraken",
+    ]
+
