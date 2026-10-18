@@ -142,3 +142,18 @@ def test_deleting_user_cascades_sessions_and_credentials(tmp_path):
 
     assert store.get_session("cascade-session") is None
     assert store.get_credentials("cascade-user", "fixture") is None
+
+
+def test_get_valid_session_rejects_expired_and_returns_active_session(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "control.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="session-user", email="session@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.create_session(token_hash="expired-token", user_id="session-user", expires_at=99)
+    store.create_session(token_hash="active-token", user_id="session-user", expires_at=101)
+
+    assert store.get_valid_session("expired-token", now_epoch=100) is None
+    active = store.get_valid_session("active-token", now_epoch=100)
+    assert active == {"user_id": "session-user", "expires_at": 101}
