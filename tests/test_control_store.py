@@ -328,3 +328,29 @@ def test_credential_listing_excludes_ciphertext_and_upsert_replaces_metadata(tmp
     assert saved["encrypted_credentials"] == b"rotated-ciphertext"
     assert saved["state"] == "VERIFIED"
     assert saved["verification_json"] == '{"version":2}'
+
+
+
+def test_credential_listing_is_scoped_to_requesting_user(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "credential-list-scope.sqlite3"))
+    store.initialize()
+    for user_id, email in (
+        ("owner-user", "owner@example.test"),
+        ("other-user", "other@example.test"),
+    ):
+        store.create_user(
+            user_id=user_id, email=email, salt=b"salt",
+            password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+        )
+    store.save_credentials(
+        user_id="owner-user", exchange_id="binance", encrypted_credentials=b"owner-cipher",
+        auth_mode="hmac", state="VERIFIED", last_verified=None, verification_json="{}",
+    )
+    store.save_credentials(
+        user_id="other-user", exchange_id="bybit", encrypted_credentials=b"other-cipher",
+        auth_mode="hmac", state="VERIFIED", last_verified=None, verification_json="{}",
+    )
+
+    assert [row["exchange_id"] for row in store.list_credentials("owner-user")] == ["binance"]
+    assert [row["exchange_id"] for row in store.list_credentials("other-user")] == ["bybit"]
+    assert store.list_credentials("missing-user") == []
