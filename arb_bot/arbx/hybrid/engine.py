@@ -15,7 +15,7 @@ from .registry import VENUE_CATALOG
 from .requirements import validate_capabilities
 from .router import RouteDecision, validate_route
 from .strategies import strategy_catalog
-from arbx.journal import TradeJournal
+from arbx.journal import create_trade_journal
 
 
 @dataclass
@@ -198,7 +198,7 @@ class HybridEngine:
             )
 
         self.evidence[venue_id] = ev
-        journal = TradeJournal(self.cfg.journal_path.with_suffix(".sqlite3"))
+        journal = create_trade_journal(self.cfg.journal_path.with_suffix(".sqlite3"))
         try:
             journal.record_certification(
                 session_id=getattr(self.cfg, "session_id", None),
