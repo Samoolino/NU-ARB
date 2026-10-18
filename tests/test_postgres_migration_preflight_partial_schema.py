@@ -21,4 +21,7 @@ def test_partial_legacy_tables_report_blockers_without_querying_missing_columns(
     assert report["safe_to_plan_cutover"] is False
     assert report["schema_family"] == "partial_legacy_control_api"
     assert report["blockers"]
+    assert report["tables"]["users"]["missing_columns"] == ["created_at", "password_hash", "salt"]
+    assert report["tables"]["sessions"]["missing_columns"] == ["expires_at", "user_id"]
+    assert report["tables"]["exchange_credentials"]["missing_columns"] == ["auth_mode", "encrypted_credentials", "last_verified", "state", "verification_json"]
     assert all("missing_columns" in table for table in report["tables"].values() if table["present"])
