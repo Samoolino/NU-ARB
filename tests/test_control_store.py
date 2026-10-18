@@ -399,3 +399,36 @@ def test_missing_user_lookup_returns_none_without_disclosing_records(tmp_path):
 
     assert store.get_user("does-not-exist") is None
 
+
+
+def test_email_uniqueness_is_case_insensitive_even_for_direct_database_writes(tmp_path):
+    import sqlite3
+
+    backend = SQLiteBackend(tmp_path / "email-case-unique.sqlite3")
+    store = ControlPlaneStore(backend)
+    store.initialize()
+
+    # Simulate legacy/imported data bypassing the store's lowercasing boundary.
+    with backend.transaction() as session:
+        session.execute(
+            "INSERT INTO control_api_users(id,email,salt,password_hash,created_at) VALUES(?,?,?,?,?)",
+            ("legacy-user", "MixedCase@example.test", b"salt", b"hash", "2026-01-01T00:00:00+00:00"),
+        )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_user(
+            user_id="duplicate-user", email="mixedcase@example.test", salt=b"salt2",
+            password_hash=b"hash2", created_at="2026-01-02T00:00:00+00:00",
+        )
+
+    assert store.get_user("duplicate-user") is None
+    assert store.get_user_by_email("MIXEDCASE@example.test")["id"] == "legacy-user"
+
+
+def test_postgres_migration_enforces_case_insensitive_email_uniqueness():
+    from pathlib import Path
+
+    migration = Path(__file__).parents[1] / "migrations" / "postgres" / "003_control_api_schema.sql"
+    sql = migration.read_text(encoding="utf-8").lower()
+    assert "create unique index if not exists control_api_users_email_ci_idx" in sql
+    assert "on control_api_users(lower(email))" in sql
