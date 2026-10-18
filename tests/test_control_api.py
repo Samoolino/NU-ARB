@@ -166,6 +166,17 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
 
+    def test_control_plane_store_factory_is_explicit_and_does_not_initialize_sqlite_schema(self):
+        from arbx.control_store import ControlPlaneStore
+
+        with patch.dict(os.environ, {
+            "ARBX_STORAGE_BACKEND": "sqlite",
+            "ARBX_APP_DB": str(self.db_path),
+        }, clear=False):
+            store = web_api.control_plane_store_from_environment()
+        self.assertIsInstance(store, ControlPlaneStore)
+        self.assertFalse(self.db_path.exists())
+
     def test_postgres_configuration_fails_closed_until_routes_are_wired(self):
         self.env.stop()
         self.env = patch.dict(os.environ, {
