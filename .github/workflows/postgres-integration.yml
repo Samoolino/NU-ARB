@@ -32,13 +32,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest pytest-asyncio "psycopg[binary]>=3.2,<4"
+          python -m pip install -r arb_bot/requirements.txt pytest pytest-asyncio httpx
       - name: Compile Python
         env:
           PYTHONPATH: arb_bot
         run: python -m compileall -q arb_bot
-      - name: Run PostgreSQL migration and integration tests
+      - name: Run PostgreSQL and control API tests
         env:
           PYTHONPATH: arb_bot
           ARBX_TEST_POSTGRES_URL: postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test
-        run: python -m pytest -q tests/test_postgres_migrations.py tests/test_postgres_integration.py tests/test_plugin_contracts.py tests/test_plugin_runtime.py tests/test_plugin_audit_postgres.py tests/test_storage_adapter.py
+        run: python -m pytest -q tests/test_postgres_migrations.py tests/test_postgres_integration.py tests/test_plugin_contracts.py tests/test_plugin_runtime.py tests/test_plugin_audit_postgres.py tests/test_storage_adapter.py tests/test_health_probes.py
