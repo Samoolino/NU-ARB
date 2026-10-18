@@ -292,3 +292,22 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["user"]["email"], "logincase@example.com")
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 200)
+
+    def test_control_plane_factory_requires_postgres_url_without_falling_back(self):
+        with patch.dict(os.environ, {
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "",
+        }, clear=False):
+            with self.assertRaisesRegex(ValueError, "ARBX_DATABASE_URL is required"):
+                web_api.control_plane_store_from_environment()
+        self.assertFalse(self.db_path.exists())
+
+    def test_control_plane_factory_rejects_unknown_backend_without_creating_sqlite(self):
+        with patch.dict(os.environ, {
+            "ARBX_STORAGE_BACKEND": "mysql",
+            "ARBX_DATABASE_URL": "",
+        }, clear=False):
+            with self.assertRaisesRegex(ValueError, "ARBX_STORAGE_BACKEND must be sqlite or postgres"):
+                web_api.control_plane_store_from_environment()
+        self.assertFalse(self.db_path.exists())
+
