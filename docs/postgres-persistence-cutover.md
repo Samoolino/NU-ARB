@@ -1,22 +1,24 @@
 # PostgreSQL Control API Persistence Cutover Plan
 
-Status: **reviewed plan; cutover blocked**  
+Status: **foundation verified; route cutover blocked**  
 Target branch: `phase-a-postgres-foundation`  
 Scope: Control API identity, sessions, and encrypted exchange-credential metadata only.
 
 ## Current verified state
 
-- PostgreSQL 16 integration workflow passed for the current session-expiry fix commit and its regression-test commit.
+- The latest commit `d08fa8aee84bc57a3214375b94819f97eb8c4b3d` passed both [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39117161133) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39117158309).
 - `ControlPlaneStore` and PostgreSQL schema migrations exist.
+- Atomic account-plus-initial-session persistence is implemented in `ControlPlaneStore.create_user_with_session(...)`; tests cover successful creation and rollback when session insertion fails.
 - FastAPI routes in `arb_bot/arbx/web_api.py` still use the legacy SQLite schema through `_connect()`.
 - Selecting `ARBX_STORAGE_BACKEND=postgres` intentionally returns HTTP 503 for route requests; do not remove this guard until route parity is tested.
+- The passing workflows validate the committed foundation and regression tests; they do **not** prove the public API routes are PostgreSQL-backed.
 - No production migration, deployment, credential import, or live execution is authorized by this plan.
 
 ## Cutover gates
 
-### Gate 1 — API/store contract tests (required before route edits)
+### Gate 1 — API/store contract tests
 
-Add integration tests against the public FastAPI endpoints with an injected persistence backend. Cover:
+Required before route cutover. Add integration tests against public FastAPI endpoints with an injected persistence backend. Cover:
 - signup writes one user and a hashed session token; password material is never returned;
 - duplicate, case-insensitive email signup maps to HTTP 409 and leaves one user;
 - login validates the same PBKDF2 parameters and creates a session;
@@ -34,7 +36,7 @@ Use a disposable local PostgreSQL service in CI only. Tests must refuse non-loca
 - Inject `ControlPlaneStore` through one explicit factory/dependency rather than branching SQL in every route.
 - Make the adapter own identity/session/credential persistence. Avoid changing market/exchange verification behavior in the same patch.
 - Normalize SQLite/PostgreSQL uniqueness violations at the storage boundary so API responses are backend-independent.
-- Preserve atomicity between account creation and initial session creation, or document and test a recoverable transaction boundary.
+- Use `create_user_with_session` for atomic account creation and initial session creation, or document and test a recoverable transaction boundary.
 - Keep SQL parameterized; never interpolate user-controlled values into SQL.
 - Keep encrypted credential bytes and session token hashes as the only persisted forms. Never log secrets, raw session tokens, or database URLs.
 - Do not initialize or mutate the PostgreSQL schema implicitly at application startup; use the versioned migration runner.
@@ -71,6 +73,8 @@ The fail-closed guard stays enabled if any gate is incomplete or any test is ski
 ## Completion checklist
 
 - [ ] API/store integration tests written first and demonstrated to fail against the current unwired routes.
+- [x] Atomic store-level account/session transaction and rollback tests implemented.
+- [x] Foundation CI workflows passed for commit `d08fa8aee84bc57a3214375b94819f97eb8c4b3d`.
 - [ ] Route adapter implemented with transaction and error parity.
 - [ ] SQLite and disposable PostgreSQL contract suites pass.
 - [ ] No route-level legacy persistence paths remain for the migrated entities.
