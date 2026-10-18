@@ -15,7 +15,7 @@ class PluginPermission:
 class PluginPermissionError(PermissionError): pass
 
 class AuditPersistenceError(RuntimeError):
-    \"\"\"Raised when durable audit storage fails; evidence is not returned.\"\"\"
+    """Raised when durable audit storage fails; evidence is not returned."""
 
 AuditWriter = Callable[[dict], Awaitable[None]]
 
