@@ -166,7 +166,6 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
 
-
     def test_postgres_configuration_fails_closed_until_routes_are_wired(self):
         self.env.stop()
         self.env = patch.dict(os.environ, {
@@ -182,6 +181,35 @@ class ControlApiTests(unittest.TestCase):
         response = self.client.get("/health/ready")
 
         self.assertEqual(response.status_code, 503)
+        self.assertFalse(self.db_path.exists())
+
+    def test_postgres_auth_routes_fail_closed_without_creating_sqlite_fallback(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "0",
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "postgresql://localhost/nu_arb_test",
+        }, clear=False)
+        self.env.start()
+
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "postgres-route@example.test", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "postgres-route@example.test", "password": "another-long-password",
+        })
+        me = self.client.get("/api/v1/auth/me", headers=self.headers)
+        exchanges = self.client.get("/api/v1/exchanges", headers=self.headers)
+
+        self.assertEqual([signup.status_code, login.status_code, me.status_code, exchanges.status_code],
+                         [503, 503, 503, 503])
+        for response in (signup, login, me, exchanges):
+            self.assertNotIn("postgresql://", response.text)
+            self.assertNotIn("password", response.text.lower())
         self.assertFalse(self.db_path.exists())
 
     def test_session_expiring_at_current_epoch_is_rejected(self):
@@ -253,4 +281,3 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["user"]["email"], "logincase@example.com")
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 200)
-
