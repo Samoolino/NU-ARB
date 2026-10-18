@@ -160,7 +160,7 @@ class ControlPlaneStore:
         with self.backend.transaction() as session:
             return session.fetch_all(self._sql(
                 """SELECT exchange_id,auth_mode,state,last_verified,verification_json
-                   FROM control_api_exchange_credentials WHERE user_id=?"""
+                   FROM control_api_exchange_credentials WHERE user_id=? ORDER BY exchange_id ASC"""
             ), (user_id,))
 
     def delete_credentials(self, user_id: str, exchange_id: str) -> None:
