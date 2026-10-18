@@ -25,6 +25,7 @@ class ControlPlaneStore:
             """CREATE TABLE IF NOT EXISTS control_api_users (
                 id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, salt BLOB NOT NULL,
                 password_hash BLOB NOT NULL, created_at TEXT NOT NULL)""",
+            "CREATE UNIQUE INDEX IF NOT EXISTS control_api_users_email_ci_idx ON control_api_users(lower(email))",
             """CREATE TABLE IF NOT EXISTS control_api_sessions (
                 token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL
                 REFERENCES control_api_users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL)""",
