@@ -63,3 +63,41 @@ def test_postgres_schema_uses_api_compatible_text_ids_and_binary_password_fields
     assert "salt BYTEA NOT NULL" in sql
     assert "password_hash BYTEA NOT NULL" in sql
     assert "encrypted_credentials BYTEA NOT NULL" in sql
+
+
+
+def test_postgres_control_store_contract_when_disposable_database_is_configured():
+    database_url = os.getenv("ARBX_TEST_POSTGRES_URL")
+    if not database_url:
+        pytest.skip("set ARBX_TEST_POSTGRES_URL to a disposable local PostgreSQL database")
+    from urllib.parse import urlparse
+    from arbx.postgres import run_postgres_migrations
+    from arbx.storage import PostgresBackend
+
+    host = urlparse(database_url).hostname
+    if host not in {"localhost", "127.0.0.1", "postgres"}:
+        pytest.skip("refusing to mutate a non-local database in integration tests")
+    run_postgres_migrations(database_url)
+    store = ControlPlaneStore(PostgresBackend(database_url))
+    user_id = "control-store-integration-fixture"
+    email = "control-store-integration@example.test"
+    # Use a deterministic fixture and clean it up through cascading foreign keys.
+    with store.backend.transaction() as session:
+        session.execute("DELETE FROM control_api_users WHERE id=%s", (user_id,))
+        session.execute("DELETE FROM control_api_users WHERE email=%s", (email,))
+    store.create_user(
+        user_id=user_id, email=email, salt=b"test-salt",
+        password_hash=b"test-password-hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    assert store.get_user_by_email(email)["id"] == user_id
+    store.create_session(token_hash="control-store-session-fixture", user_id=user_id, expires_at=2_000_000_000)
+    assert store.get_session("control-store-session-fixture")["user_id"] == user_id
+    store.save_credentials(
+        user_id=user_id, exchange_id="fixture", encrypted_credentials=b"ciphertext",
+        auth_mode="test", state="NOT_VERIFIED", last_verified=None, verification_json="{}",
+    )
+    assert store.get_credentials(user_id, "fixture")["encrypted_credentials"] == b"ciphertext"
+    store.delete_credentials(user_id, "fixture")
+    store.delete_session("control-store-session-fixture")
+    with store.backend.transaction() as session:
+        session.execute("DELETE FROM control_api_users WHERE id=%s", (user_id,))
