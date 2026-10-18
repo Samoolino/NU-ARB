@@ -68,26 +68,34 @@ def inspect_database(path: str | Path) -> dict[str, Any]:
         # foundation and must not be mistaken for the active route data source.
         legacy_present = set(EXPECTED_COLUMNS).intersection(tables)
         control_present = {"control_api_users", "control_api_sessions", "control_api_exchange_credentials"}.intersection(tables)
+        actual_columns: dict[str, set[str]] = {}
+        for table in EXPECTED_COLUMNS:
+            if table in tables:
+                actual_columns[table] = _columns(db, table)
+        complete_legacy = (
+            legacy_present == set(EXPECTED_COLUMNS)
+            and all(EXPECTED_COLUMNS[table].issubset(actual_columns[table]) for table in EXPECTED_COLUMNS)
+        )
         report["schema_family"] = (
-            "legacy_control_api" if legacy_present == set(EXPECTED_COLUMNS)
+            "legacy_control_api" if complete_legacy
             else "partial_legacy_control_api" if legacy_present
             else "control_api_foundation_only" if control_present
             else "unrecognized_or_empty"
         )
-        if legacy_present != set(EXPECTED_COLUMNS):
+        if not complete_legacy:
             blockers.append("active legacy control-plane schema is incomplete or absent")
         for table, required in EXPECTED_COLUMNS.items():
             if table not in tables:
                 report["tables"][table] = {"present": False, "rows": None}
                 continue
-            actual = _columns(db, table)
+            actual = actual_columns[table]
             missing = sorted(required - actual)
             count = db.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
             report["tables"][table] = {"present": True, "rows": count, "missing_columns": missing}
             if missing:
                 blockers.append(f"{table} is missing required columns")
 
-        if legacy_present == set(EXPECTED_COLUMNS):
+        if complete_legacy:
             duplicate_emails = db.execute(
                 "SELECT COUNT(*) FROM (SELECT lower(trim(email)) AS normalized "
                 "FROM users GROUP BY lower(trim(email)) HAVING COUNT(*) > 1)"
