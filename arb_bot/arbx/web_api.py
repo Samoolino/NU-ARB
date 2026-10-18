@@ -143,6 +143,14 @@ def control_api_backend_from_environment():
 
 
 def _connect():
+    # Do not silently write to SQLite when an operator has selected PostgreSQL.
+    # PostgreSQL route/schema parity is not implemented yet; fail closed instead.
+    storage_backend = os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower()
+    if storage_backend not in {"sqlite", ""}:
+        raise HTTPException(
+            status_code=503,
+            detail="Configured persistence backend is not yet supported by the Control API",
+        )
     APP_DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(APP_DB, timeout=10)
     db.row_factory = sqlite3.Row
