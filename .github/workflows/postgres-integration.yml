@@ -1,0 +1,44 @@
+name: PostgreSQL Integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - phase-a-postgres-foundation
+
+jobs:
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: nu_arb_test
+          POSTGRES_USER: nu_arb_test
+          POSTGRES_PASSWORD: nu_arb_test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nu_arb_test -d nu_arb_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest "psycopg[binary]>=3.2,<4"
+      - name: Compile Python
+        env:
+          PYTHONPATH: arb_bot
+        run: python -m compileall -q arb_bot
+      - name: Run PostgreSQL migration and integration tests
+        env:
+          PYTHONPATH: arb_bot
+          ARBX_TEST_POSTGRES_URL: postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test
+        run: python -m pytest -q tests/test_postgres_migrations.py tests/test_postgres_integration.py tests/test_plugin_contracts.py
