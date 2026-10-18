@@ -82,6 +82,14 @@ class ControlPlaneStore:
                 "SELECT user_id,expires_at FROM control_api_sessions WHERE token_hash=? AND expires_at>?"
             ), (token_hash, now_epoch))
 
+    def purge_expired_sessions(self, *, now_epoch: int) -> int:
+        """Delete sessions that are expired at or before the supplied epoch."""
+        with self.backend.transaction() as session:
+            cursor = session.execute(self._sql(
+                "DELETE FROM control_api_sessions WHERE expires_at<=?"
+            ), (now_epoch,))
+            return max(0, int(cursor.rowcount))
+
     def delete_session(self, token_hash: str) -> None:
         with self.backend.transaction() as session:
             session.execute(self._sql(
