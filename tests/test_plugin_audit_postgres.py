@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 from arbx.plugins.audit import PostgresPluginAuditWriter
 
@@ -58,7 +59,7 @@ def test_postgres_audit_writer_persists_metadata_without_raw_payload():
     assert "INSERT INTO plugin_audit_log" in sql
     assert params == (
         "docs", "lookup", "request-123", "evidence:read", "completed",
-        17, "ok", "a" * 64, "2026-10-18T10:00:00+00:00",
+        17, "ok", "a" * 64, datetime(2026, 10, 18, 10, 0, tzinfo=timezone.utc),
     )
     assert "payload" not in sql.lower() or "payload_sha256" in sql.lower()
 
