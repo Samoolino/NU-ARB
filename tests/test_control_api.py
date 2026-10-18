@@ -234,3 +234,23 @@ class ControlApiTests(unittest.TestCase):
         self.assertTrue(logout.json()["ok"])
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 401)
 
+    def test_login_is_case_insensitive_and_rejects_wrong_password(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "LoginCase@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        self.client.post("/api/v1/auth/logout", headers=self.headers)
+
+        wrong = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "LOGINCASE@example.com", "password": "incorrect-password",
+        })
+        self.assertEqual(wrong.status_code, 401)
+
+        login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "LOGINCASE@example.com", "password": "another-long-password",
+        })
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["user"]["email"], "logincase@example.com")
+        self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 200)
+
