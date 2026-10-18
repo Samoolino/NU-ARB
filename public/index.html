@@ -40,6 +40,7 @@
         <option value="kraken" selected>Kraken</option><option value="coinbaseexchange" selected>Coinbase Exchange</option><option value="bitfinex" selected>Bitfinex</option>
         <option value="bitstamp" selected>Bitstamp</option><option value="gemini" selected>Gemini</option><option value="cryptocom" selected>Crypto.com</option>
         <option value="coinex" selected>CoinEx</option><option value="bingx" selected>BingX</option><option value="whitebit" selected>WhiteBIT</option>
+        <option value="bitmart" selected>BitMart</option><option value="upbit" selected>Upbit</option>
       </select><div class="account-actions"><button class="button secondary" id="selectAllVenues" type="button">Select all</button><button class="button secondary" id="clearVenues" type="button">Clear</button></div></div>
       <div class="field amount"><label for="size">NOTIONAL · USD-EQUIVALENT</label><input id="size" type="number" min="1" max="100000" step="1" value="100" required></div>
       <div class="field small"><label for="takerFee">ASSUMED TAKER FEE · BPS / VENUE</label><input id="takerFee" type="number" min="0" max="100" step="0.1" value="10" required></div>
@@ -54,7 +55,7 @@
     <div class="fineprint"><strong>Read-only estimates.</strong><span>Snapshots use public REST depth; stable quote values are assumed to be $1. Enter your estimated taker fee and minimum net edge in BPS. Fees, actual inventory, latency, partial fills, and slippage can differ. These estimates do not place orders or assure profit. The separate engine panel preserves account-level live eligibility checks.</span></div>
     <details class="account" id="accountPanel">
       <summary>Account and exchange verification</summary>
-      <p class="account-note">Create an application account to verify exchange connections. Passwords are hashed and exchange credentials are encrypted at rest. All 18 registry venues can be selected for verification where an adapter is available. Live eligibility is separate: only Binance, Bybit, and KuCoin currently have permission probes that may satisfy the strict checks, and every account must pass fresh balance, scope, spot execution, and stream checks. A listed venue is not automatically live-enabled.</p>
+      <p class="account-note">Create an application account to verify exchange connections. Passwords are hashed and exchange credentials are encrypted at rest. All 20 registry venues can be selected for verification where an adapter is available. Live eligibility is separate: only Binance, Bybit, and KuCoin currently have permission probes that may satisfy the strict checks, and every account must pass fresh balance, scope, spot execution, and stream checks. A listed venue is not automatically live-enabled.</p>
       <div class="account-grid">
         <section class="account-box" id="authBox">
           <h3 id="authTitle">Sign in or create an account</h3>
@@ -159,8 +160,8 @@
       $("scan").textContent = "Scanning…";
       const venues = selectedValues($("venues"));
       const symbols = selectedValues($("markets"));
-      if (venues.length < 2 || venues.length > 18 || symbols.length < 1 || symbols.length > 12) {
-        $("error").textContent = "Select 2–18 venues and 1–12 spot markets.";
+      if (venues.length < 2 || venues.length > 20 || symbols.length < 1 || symbols.length > 12) {
+        $("error").textContent = "Select 2–20 venues and 1–12 spot markets.";
         $("error").classList.add("show");
         $("globalStatus").textContent = "Selection required";
         $("globalDot").className = "dot error";
