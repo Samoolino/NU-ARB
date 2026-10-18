@@ -123,6 +123,25 @@ async def validation_error_without_input(request: Request, exc: RequestValidatio
     return JSONResponse(status_code=422, content={"detail": "Invalid request. Check the required fields and try again."})
 
 
+def control_api_backend_from_environment():
+    """Resolve the configured storage backend without changing API persistence.
+
+    This factory is preparatory only: API routes still use _connect() and the
+    SQLite schema until their SQL, transaction, and schema parity is migrated.
+    """
+    from arbx.storage import PostgresBackend, SQLiteBackend
+
+    kind = os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower()
+    if kind == "sqlite":
+        return SQLiteBackend(APP_DB)
+    if kind in {"postgres", "postgresql"}:
+        url = os.getenv("ARBX_DATABASE_URL", "")
+        if not url:
+            raise ValueError("ARBX_DATABASE_URL is required for PostgreSQL storage")
+        return PostgresBackend(url)
+    raise ValueError("ARBX_STORAGE_BACKEND must be sqlite or postgres")
+
+
 def _connect():
     APP_DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(APP_DB, timeout=10)
