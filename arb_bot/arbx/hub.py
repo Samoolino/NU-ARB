@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
 from arbx.gate import ProfitGate, RiskManager
-from arbx.journal import TradeJournal
+from arbx.journal import create_trade_journal
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
 
@@ -45,7 +45,7 @@ class Hub:
     def __init__(self, cfg: Config, out: "queue.Queue | None" = None):
         self.cfg, self.out = cfg, out
         self.session_id = os.getenv("BOT_SESSION_ID") or uuid.uuid4().hex
-        self.journal_store = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
+        self.journal_store = create_trade_journal(cfg.journal_path.with_suffix(".sqlite3"))
         self.risk = RiskManager(cfg)
         self.risk.pnl = self.journal_store.realized(self.session_id)
         self.gate = ProfitGate(cfg, self.risk)
