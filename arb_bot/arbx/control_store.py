@@ -90,6 +90,14 @@ class ControlPlaneStore:
             ), (now_epoch,))
             return max(0, int(cursor.rowcount))
 
+    def revoke_user_sessions(self, user_id: str) -> int:
+        """Revoke every session for one user without affecting other accounts."""
+        with self.backend.transaction() as session:
+            cursor = session.execute(self._sql(
+                "DELETE FROM control_api_sessions WHERE user_id=?"
+            ), (user_id,))
+            return max(0, int(cursor.rowcount))
+
     def delete_session(self, token_hash: str) -> None:
         with self.backend.transaction() as session:
             session.execute(self._sql(
