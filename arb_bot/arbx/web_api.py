@@ -760,3 +760,30 @@ def engine_stop(request: Request):
         engine_phase = "STOPPING"
     engine_hub.request_stop()
     return {"status": "STOPPING"}
+
+
+@app.get("/health/live", include_in_schema=False)
+def liveness_probe():
+    """Process liveness only; intentionally does not depend on database availability."""
+    return {"status": "alive"}
+
+
+@app.get("/health/ready", include_in_schema=False)
+def readiness_probe():
+    """Control API readiness against its currently configured SQLite persistence.
+
+    The PostgreSQL storage adapter is still opt-in and is not used by this API yet,
+    so this probe must not report PostgreSQL readiness on its behalf.
+    """
+    db = None
+    try:
+        db = _connect()
+        row = db.execute("SELECT 1 AS healthy").fetchone()
+        if row is None or row["healthy"] != 1:
+            raise sqlite3.DatabaseError("health query returned an unexpected result")
+        return {"status": "ready", "storage": "sqlite"}
+    except (sqlite3.Error, OSError):
+        raise HTTPException(status_code=503, detail="Control API persistence is not ready") from None
+    finally:
+        if db is not None:
+            db.close()
