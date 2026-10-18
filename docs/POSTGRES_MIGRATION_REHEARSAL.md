@@ -32,14 +32,28 @@ python scripts/postgres_migration_rehearsal.py --database path\\to\\arbx_app.sql
 - The JSON contains only table counts, static blocker/warning messages, and review steps. It does not contain a destination URL or row-level values.
 - This command deliberately has no write mode. It does not implement or authorize a migration.
 
-## 3. Disposable target requirements
+## 3. Local target validation guard
+
+The helper `scripts/postgres_rehearsal_target.py` validates a destination URL without opening a connection. It permits only the local hosts `localhost`, `127.0.0.1`, and `postgres`, and requires the database name to contain a standalone `test`, `rehearsal`, or `disposable` marker. When a production URL is provided, matching host/port/database identity is rejected. Validation errors do not echo the URL.
+
+Example usage from Python:
+
+```python
+from scripts.postgres_rehearsal_target import validate_disposable_target
+
+validate_disposable_target(target_url, production_url=configured_production_url)
+```
+
+This helper is a guard, not a migration runner. It does not prove that a local database is disposable, and it does not connect to or modify any database. Only use a fresh, isolated test database and explicit review before any future write-capable rehearsal.
+
+## 4. Disposable target requirements
 
 - Use a new, isolated PostgreSQL database or disposable local service with no production data.
 - Set `ARBX_TEST_POSTGRES_URL` only to a local test host accepted by the integration test (`localhost`, `127.0.0.1`, or `postgres`).
 - Confirm the target is disposable and contains no valuable records before running migration integration tests; the suite applies migrations and writes fixture rows.
 - Never put database URLs, passwords, encryption keys, credential payloads, or session tokens into logs or CI output.
 
-## 4. Required migration rehearsal behavior
+## 5. Required migration rehearsal behavior
 
 The rehearsal implementation must be a separate, explicit command and default to dry-run. Before any write-capable mode exists, tests must prove:
 
@@ -54,7 +68,7 @@ The rehearsal implementation must be a separate, explicit command and default to
 9. Output is metadata-only and never serializes rows, emails, identifiers, password material, token hashes, ciphertext, or verification payloads.
 10. Rollback and restore are demonstrated from backups in a separate rehearsal before any production approval.
 
-## 5. Go/no-go gates before route cutover
+## 6. Go/no-go gates before route cutover
 
 - Reviewed mapping between the legacy `users`/`sessions`/`exchange_credentials` schema and the new `control_api_*` schema.
 - Automated source and destination parity checks, including binary credential preservation.
