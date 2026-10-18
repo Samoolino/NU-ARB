@@ -174,3 +174,24 @@ def test_purge_expired_sessions_removes_only_sessions_at_or_before_now(tmp_path)
     assert store.get_session("old-session") is None
     assert store.get_session("boundary-session") is None
     assert store.get_session("future-session")["expires_at"] == 101
+
+
+def test_revoke_all_user_sessions_does_not_affect_other_users(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "control.sqlite3"))
+    store.initialize()
+    for user_id, email in (
+        ("revoke-user", "revoke@example.test"),
+        ("keep-user", "keep@example.test"),
+    ):
+        store.create_user(
+            user_id=user_id, email=email, salt=b"salt",
+            password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+        )
+    store.create_session(token_hash="revoke-session-a", user_id="revoke-user", expires_at=200)
+    store.create_session(token_hash="revoke-session-b", user_id="revoke-user", expires_at=300)
+    store.create_session(token_hash="keep-session", user_id="keep-user", expires_at=400)
+
+    assert store.revoke_user_sessions("revoke-user") == 2
+    assert store.get_session("revoke-session-a") is None
+    assert store.get_session("revoke-session-b") is None
+    assert store.get_session("keep-session")["user_id"] == "keep-user"
