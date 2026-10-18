@@ -332,3 +332,36 @@ class ControlApiTests(unittest.TestCase):
         self.assertIn(token_hash, stored_tokens)
         self.assertNotIn(raw_token, stored_tokens)
 
+    def test_postgres_configuration_fails_closed_for_all_identity_bound_routes(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "0",
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "postgresql://localhost/nu_arb_test",
+        }, clear=False)
+        self.env.start()
+
+        requests = [
+            ("get", "/api/v1/capital-sources", None),
+            ("get", "/api/v1/engine/state", None),
+            ("get", "/api/v1/engine/journal", None),
+            ("post", "/api/v1/engine/stop", {}),
+            ("post", "/api/v1/engine/start", {
+                "mode": "paper", "exchange_ids": ["binance"], "trade_size_usd": 5,
+                "max_loss_usd": 2, "target_profit_usd": 1,
+            }),
+        ]
+        responses = [
+            getattr(self.client, method)(path, headers=self.headers, json=payload)
+            if payload is not None else getattr(self.client, method)(path, headers=self.headers)
+            for method, path, payload in requests
+        ]
+
+        self.assertEqual([response.status_code for response in responses], [503] * len(requests))
+        for response in responses:
+            self.assertNotIn("postgresql://", response.text)
+        self.assertFalse(self.db_path.exists())
+
