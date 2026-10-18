@@ -46,14 +46,37 @@ validate_disposable_target(target_url, production_url=configured_production_url)
 
 This helper is a guard, not a migration runner. It does not prove that a local database is disposable, and it does not connect to or modify any database. Only use a fresh, isolated test database and explicit review before any future write-capable rehearsal.
 
-## 4. Disposable target requirements
+## 4. Import rehearsal command
+
+The import rehearsal is a separate command. It defaults to dry-run and never opens a destination connection unless `--execute` is explicitly supplied.
+
+Dry-run example:
+
+```powershell
+python scripts/postgres_migration_import_rehearsal.py --database path\\to\\copied.sqlite3 --target-url postgresql://tester:secret@localhost:5432/nu_arb_rehearsal
+```
+
+Explicit disposable-target rehearsal (only after confirming the destination is isolated and the schema migration has been applied):
+
+```powershell
+python scripts/postgres_migration_import_rehearsal.py --database path\\to\\copied.sqlite3 --target-url postgresql://tester:secret@localhost:5432/nu_arb_rehearsal --execute
+```
+
+- The source is opened read-only; a blocked preflight stops before destination access.
+- Write mode accepts only local disposable target names and requires the three `control_api_*` tables to be empty.
+- Inserts run in a single PostgreSQL transaction; collisions and failures abort the transaction rather than merging identities.
+- Ciphertext and session hashes are copied as stored, without decrypting or re-encrypting credentials.
+- The command emits counts and status only, not row-level data or driver error messages.
+- A successful import report is not cutover approval. Review parity, restore/rollback evidence, and all release gates independently.
+
+## 5. Disposable target requirements
 
 - Use a new, isolated PostgreSQL database or disposable local service with no production data.
 - Set `ARBX_TEST_POSTGRES_URL` only to a local test host accepted by the integration test (`localhost`, `127.0.0.1`, or `postgres`).
 - Confirm the target is disposable and contains no valuable records before running migration integration tests; the suite applies migrations and writes fixture rows.
 - Never put database URLs, passwords, encryption keys, credential payloads, or session tokens into logs or CI output.
 
-## 5. Required migration rehearsal behavior
+## 6. Required migration rehearsal behavior
 
 The rehearsal implementation must be a separate, explicit command and default to dry-run. Before any write-capable mode exists, tests must prove:
 
@@ -68,7 +91,7 @@ The rehearsal implementation must be a separate, explicit command and default to
 9. Output is metadata-only and never serializes rows, emails, identifiers, password material, token hashes, ciphertext, or verification payloads.
 10. Rollback and restore are demonstrated from backups in a separate rehearsal before any production approval.
 
-## 6. Go/no-go gates before route cutover
+## 7. Go/no-go gates before route cutover
 
 - Reviewed mapping between the legacy `users`/`sessions`/`exchange_credentials` schema and the new `control_api_*` schema.
 - Automated source and destination parity checks, including binary credential preservation.
