@@ -26,7 +26,7 @@
       <div class="brand"><div class="mark">A</div><div><div class="brand-name">ARBX <span style="color:var(--muted);font-weight:450">/ MARKET SCANNER</span></div><div class="brand-sub">Cross-exchange spot intelligence</div></div></div>
       <div class="live-label"><span id="globalDot" class="dot"></span><span id="globalStatus">Waiting for first snapshot</span></div>
     </header>
-    <section class="hero"><div><h1>Market edge, measured.</h1><p>Choose from 18 public spot venues. Depth-aware estimates. No orders sent.</p></div><div class="stamp" id="updatedAt">—</div></section>
+    <section class="hero"><div><h1>Market edge, measured.</h1><p>Choose from 20 candidate public spot venues. Depth-aware estimates. No orders sent.</p></div><div class="stamp" id="updatedAt">—</div></section>
     <form class="controls" id="controls">
       <div class="field selection"><label for="markets">SPOT PAIRS · BASE/QUOTE</label><select id="markets" multiple size="6" required>
         <option value="BTC/USDT" selected>BTC / USDT</option><option value="BNB/USDT">BNB / USDT</option><option value="ETH/USDT" selected>ETH / USDT</option>
@@ -40,6 +40,7 @@
         <option value="kraken" selected>Kraken</option><option value="coinbaseexchange" selected>Coinbase Exchange</option><option value="bitfinex" selected>Bitfinex</option>
         <option value="bitstamp" selected>Bitstamp</option><option value="gemini" selected>Gemini</option><option value="cryptocom" selected>Crypto.com</option>
         <option value="coinex" selected>CoinEx</option><option value="bingx" selected>BingX</option><option value="whitebit" selected>WhiteBIT</option>
+        <option value="bitmart" selected>BitMart</option><option value="upbit" selected>Upbit</option>
       </select><div class="account-actions"><button class="button secondary" id="selectAllVenues" type="button">Select all</button><button class="button secondary" id="clearVenues" type="button">Clear</button></div></div>
       <div class="field amount"><label for="size">NOTIONAL · USD-EQUIVALENT</label><input id="size" type="number" min="1" max="100000" step="1" value="100" required></div>
       <div class="field small"><label for="takerFee">ASSUMED TAKER FEE · BPS / VENUE</label><input id="takerFee" type="number" min="0" max="100" step="0.1" value="10" required></div>
@@ -54,7 +55,7 @@
     <div class="fineprint"><strong>Read-only estimates.</strong><span>Snapshots use public REST depth; stable quote values are assumed to be $1. Enter your estimated taker fee and minimum net edge in BPS. Fees, actual inventory, latency, partial fills, and slippage can differ. These estimates do not place orders or assure profit. The separate engine panel preserves account-level live eligibility checks.</span></div>
     <details class="account" id="accountPanel">
       <summary>Account and exchange verification</summary>
-      <p class="account-note">Create an application account to verify exchange connections. Passwords are hashed and exchange credentials are encrypted at rest. All 18 registry venues can be selected for verification where an adapter is available. Live eligibility is separate: only Binance, Bybit, and KuCoin currently have permission probes that may satisfy the strict checks, and every account must pass fresh balance, scope, spot execution, and stream checks. A listed venue is not automatically live-enabled.</p>
+      <p class="account-note">Create an application account to verify exchange connections. Passwords are hashed and exchange credentials are encrypted at rest. All 20 registry venues can be selected for verification where an adapter is available. Live eligibility is separate: only Binance, Bybit, and KuCoin currently have permission probes that may satisfy the strict checks, and every account must pass fresh balance, scope, spot execution, and stream checks. A listed venue is not automatically live-enabled.</p>
       <div class="account-grid">
         <section class="account-box" id="authBox">
           <h3 id="authTitle">Sign in or create an account</h3>
@@ -85,7 +86,7 @@
           <p class="account-note">The engine streams spot markets and runs the existing paper or live strategy. Paper mode uses virtual execution. Live orders remain operator-disabled by default and require fresh account, permission, private-stream, market-data, and latency checks before activation.</p>
           <form class="account-form" id="engineForm">
             <label class="field"><span>Mode</span><select id="engineMode"><option value="paper">Paper scan</option><option value="live">Live orders</option></select></label>
-            <label class="field"><span>Exchanges (choose up to all 18 registered venues)</span><select id="engineVenue" multiple size="8" style="height:auto;min-height:160px"></select></label>
+            <label class="field"><span>Exchanges (choose up to all 20 candidate venues)</span><select id="engineVenue" multiple size="8" style="height:auto;min-height:160px"></select></label>
             <label class="field"><span>Trade size · USD (max $25)</span><input id="engineTradeSize" type="number" min="0.01" max="25" step="0.01" value="5" required></label>
             <label class="field"><span>Session loss stop · USD (max $3 pilot limit)</span><input id="engineMaxLoss" type="number" min="0.01" max="3" step="0.01" value="3" required></label>
             <label class="field"><span>Realized profit stop · USD (per ignition)</span><input id="engineTarget" type="number" min="0.01" max="1000" step="0.01" value="200" required></label>
@@ -112,7 +113,7 @@
         </section>
       </div>
     </details>
-    <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>18 configured public spot adapters · credentials remain server-side</span></footer>
+    <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>20 cataloged public spot venues · credentials remain server-side</span></footer>
   </main>
   <script type="module">
     const EXCHANGES = [{"id":"binance","name":"Binance"},{"id":"bybit","name":"Bybit"},{"id":"okx","name":"OKX"},{"id":"kucoin","name":"KuCoin"},{"id":"gateio","name":"Gate.io"},{"id":"mexc","name":"MEXC"},{"id":"htx","name":"HTX"},{"id":"lbank","name":"LBank"},{"id":"bitget","name":"Bitget"},{"id":"kraken","name":"Kraken"},{"id":"coinbaseexchange","name":"Coinbase Exchange"},{"id":"bitfinex","name":"Bitfinex"},{"id":"bitstamp","name":"Bitstamp"},{"id":"gemini","name":"Gemini"},{"id":"cryptocom","name":"Crypto.com Exchange"},{"id":"coinex","name":"CoinEx"},{"id":"bingx","name":"BingX"},{"id":"whitebit","name":"WhiteBIT"}];
@@ -159,8 +160,8 @@
       $("scan").textContent = "Scanning…";
       const venues = selectedValues($("venues"));
       const symbols = selectedValues($("markets"));
-      if (venues.length < 2 || venues.length > 18 || symbols.length < 1 || symbols.length > 12) {
-        $("error").textContent = "Select 2–18 venues and 1–12 spot markets.";
+      if (venues.length < 2 || venues.length > 20 || symbols.length < 1 || symbols.length > 12) {
+        $("error").textContent = "Select 2–20 venues and 1–12 spot markets.";
         $("error").classList.add("show");
         $("globalStatus").textContent = "Selection required";
         $("globalDot").className = "dot error";

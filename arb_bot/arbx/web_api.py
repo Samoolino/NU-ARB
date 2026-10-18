@@ -39,6 +39,7 @@ VENUES = {
     "mexc": "MEXC", "htx": "HTX", "lbank": "LBank", "bitget": "Bitget", "kraken": "Kraken",
     "coinbaseexchange": "Coinbase Exchange", "bitfinex": "Bitfinex", "bitstamp": "Bitstamp", "gemini": "Gemini",
     "cryptocom": "Crypto.com Exchange", "coinex": "CoinEx", "bingx": "BingX", "whitebit": "WhiteBIT",
+    "bitmart": "BitMart", "upbit": "Upbit",
 }
 AUTH_SCHEMAS = {venue_id: {"modes": [{"id": "ccxt", "label": "API key and secret",
                                      "fields": [{"name": "apiKey", "label": "API key"},
