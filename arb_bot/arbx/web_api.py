@@ -183,7 +183,7 @@ def _user(db: sqlite3.Connection, token: str | None):
         raise HTTPException(401, "Sign in required")
     digest = hashlib.sha256(token.encode()).hexdigest()
     row = db.execute("SELECT user_id, expires_at FROM sessions WHERE token_hash=?", (digest,)).fetchone()
-    if not row or row["expires_at"] < int(time.time()):
+    if not row or row["expires_at"] <= int(time.time()):
         if row:
             db.execute("DELETE FROM sessions WHERE token_hash=?", (digest,)); db.commit()
         raise HTTPException(401, "Session expired; sign in again")
