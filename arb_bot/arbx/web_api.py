@@ -142,16 +142,28 @@ def control_api_backend_from_environment():
     raise ValueError("ARBX_STORAGE_BACKEND must be sqlite or postgres")
 
 
-def control_plane_store_from_environment():
+def control_plane_store_from_environment(*, backend=None):
     """Build the shared identity/session/credential store without implicit schema changes.
 
-    SQLite schema initialization is an explicit caller action. PostgreSQL schema
-    remains migration-runner-only. This factory is not yet used by API routes;
-    the legacy route adapter stays fail-closed for PostgreSQL until parity tests
-    cover every route that shares identity, session, and credential state.
+    Tests and future application wiring may inject a backend explicitly. If omitted,
+    the configured environment backend is resolved. SQLite schema initialization
+    remains an explicit caller action and PostgreSQL schema remains migration-runner-
+    only. This dependency is preparatory: public routes still use _connect() and
+    PostgreSQL remains fail-closed until identity, credential, and engine-ownership
+    route parity is migrated and tested together.
     """
     from arbx.control_store import ControlPlaneStore
-    return ControlPlaneStore(control_api_backend_from_environment())
+    return ControlPlaneStore(backend if backend is not None else control_api_backend_from_environment())
+
+
+def get_control_plane_store():
+    """FastAPI dependency seam for the future coordinated route cutover.
+
+    Routes should depend on this function rather than constructing stores directly,
+    allowing tests to inject a disposable backend with app.dependency_overrides.
+    It intentionally does not initialize schemas or change current route behavior.
+    """
+    return control_plane_store_from_environment()
 
 
 def _connect():
