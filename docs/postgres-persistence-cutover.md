@@ -6,12 +6,13 @@ Scope: Control API identity, sessions, and encrypted exchange-credential metadat
 
 ## Current verified state
 
-- The latest verified HEAD `2663a00ab8210c41d477166d7d209bbf66899852` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39118155253) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39118155203). These validate the preparatory store factory and fail-closed behavior; they do not demonstrate PostgreSQL-backed public routes.
+- The latest verified HEAD `26db7ca96a3b7706d7078efa9d4b85d796029c09` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39119797321) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39119797256) (a duplicate PostgreSQL run also passed: [run](https://github.com/Samoolino/NU-ARB/actions/runs/39119793708)). These validate the preparatory store factory, fail-closed behavior, session-token hashing, and user-scoped credential listing; they do not demonstrate PostgreSQL-backed public routes.
 - `ControlPlaneStore` and PostgreSQL schema migrations exist.
 - Atomic account-plus-initial-session persistence is implemented in `ControlPlaneStore.create_user_with_session(...)`; tests cover successful creation and rollback when session insertion fails.
 - FastAPI routes in `arb_bot/arbx/web_api.py` still use the legacy SQLite schema through `_connect()`.
 - Selecting `ARBX_STORAGE_BACKEND=postgres` intentionally returns HTTP 503 for route requests; do not remove this guard until route parity is tested.
 - The fail-closed regression test proves that the current unwired routes return sanitized HTTP 503 for configured PostgreSQL without creating a SQLite fallback database.
+- Store-level credential-listing tests prove ciphertext is omitted from listing responses, metadata upserts replace prior values, and each user's listing is isolated from other users.
 - The passing workflows validate the committed foundation and regression tests; they do **not** prove the public API routes are PostgreSQL-backed.
 - No production migration, deployment, credential import, or live execution is authorized by this plan.
 
@@ -75,7 +76,7 @@ The fail-closed guard stays enabled if any gate is incomplete or any test is ski
 
 - [ ] API/store integration tests written first and demonstrated to fail against the current unwired routes.
 - [x] Atomic store-level account/session transaction and rollback tests implemented.
-- [x] Foundation and fail-closed safety CI workflows passed for HEAD `2663a00ab8210c41d477166d7d209bbf66899852`.
+- [x] Foundation and fail-closed safety CI workflows passed for HEAD `26db7ca96a3b7706d7078efa9d4b85d796029c09`.
 - [ ] Route adapter implemented with transaction and error parity.
 - [ ] SQLite and disposable PostgreSQL contract suites pass.
 - [ ] No route-level legacy persistence paths remain for the migrated entities.
