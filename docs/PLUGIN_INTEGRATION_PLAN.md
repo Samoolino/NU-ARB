@@ -33,6 +33,7 @@ Integrate external research, repository, security, and deployment tools as optio
 
 ### 4. Engineering, deployment, and durable work
 - GitHub + agent-skills: issue/PR workflows, test-first changes, code review, security review, and evidence-linked approvals.
+- SQL Expert: schema/query review, migration and data-quality analysis, and performance recommendations; generated SQL must be reviewed and tested against the repository's supported PostgreSQL version before use.
 - Vercel: preview/deployment status and health checks; no production promotion until required gates pass.
 - Cerebrium: optional isolated compute for non-sensitive batch research only after data residency, secrets, and egress controls are reviewed.
 - ZzzOps: durable implementation goals and dependency tracking, with each goal linked to an issue/PR and verification evidence.
@@ -58,7 +59,7 @@ Integrate external research, repository, security, and deployment tools as optio
 
 ## Plugin inventory and status
 
-The names below are proposed integration candidates, not assertions that a working connection or permission already exists: GitHub, agent-skills, AlgoVault, Binance, Blockscout, Bybit, Cerebrium, CoinGecko, cryptography-research-skills, ethskills, Etherscan, FiraQuantumSafe, Gate Info, Proxyman, TokenOS dApp Builder, TradingCursor, TraderSpy, Vercel, and ZzzOps.
+The names below are proposed integration candidates, not assertions that a working connection or permission already exists: GitHub, agent-skills, AlgoVault, Binance, Blockscout, Bybit, Cerebrium, CoinGecko, cryptography-research-skills, ethskills, Etherscan, FiraQuantumSafe, Gate Info, Proxyman, SQL Expert, TokenOS dApp Builder, TradingCursor, TraderSpy, Vercel, and ZzzOps.
 
 Each provider needs an owner, documented purpose, permissions inventory, data-retention decision, test doubles, failure-mode tests, and an explicit enablement decision before implementation.
 
@@ -114,7 +115,7 @@ This is the execution order for follow-up PRs. Keep each phase independently rev
 
 ### Phase F — engineering, compute, and delivery workflows
 **Provider candidates**
-- GitHub and agent-skills; Vercel; Cerebrium; ZzzOps.
+- GitHub and agent-skills; SQL Expert for reviewed schema/query analysis; Vercel; Cerebrium; ZzzOps.
 **Deliverables**
 - GitHub issue/PR automation tied to explicit allowlisted repositories and branches; test-first changes, review summaries, and evidence links.
 - Vercel preview/health-status checks; production promotion remains a separate, human-approved action.
@@ -152,6 +153,7 @@ This is the execution order for follow-up PRs. Keep each phase independently rev
 | FiraQuantumSafe | Supported TLS posture checks | Claiming unsupported checks passed |
 | Gate Info | Public market data | Trading/withdrawals |
 | Proxyman | Sanitized network diagnostics | Capturing or exporting raw secrets |
+| SQL Expert | Reviewed schema, query, migration, and data-quality analysis | Unreviewed production DDL/DML, destructive changes, or direct production database access by default |
 | TokenOS dApp Builder | Design-time dApp/integration artifacts | Automatic deployment or signing |
 | TradingCursor | Research signals and reports | Direct order invocation |
 | TraderSpy | Research signals and reports | Direct order invocation |
