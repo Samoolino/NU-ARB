@@ -77,7 +77,7 @@ class ControlPlaneStore:
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         with self.backend.transaction() as session:
             return session.fetch_one(self._sql(
-                "SELECT id,email,salt,password_hash,created_at FROM control_api_users WHERE email=?"
+                "SELECT id,email,salt,password_hash,created_at FROM control_api_users WHERE lower(email)=lower(?)"
             ), (email.lower(),))
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
