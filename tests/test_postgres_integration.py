@@ -22,7 +22,7 @@ def test_migrations_are_idempotent(database_url):
     assert run_postgres_migrations(database_url) == []
     with psycopg.connect(database_url) as conn:
         versions = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-    assert versions == [("001",)]
+    assert versions == [("001",), ("002",)]
 
 
 def test_foreign_key_and_unique_constraints_are_enforced(database_url):
