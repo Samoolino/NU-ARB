@@ -101,3 +101,44 @@ def test_postgres_control_store_contract_when_disposable_database_is_configured(
     store.delete_session("control-store-session-fixture")
     with store.backend.transaction() as session:
         session.execute("DELETE FROM control_api_users WHERE id=%s", (user_id,))
+
+
+
+def test_store_rolls_back_duplicate_email_without_creating_second_user(tmp_path):
+    backend = SQLiteBackend(tmp_path / "control.sqlite3")
+    store = ControlPlaneStore(backend)
+    store.initialize()
+    store.create_user(
+        user_id="first-user", email="same@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    with pytest.raises(Exception):
+        store.create_user(
+            user_id="second-user", email="SAME@example.test", salt=b"salt2",
+            password_hash=b"hash2", created_at="2026-01-02T00:00:00+00:00",
+        )
+
+    assert store.get_user("second-user") is None
+    assert store.get_user_by_email("same@example.test")["id"] == "first-user"
+
+
+def test_deleting_user_cascades_sessions_and_credentials(tmp_path):
+    backend = SQLiteBackend(tmp_path / "control.sqlite3")
+    store = ControlPlaneStore(backend)
+    store.initialize()
+    store.create_user(
+        user_id="cascade-user", email="cascade@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.create_session(token_hash="cascade-session", user_id="cascade-user", expires_at=2_000_000_000)
+    store.save_credentials(
+        user_id="cascade-user", exchange_id="fixture", encrypted_credentials=b"ciphertext",
+        auth_mode="test", state="NOT_VERIFIED", last_verified=None, verification_json="{}",
+    )
+
+    with backend.transaction() as session:
+        session.execute("DELETE FROM control_api_users WHERE id=?", ("cascade-user",))
+
+    assert store.get_session("cascade-session") is None
+    assert store.get_credentials("cascade-user", "fixture") is None
