@@ -311,3 +311,23 @@ class ControlApiTests(unittest.TestCase):
                 web_api.control_plane_store_from_environment()
         self.assertFalse(self.db_path.exists())
 
+    def test_signup_persists_only_hashed_session_token(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "session-hash@example.test", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        raw_token = self.client.cookies.get(web_api.SESSION_COOKIE)
+        self.assertTrue(raw_token)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        db = web_api._connect()
+        try:
+            rows = db.execute("SELECT token_hash FROM sessions").fetchall()
+        finally:
+            db.close()
+
+        stored_tokens = [row["token_hash"] for row in rows]
+        self.assertIn(token_hash, stored_tokens)
+        self.assertNotIn(raw_token, stored_tokens)
+
