@@ -6,7 +6,7 @@ Scope: Control API identity, sessions, and encrypted exchange-credential metadat
 
 ## Current verified state
 
-- The latest verified code HEAD `1b5ddc8acf77e416be415206e7fa5487843cf2c0` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39122255073) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39122254907). These validate the injectable dependency seam and preparatory store/fail-closed tests, including regression coverage that public user lookup omits password material and missing-user lookup returns `None`; they do not demonstrate PostgreSQL-backed public routes.
+- The latest verified code HEAD `cd1ecd9f877895700b50b715bfc22cd0879bdef9` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39122717168) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39122716854). A duplicate PostgreSQL run also passed: [run 39122710054](https://github.com/Samoolino/NU-ARB/actions/runs/39122710054). The preceding test commit `87bad5814a1f77378dd07a7b1cffca9210b1f7dc` had a PostgreSQL integration failure because a case-insensitive lookup test assumed a mixed-case legacy record would be found by an exact-match query; `cd1ecd9` corrected the query to compare `lower(email)` and all checks above passed. These validate the injectable dependency seam and preparatory store/fail-closed tests, including regression coverage that public user lookup omits password material and missing-user lookup returns `None`; they do not demonstrate PostgreSQL-backed public routes.
 - `ControlPlaneStore` and PostgreSQL schema migrations exist.
 - Atomic account-plus-initial-session persistence is implemented in `ControlPlaneStore.create_user_with_session(...)`; tests cover successful creation and rollback when session insertion fails.
 - FastAPI routes in `arb_bot/arbx/web_api.py` still use the legacy SQLite schema through `_connect()`.
@@ -84,7 +84,7 @@ The fail-closed guard stays enabled if any gate is incomplete or any test is ski
 - [ ] API/store integration tests written first and demonstrated to fail against the current unwired routes.
 - [x] Injectable `control_plane_store_from_environment(backend=...)` seam and `get_control_plane_store()` FastAPI dependency entry point added; injection does not initialize schema implicitly.
 - [x] Atomic store-level account/session transaction and rollback tests implemented.
-- [x] Foundation and fail-closed safety CI workflows passed for HEAD `1b5ddc8acf77e416be415206e7fa5487843cf2c0`.
+- [x] Foundation and fail-closed safety CI workflows passed for HEAD `cd1ecd9f877895700b50b715bfc22cd0879bdef9`.
 - [ ] Route adapter implemented with transaction and error parity.
 - [ ] SQLite and disposable PostgreSQL contract suites pass.
 - [ ] No route-level legacy persistence paths remain for the migrated entities.
