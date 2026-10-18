@@ -63,14 +63,24 @@ def test_transaction_rollback_leaves_no_partial_row(database_url):
 
 
 def test_concurrent_unique_insert_has_one_winner(database_url):
+    from concurrent.futures import ThreadPoolExecutor
+
     email = "concurrency@example.invalid"
     with psycopg.connect(database_url) as conn:
         conn.execute("DELETE FROM users WHERE email = %s", (email,))
-    with psycopg.connect(database_url) as first, psycopg.connect(database_url) as second:
-        first.execute("INSERT INTO users (email, password_hash) VALUES (%s, %s)", (email, "first"))
-        with pytest.raises(psycopg.errors.UniqueViolation):
-            with second.transaction():
-                second.execute("INSERT INTO users (email, password_hash) VALUES (%s, %s)", (email, "second"))
+
+    def insert_if_absent(label):
+        with psycopg.connect(database_url) as conn:
+            result = conn.execute(
+                """INSERT INTO users (email, password_hash) VALUES (%s, %s)
+                   ON CONFLICT (email) DO NOTHING""",
+                (email, label),
+            )
+            return result.rowcount
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(insert_if_absent, ("first", "second")))
+    assert sum(outcomes) == 1
     with psycopg.connect(database_url) as conn:
         count = conn.execute("SELECT count(*) FROM users WHERE email = %s", (email,)).fetchone()[0]
     assert count == 1
