@@ -167,6 +167,27 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
 
+    def test_control_plane_store_factory_accepts_injected_backend_without_schema_side_effects(self):
+        from arbx.control_store import ControlPlaneStore
+        from arbx.storage import SQLiteBackend
+
+        injected_path = self.db_path.with_name("injected-control-store.sqlite3")
+        backend = SQLiteBackend(injected_path)
+        store = web_api.control_plane_store_from_environment(backend=backend)
+
+        self.assertIsInstance(store, ControlPlaneStore)
+        self.assertIs(store.backend, backend)
+        self.assertFalse(injected_path.exists())
+
+    def test_fastapi_control_plane_dependency_delegates_to_configured_factory(self):
+        from arbx.control_store import ControlPlaneStore
+
+        with patch.object(web_api, "control_plane_store_from_environment") as factory:
+            expected = object()
+            factory.return_value = expected
+            self.assertIs(web_api.get_control_plane_store(), expected)
+            factory.assert_called_once_with()
+
     def test_control_plane_store_factory_is_explicit_and_does_not_initialize_sqlite_schema(self):
         from arbx.control_store import ControlPlaneStore
 
