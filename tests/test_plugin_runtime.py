@@ -52,3 +52,13 @@ async def test_provider_exception_is_sanitized_and_audited():
     result = await runner.invoke(FakeProvider(failure=RuntimeError("private details")), request())
     assert result.status is EvidenceStatus.ERROR and result.error_code == "RuntimeError"
     assert "private details" not in repr(audit)
+
+
+@pytest.mark.asyncio
+async def test_audit_storage_failure_blocks_returning_evidence():
+    async def broken_writer(record):
+        raise OSError("audit database unavailable")
+
+    runner = PluginRunner((PluginPermission("fixture", frozenset({"lookup"})),), broken_writer)
+    with pytest.raises(Exception, match="audit"):
+        await runner.invoke(FakeProvider(), request())
