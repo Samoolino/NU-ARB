@@ -149,7 +149,7 @@ def main() -> None:
     report = build_empty_report()
     if args.public_network:
         asyncio.run(probe_public_connectivity(report, timeout_seconds=args.timeout))
-    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(report["summary"], sort_keys=True))
 
 
