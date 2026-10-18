@@ -183,3 +183,24 @@ class ControlApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertFalse(self.db_path.exists())
+
+    def test_session_expiring_at_current_epoch_is_rejected(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "boundary@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        token = self.client.cookies.get(web_api.SESSION_COOKIE)
+        self.assertTrue(token)
+        digest = web_api.hashlib.sha256(token.encode()).hexdigest()
+        db = web_api._connect()
+        try:
+            db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (int(web_api.time.time()), digest))
+            db.commit()
+        finally:
+            db.close()
+
+        response = self.client.get("/api/v1/auth/me", headers=self.headers)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("expired", response.json()["detail"].lower())
