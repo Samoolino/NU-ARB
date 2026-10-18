@@ -6,7 +6,7 @@ Scope: Control API identity, sessions, and encrypted exchange-credential metadat
 
 ## Current verified state
 
-- The latest safety-test commit `9ac2555893a136ec80e2249fc1a892e1303e67ee` passed both [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39117884138) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39117884144).
+- The latest verified HEAD `2663a00ab8210c41d477166d7d209bbf66899852` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39118155253) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39118155203). These validate the preparatory store factory and fail-closed behavior; they do not demonstrate PostgreSQL-backed public routes.
 - `ControlPlaneStore` and PostgreSQL schema migrations exist.
 - Atomic account-plus-initial-session persistence is implemented in `ControlPlaneStore.create_user_with_session(...)`; tests cover successful creation and rollback when session insertion fails.
 - FastAPI routes in `arb_bot/arbx/web_api.py` still use the legacy SQLite schema through `_connect()`.
@@ -75,7 +75,7 @@ The fail-closed guard stays enabled if any gate is incomplete or any test is ski
 
 - [ ] API/store integration tests written first and demonstrated to fail against the current unwired routes.
 - [x] Atomic store-level account/session transaction and rollback tests implemented.
-- [x] Foundation and fail-closed safety CI workflows passed for commit `9ac2555893a136ec80e2249fc1a892e1303e67ee`.
+- [x] Foundation and fail-closed safety CI workflows passed for HEAD `2663a00ab8210c41d477166d7d209bbf66899852`.
 - [ ] Route adapter implemented with transaction and error parity.
 - [ ] SQLite and disposable PostgreSQL contract suites pass.
 - [ ] No route-level legacy persistence paths remain for the migrated entities.
