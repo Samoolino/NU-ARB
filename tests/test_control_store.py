@@ -195,3 +195,63 @@ def test_revoke_all_user_sessions_does_not_affect_other_users(tmp_path):
     assert store.get_session("revoke-session-a") is None
     assert store.get_session("revoke-session-b") is None
     assert store.get_session("keep-session")["user_id"] == "keep-user"
+
+
+
+def test_session_expiry_and_revocation_are_user_scoped(tmp_path):
+    backend = SQLiteBackend(tmp_path / "session-lifecycle.sqlite3")
+    store = ControlPlaneStore(backend)
+    store.initialize()
+    for user_id, email in (
+        ("user-one", "one@example.test"),
+        ("user-two", "two@example.test"),
+    ):
+        store.create_user(
+            user_id=user_id,
+            email=email,
+            salt=b"salt",
+            password_hash=b"hash",
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+    store.create_session(token_hash="one-valid", user_id="user-one", expires_at=200)
+    store.create_session(token_hash="one-expired", user_id="user-one", expires_at=100)
+    store.create_session(token_hash="two-valid", user_id="user-two", expires_at=300)
+
+    assert store.get_valid_session("one-valid", now_epoch=199)["user_id"] == "user-one"
+    assert store.get_valid_session("one-valid", now_epoch=200) is None
+    assert store.get_valid_session("one-expired", now_epoch=100) is None
+    assert store.purge_expired_sessions(now_epoch=100) == 1
+    assert store.revoke_user_sessions("user-one") == 1
+    assert store.get_session("one-valid") is None
+    assert store.get_session("two-valid")["user_id"] == "user-two"
+
+
+def test_credentials_are_isolated_between_users_and_deletion_is_scoped(tmp_path):
+    backend = SQLiteBackend(tmp_path / "credential-isolation.sqlite3")
+    store = ControlPlaneStore(backend)
+    store.initialize()
+    for user_id, email in (
+        ("user-one", "one@example.test"),
+        ("user-two", "two@example.test"),
+    ):
+        store.create_user(
+            user_id=user_id,
+            email=email,
+            salt=b"salt",
+            password_hash=b"hash",
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+    store.save_credentials(
+        user_id="user-one", exchange_id="binance", encrypted_credentials=b"cipher-one",
+        auth_mode="hmac", state="VERIFIED", last_verified=None, verification_json="{}",
+    )
+    store.save_credentials(
+        user_id="user-two", exchange_id="binance", encrypted_credentials=b"cipher-two",
+        auth_mode="hmac", state="VERIFIED", last_verified=None, verification_json="{}",
+    )
+
+    assert store.get_credentials("user-one", "binance")["encrypted_credentials"] == b"cipher-one"
+    assert store.get_credentials("user-two", "binance")["encrypted_credentials"] == b"cipher-two"
+    store.delete_credentials("user-one", "binance")
+    assert store.get_credentials("user-one", "binance") is None
+    assert store.get_credentials("user-two", "binance")["encrypted_credentials"] == b"cipher-two"
