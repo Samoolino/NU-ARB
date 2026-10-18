@@ -465,10 +465,9 @@ def healthz():
         raise HTTPException(503, "Control service configuration is incomplete")
     db = _connect()
     try:
-        db.execute("CREATE TABLE IF NOT EXISTS service_health_probe (ok INTEGER NOT NULL)")
-        db.execute("INSERT INTO service_health_probe(ok) VALUES(1)")
-        db.execute("DELETE FROM service_health_probe")
-        db.commit()
+        # Health checks must be read-only: orchestrators may call this endpoint
+        # frequently, and probes must not create tables or write rows.
+        db.execute("SELECT 1").fetchone()
     finally:
         db.close()
     return {"status": "ready"}
