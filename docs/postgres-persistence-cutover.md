@@ -6,7 +6,7 @@ Scope: Control API identity, sessions, and encrypted exchange-credential metadat
 
 ## Current verified state
 
-- The latest verified HEAD `26db7ca96a3b7706d7078efa9d4b85d796029c09` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39119797321) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39119797256) (a duplicate PostgreSQL run also passed: [run](https://github.com/Samoolino/NU-ARB/actions/runs/39119793708)). These validate the preparatory store factory, fail-closed behavior, session-token hashing, and user-scoped credential listing; they do not demonstrate PostgreSQL-backed public routes.
+- The latest verified HEAD `b4c6410275c52ef07ace234d3862f4203d7a5ddf` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39120224343) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39120224341) (a duplicate PostgreSQL run also passed: [run](https://github.com/Samoolino/NU-ARB/actions/runs/39120220398)). These validate the preparatory store factory, fail-closed behavior across identity-bound engine routes, session-token hashing, and user-scoped credential listing; they do not demonstrate PostgreSQL-backed public routes.
 - `ControlPlaneStore` and PostgreSQL schema migrations exist.
 - Atomic account-plus-initial-session persistence is implemented in `ControlPlaneStore.create_user_with_session(...)`; tests cover successful creation and rollback when session insertion fails.
 - FastAPI routes in `arb_bot/arbx/web_api.py` still use the legacy SQLite schema through `_connect()`.
@@ -34,6 +34,13 @@ Required before route cutover. Add integration tests against public FastAPI endp
 Use a disposable local PostgreSQL service in CI only. Tests must refuse non-local or production-looking database hosts and use unique fixture IDs with cleanup. Add failure-path and transaction rollback tests, not only happy paths.
 
 ### Gate 2 — route/store adapter
+
+Implementation order (keep the fail-closed guard until every step is complete):
+1. Introduce a request-scoped control-plane persistence dependency and allow tests to inject a backend/store without mutating module globals.
+2. Migrate signup and login together so the account and first session are created atomically; preserve PBKDF2 settings, cookie attributes, response bodies, and 409/401 behavior.
+3. Migrate session lookup, expiry cleanup, `/auth/me`, and logout to the same store; verify engine ownership checks use that same session identity.
+4. Migrate exchange credential reads/writes/deletes through the store, retaining encryption at the API boundary and returning metadata-only listings.
+5. Migrate engine state, journal, capital-source, start, and stop identity/ownership reads as one coordinated set. Do not enable PostgreSQL until these routes no longer use the legacy `_connect()` tables.
 
 - Inject `ControlPlaneStore` through one explicit factory/dependency rather than branching SQL in every route.
 - Make the adapter own identity/session/credential persistence. Avoid changing market/exchange verification behavior in the same patch.
@@ -76,7 +83,7 @@ The fail-closed guard stays enabled if any gate is incomplete or any test is ski
 
 - [ ] API/store integration tests written first and demonstrated to fail against the current unwired routes.
 - [x] Atomic store-level account/session transaction and rollback tests implemented.
-- [x] Foundation and fail-closed safety CI workflows passed for HEAD `26db7ca96a3b7706d7078efa9d4b85d796029c09`.
+- [x] Foundation and fail-closed safety CI workflows passed for HEAD `b4c6410275c52ef07ace234d3862f4203d7a5ddf`.
 - [ ] Route adapter implemented with transaction and error parity.
 - [ ] SQLite and disposable PostgreSQL contract suites pass.
 - [ ] No route-level legacy persistence paths remain for the migrated entities.
