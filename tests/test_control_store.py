@@ -375,3 +375,27 @@ def test_credential_listing_is_sorted_stably_by_exchange_id(tmp_path):
         "binance", "coinbase", "kraken",
     ]
 
+def test_public_user_lookup_never_returns_password_material(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "user-safe-lookup.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="safe-user", email="safe@example.test", salt=b"fixture-salt",
+        password_hash=b"fixture-password-hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    public_user = store.get_user("safe-user")
+    assert public_user == {
+        "id": "safe-user",
+        "email": "safe@example.test",
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+    assert "salt" not in public_user
+    assert "password_hash" not in public_user
+
+
+def test_missing_user_lookup_returns_none_without_disclosing_records(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "missing-user-safe-lookup.sqlite3"))
+    store.initialize()
+
+    assert store.get_user("does-not-exist") is None
+
