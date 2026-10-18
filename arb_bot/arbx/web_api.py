@@ -503,7 +503,7 @@ def signup(payload: Signup, response: Response):
 def login(payload: Login, response: Response):
     db = _connect()
     try:
-        row = db.execute("SELECT id,email,salt,password_hash FROM users WHERE email=?", (payload.email.lower(),)).fetchone()
+        row = db.execute("SELECT id,email,salt,password_hash FROM users WHERE lower(email)=lower(?)", (payload.email,)).fetchone()
         supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
         if not row or not hmac.compare_digest(supplied, row["password_hash"]):
             raise HTTPException(401, "Email or password is incorrect")
