@@ -142,6 +142,18 @@ def control_api_backend_from_environment():
     raise ValueError("ARBX_STORAGE_BACKEND must be sqlite or postgres")
 
 
+def control_plane_store_from_environment():
+    """Build the shared identity/session/credential store without implicit schema changes.
+
+    SQLite schema initialization is an explicit caller action. PostgreSQL schema
+    remains migration-runner-only. This factory is not yet used by API routes;
+    the legacy route adapter stays fail-closed for PostgreSQL until parity tests
+    cover every route that shares identity, session, and credential state.
+    """
+    from arbx.control_store import ControlPlaneStore
+    return ControlPlaneStore(control_api_backend_from_environment())
+
+
 def _connect():
     # Do not silently write to SQLite when an operator has selected PostgreSQL.
     # PostgreSQL route/schema parity is not implemented yet; fail closed instead.
