@@ -47,6 +47,44 @@ def test_sqlite_control_store_signup_login_session_and_credentials(tmp_path):
     assert store.get_credentials("user-fixture", "binance") is None
 
 
+def test_account_and_initial_session_are_created_atomically(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "atomic-control.sqlite3"))
+    store.initialize()
+
+    user = store.create_user_with_session(
+        user_id="atomic-user", email="Atomic@Example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+        token_hash="atomic-session-digest", expires_at=2_000_000_000,
+    )
+
+    assert user["email"] == "atomic@example.test"
+    assert store.get_session("atomic-session-digest") == {
+        "user_id": "atomic-user", "expires_at": 2_000_000_000,
+    }
+
+
+def test_account_creation_rolls_back_if_initial_session_insert_fails(tmp_path):
+    import sqlite3
+
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "atomic-rollback.sqlite3"))
+    store.initialize()
+    store.create_user_with_session(
+        user_id="existing-user", email="existing@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+        token_hash="already-used-digest", expires_at=2_000_000_000,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_user_with_session(
+            user_id="must-rollback", email="rollback@example.test", salt=b"salt",
+            password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+            token_hash="already-used-digest", expires_at=2_000_000_000,
+        )
+
+    assert store.get_user_by_email("rollback@example.test") is None
+    assert store.get_session("already-used-digest")["user_id"] == "existing-user"
+
+
 def test_store_requires_backend_schema_initialization(tmp_path):
     store = ControlPlaneStore(SQLiteBackend(tmp_path / "control.sqlite3"))
     with pytest.raises(Exception):
