@@ -75,6 +75,13 @@ class ControlPlaneStore:
                 "SELECT user_id,expires_at FROM control_api_sessions WHERE token_hash=?"
             ), (token_hash,))
 
+    def get_valid_session(self, token_hash: str, *, now_epoch: int) -> dict[str, Any] | None:
+        """Return a session only while its expiry is strictly in the future."""
+        with self.backend.transaction() as session:
+            return session.fetch_one(self._sql(
+                "SELECT user_id,expires_at FROM control_api_sessions WHERE token_hash=? AND expires_at>?"
+            ), (token_hash, now_epoch))
+
     def delete_session(self, token_hash: str) -> None:
         with self.backend.transaction() as session:
             session.execute(self._sql(
