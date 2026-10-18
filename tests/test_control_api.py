@@ -77,6 +77,14 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).json()["user"]["email"], "person@example.com")
         self.assertEqual(self.client.get("/healthz").status_code, 200)
+        db = web_api._connect()
+        try:
+            probe_table = db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='service_health_probe'"
+            ).fetchone()
+            self.assertIsNone(probe_table)
+        finally:
+            db.close()
 
     def test_login_matches_email_case_insensitively(self):
         signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
