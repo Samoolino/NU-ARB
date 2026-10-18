@@ -22,14 +22,18 @@ def test_database_url_accepts_postgres_schemes():
     assert _database_url("postgres://user:pass@localhost/db").startswith("postgres://")
 
 
-def test_migration_inventory_is_sorted_and_has_initial_schema():
+def test_migration_inventory_is_sorted_and_includes_audit_schema():
     files = _migration_files()
     assert files == sorted(files)
-    assert [p.name for p in files] == ["001_initial_schema.sql"]
+    assert [p.name for p in files] == ["001_initial_schema.sql", "002_plugin_audit.sql"]
     sql = files[0].read_text(encoding="utf-8")
     assert "provider_evidence" in sql
     assert "encrypted_payload BYTEA NOT NULL" in sql
     assert "live_eligible BOOLEAN NOT NULL DEFAULT FALSE" in sql
+    audit_sql = files[1].read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS plugin_audit_log" in audit_sql
+    assert "payload_sha256" in audit_sql
+    assert "payload JSON" not in audit_sql
 
 
 def test_migration_inventory_rejects_duplicate_versions(tmp_path: Path):
