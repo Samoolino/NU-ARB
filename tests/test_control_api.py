@@ -78,6 +78,19 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).json()["user"]["email"], "person@example.com")
         self.assertEqual(self.client.get("/healthz").status_code, 200)
 
+    def test_login_matches_email_case_insensitively(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "CaseSensitive@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        self.client.post("/api/v1/auth/logout", headers=self.headers)
+        login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "CASESENSITIVE@EXAMPLE.COM", "password": "another-long-password",
+        })
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["user"]["email"], "casesensitive@example.com")
+
     def test_live_engine_is_operator_disabled_by_default(self):
         response = self.client.post("/api/v1/engine/start", headers=self.headers, json={
             "mode": "live", "exchange_ids": ["binance", "bybit"], "trade_size_usd": 5,
