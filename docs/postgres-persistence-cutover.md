@@ -6,7 +6,7 @@ Scope: Control API identity, sessions, and encrypted exchange-credential metadat
 
 ## Current verified state
 
-- The latest verified HEAD `b4c6410275c52ef07ace234d3862f4203d7a5ddf` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39120224343) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39120224341) (a duplicate PostgreSQL run also passed: [run](https://github.com/Samoolino/NU-ARB/actions/runs/39120220398)). These validate the preparatory store factory, fail-closed behavior across identity-bound engine routes, session-token hashing, and user-scoped credential listing; they do not demonstrate PostgreSQL-backed public routes.
+- The latest verified code HEAD `a11a0a88530a5419c9b070f82cd1c19d4a3881fc` passed [Hybrid Core Tests](https://github.com/Samoolino/NU-ARB/actions/runs/39120489898) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39120489992). These validate the injectable dependency seam and preparatory store/fail-closed tests; they do not demonstrate PostgreSQL-backed public routes.
 - `ControlPlaneStore` and PostgreSQL schema migrations exist.
 - Atomic account-plus-initial-session persistence is implemented in `ControlPlaneStore.create_user_with_session(...)`; tests cover successful creation and rollback when session insertion fails.
 - FastAPI routes in `arb_bot/arbx/web_api.py` still use the legacy SQLite schema through `_connect()`.
@@ -82,6 +82,7 @@ The fail-closed guard stays enabled if any gate is incomplete or any test is ski
 ## Completion checklist
 
 - [ ] API/store integration tests written first and demonstrated to fail against the current unwired routes.
+- [x] Injectable `control_plane_store_from_environment(backend=...)` seam and `get_control_plane_store()` FastAPI dependency entry point added; injection does not initialize schema implicitly.
 - [x] Atomic store-level account/session transaction and rollback tests implemented.
 - [x] Foundation and fail-closed safety CI workflows passed for HEAD `b4c6410275c52ef07ace234d3862f4203d7a5ddf`.
 - [ ] Route adapter implemented with transaction and error parity.
