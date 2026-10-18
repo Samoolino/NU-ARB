@@ -204,3 +204,33 @@ class ControlApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertIn("expired", response.json()["detail"].lower())
+
+    def test_signup_rejects_case_insensitive_duplicate_email(self):
+        first = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "Duplicate@Example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "duplicate@example.COM", "password": "different-long-password",
+            "password_confirmation": "different-long-password",
+        })
+
+        self.assertEqual(second.status_code, 409)
+        self.assertNotIn("duplicate@example.com", second.text.lower().replace(" ", ""))
+
+    def test_logout_revokes_session_and_clears_cookie(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "logout@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 200)
+
+        logout = self.client.post("/api/v1/auth/logout", headers=self.headers)
+
+        self.assertEqual(logout.status_code, 200)
+        self.assertTrue(logout.json()["ok"])
+        self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 401)
+
