@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS control_api_users (
     password_hash BYTEA NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS control_api_users_email_ci_idx
+    ON control_api_users(lower(email));
 CREATE TABLE IF NOT EXISTS control_api_sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES control_api_users(id) ON DELETE CASCADE,
