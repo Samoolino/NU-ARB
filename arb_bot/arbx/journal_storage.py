@@ -85,6 +85,13 @@ class BackendTradeJournal:
     def _placeholder(self) -> str:
         return "%s" if self.dialect == "postgres" else "?"
 
+    def _json_parameter(self, value: Any) -> Any:
+        encoded = json.dumps(value, separators=(",", ":"), allow_nan=False)
+        if self.dialect == "postgres":
+            from psycopg.types.json import Jsonb
+            return Jsonb(json.loads(encoded))
+        return encoded
+
     def _insert_id(self, table: str, columns: tuple[str, ...], values: list[Any]) -> int:
         p = self._placeholder()
         names = ", ".join(columns)
@@ -112,13 +119,13 @@ class BackendTradeJournal:
 
     def append(self, record: dict[str, Any]) -> int:
         values = [record.get(key) for key in TRADE_COLUMNS]
-        values[5] = json.dumps(record.get("path", []), separators=(",", ":"), allow_nan=False)
-        values[6] = json.dumps(record.get("symbols", []), separators=(",", ":"), allow_nan=False)
+        values[5] = self._json_parameter(record.get("path", []))
+        values[6] = self._json_parameter(record.get("symbols", []))
         return self._insert_id("trades", TRADE_COLUMNS, values)
 
     def append_opportunity(self, record: dict[str, Any]) -> int:
         values = [record.get(key) for key in OPPORTUNITY_COLUMNS]
-        values[-1] = json.dumps(record.get("evidence", {}), separators=(",", ":"), allow_nan=False)
+        values[-1] = self._json_parameter(record.get("evidence", {}))
         return self._insert_id("opportunities", OPPORTUNITY_COLUMNS, values)
 
     def recent_opportunities(self, limit: int = 25) -> list[dict[str, Any]]:
@@ -142,8 +149,8 @@ class BackendTradeJournal:
         live_eligible: bool, reasons: list[str] | tuple[str, ...], evidence: dict[str, Any],
     ) -> int:
         columns = ("session_id", "venue", "symbol", "notional_usd", "live_eligible", "reasons", "evidence")
-        reasons_json = json.dumps(list(reasons), separators=(",", ":"), allow_nan=False)
-        evidence_json = json.dumps(evidence, separators=(",", ":"), allow_nan=False)
+        reasons_json = self._json_parameter(list(reasons))
+        evidence_json = self._json_parameter(evidence)
         values: list[Any] = [session_id, venue, symbol, notional_usd, live_eligible, reasons_json, evidence_json]
         if self.dialect == "sqlite":
             values[4] = int(live_eligible)
