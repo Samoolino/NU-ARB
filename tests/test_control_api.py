@@ -165,3 +165,21 @@ class ControlApiTests(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
+
+
+    def test_postgres_configuration_fails_closed_until_routes_are_wired(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "0",
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "postgresql://localhost/nu_arb_test",
+        }, clear=False)
+        self.env.start()
+
+        response = self.client.get("/health/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(self.db_path.exists())
