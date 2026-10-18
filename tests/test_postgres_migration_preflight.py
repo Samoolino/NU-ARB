@@ -115,3 +115,17 @@ def test_preflight_detects_null_required_values_in_permissive_legacy_schema(tmp_
     assert report["safe_to_plan_cutover"] is False
     assert report["integrity_checks"]["null_required_values"]["users.email"] == 1
     assert "user-fixture" not in str(report)
+
+
+
+def test_preflight_cli_error_does_not_disclose_source_path(tmp_path, capsys):
+    from scripts.postgres_migration_preflight import main
+
+    missing_path = tmp_path / "private-source-name.sqlite3"
+    exit_code = main(["--database", str(missing_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert '"error": "FileNotFoundError"' in output
+    assert str(tmp_path) not in output
+    assert "private-source-name.sqlite3" not in output
