@@ -93,3 +93,25 @@ def test_preflight_blocks_unknown_schema_family(tmp_path):
     assert report["schema_family"] == "unrecognized_or_empty"
     assert report["safe_to_plan_cutover"] is False
     assert report["blockers"]
+
+
+def test_preflight_detects_null_required_values_in_permissive_legacy_schema(tmp_path):
+    path = tmp_path / "nullable.sqlite3"
+    db = sqlite3.connect(path)
+    db.executescript("""
+        CREATE TABLE users (id TEXT, email TEXT, salt BLOB, password_hash BLOB, created_at TEXT);
+        CREATE TABLE sessions (token_hash TEXT, user_id TEXT, expires_at INTEGER);
+        CREATE TABLE exchange_credentials (
+            user_id TEXT, exchange_id TEXT, encrypted_credentials BLOB, auth_mode TEXT,
+            state TEXT, last_verified TEXT, verification_json TEXT
+        );
+    """)
+    db.execute("INSERT INTO users VALUES(?,?,?,?,?)", ("user-fixture", None, b"salt", b"hash", "now"))
+    db.commit()
+    db.close()
+
+    report = inspect_database(path)
+
+    assert report["safe_to_plan_cutover"] is False
+    assert report["integrity_checks"]["null_required_values"]["users.email"] == 1
+    assert "user-fixture" not in str(report)
