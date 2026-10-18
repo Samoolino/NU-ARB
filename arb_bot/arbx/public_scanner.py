@@ -118,10 +118,10 @@ async def scan_public_spot(
     min_net_bps: float = 5.0,
     exchange_factory: Callable | None = None,
 ) -> dict:
-    if (len(venue_ids) < 2 or len(venue_ids) > 18
+    if (len(venue_ids) < 2 or len(venue_ids) > 20
             or len(set(venue_ids)) != len(venue_ids)
             or any(venue not in VENUES for venue in venue_ids)):
-        raise ValueError("Select between two and 18 distinct venues.")
+        raise ValueError("Select between two and 20 distinct venues.")
     if any(not isinstance(venue, str) or not re.fullmatch(r"[a-z0-9]+", venue) for venue in venue_ids):
         raise ValueError("Venue IDs must be lowercase registry IDs.")
     if len(symbols) < 1 or len(symbols) > MAX_SCAN_SYMBOLS or len(set(symbols)) != len(symbols):
