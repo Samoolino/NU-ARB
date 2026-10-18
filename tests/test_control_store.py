@@ -293,3 +293,38 @@ def test_credentials_are_isolated_between_users_and_deletion_is_scoped(tmp_path)
     store.delete_credentials("user-one", "binance")
     assert store.get_credentials("user-one", "binance") is None
     assert store.get_credentials("user-two", "binance")["encrypted_credentials"] == b"cipher-two"
+
+
+
+def test_credential_listing_excludes_ciphertext_and_upsert_replaces_metadata(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "credential-listing.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="listing-user", email="listing@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    store.save_credentials(
+        user_id="listing-user", exchange_id="binance", encrypted_credentials=b"secret-ciphertext",
+        auth_mode="hmac", state="NOT_VERIFIED", last_verified=None,
+        verification_json='{"version":1}',
+    )
+    listed = store.list_credentials("listing-user")
+    assert listed == [{
+        "exchange_id": "binance",
+        "auth_mode": "hmac",
+        "state": "NOT_VERIFIED",
+        "last_verified": None,
+        "verification_json": '{"version":1}',
+    }]
+    assert all("encrypted_credentials" not in row for row in listed)
+
+    store.save_credentials(
+        user_id="listing-user", exchange_id="binance", encrypted_credentials=b"rotated-ciphertext",
+        auth_mode="hmac", state="VERIFIED", last_verified="2026-01-02T00:00:00+00:00",
+        verification_json='{"version":2}',
+    )
+    saved = store.get_credentials("listing-user", "binance")
+    assert saved["encrypted_credentials"] == b"rotated-ciphertext"
+    assert saved["state"] == "VERIFIED"
+    assert saved["verification_json"] == '{"version":2}'
