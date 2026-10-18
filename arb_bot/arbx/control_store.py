@@ -51,6 +51,28 @@ class ControlPlaneStore:
             assert row is not None
             return row
 
+    def create_user_with_session(self, *, user_id: str, email: str, salt: bytes,
+                                 password_hash: bytes, created_at: str,
+                                 token_hash: str, expires_at: int) -> dict[str, Any]:
+        """Atomically create an account and its initial hashed-token session.
+
+        This avoids leaving an account without a usable initial session if session
+        persistence fails. The caller must generate and retain the raw token only
+        in memory for the response cookie; only its hash belongs in this store.
+        """
+        with self.backend.transaction() as session:
+            session.execute(self._sql(
+                "INSERT INTO control_api_users(id,email,salt,password_hash,created_at) VALUES(?,?,?,?,?)"
+            ), (user_id, email.lower(), salt, password_hash, created_at))
+            session.execute(self._sql(
+                "INSERT INTO control_api_sessions(token_hash,user_id,expires_at) VALUES(?,?,?)"
+            ), (token_hash, user_id, expires_at))
+            row = session.fetch_one(self._sql(
+                "SELECT id,email,created_at FROM control_api_users WHERE id=?"
+            ), (user_id,))
+            assert row is not None
+            return row
+
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         with self.backend.transaction() as session:
             return session.fetch_one(self._sql(
