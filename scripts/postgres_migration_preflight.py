@@ -158,7 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = inspect_database(args.database)
     except (OSError, sqlite3.Error) as exc:
-        print(json.dumps({"error": type(exc).__name__, "message": str(exc)}, indent=2))
+        # Exception messages can disclose source paths or filesystem details.
+        print(json.dumps({"error": type(exc).__name__}, indent=2))
         return 2
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["safe_to_plan_cutover"] else 1
