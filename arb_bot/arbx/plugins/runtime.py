@@ -64,6 +64,10 @@ class PluginRunner:
                 observed_at=now, retrieved_at=now, latency_ms=elapsed, error_code=type(exc).__name__)
 
     async def _audit(self, outcome, provider, request, scope, latency_ms, result_code, payload_hash):
-        await self._audit_writer({"provider": provider, "operation": request.operation, "request_id": request.request_id,
+        record = {"provider": provider, "operation": request.operation, "request_id": request.request_id,
             "scope": scope, "outcome": outcome, "latency_ms": latency_ms, "result_code": result_code,
-            "payload_sha256": payload_hash, "recorded_at": datetime.now(timezone.utc).isoformat()})
+            "payload_sha256": payload_hash, "recorded_at": datetime.now(timezone.utc).isoformat()}
+        try:
+            await self._audit_writer(record)
+        except Exception as exc:
+            raise AuditPersistenceError("plugin audit persistence failed; operation blocked") from exc
