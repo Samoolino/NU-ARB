@@ -22,6 +22,14 @@ EXPECTED_COLUMNS = {
         "state", "last_verified", "verification_json",
     },
 }
+REQUIRED_VALUES = {
+    "users": ("id", "email", "salt", "password_hash", "created_at"),
+    "sessions": ("token_hash", "user_id", "expires_at"),
+    "exchange_credentials": (
+        "user_id", "exchange_id", "encrypted_credentials", "auth_mode",
+        "state", "verification_json",
+    ),
+}
 
 
 def _tables(db: sqlite3.Connection) -> set[str]:
@@ -50,6 +58,11 @@ def inspect_database(path: str | Path) -> dict[str, Any]:
         "safe_to_plan_cutover": False,
     }
     try:
+        integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            blockers.append("SQLite integrity check reported structural errors")
+        report["source"]["sqlite_integrity_check"] = "ok" if integrity == "ok" else "failed"
+
         tables = _tables(db)
         # Current API uses legacy names. The control_api_* tables are an isolated
         # foundation and must not be mistaken for the active route data source.
@@ -103,12 +116,24 @@ def inspect_database(path: str | Path) -> dict[str, Any]:
             ).fetchone()[0]
             if empty_ciphertext:
                 blockers.append("credential rows contain empty encrypted payloads")
+            null_required_values = {}
+            for table, columns in REQUIRED_VALUES.items():
+                for column in columns:
+                    # Table/column names are constants defined above.
+                    count = db.execute(
+                        f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" IS NULL'
+                    ).fetchone()[0]
+                    if count:
+                        null_required_values[f"{table}.{column}"] = count
+            if null_required_values:
+                blockers.append("required fields contain NULL values")
             report["integrity_checks"] = {
                 "duplicate_normalized_emails": duplicate_emails,
                 "orphan_sessions": orphan_sessions,
                 "orphan_credentials": orphan_credentials,
                 "invalid_verification_json_rows": invalid_verification_json,
                 "empty_encrypted_payload_rows": empty_ciphertext,
+                "null_required_values": null_required_values,
             }
             if not blockers:
                 warnings.append("preflight checks are structural only; they do not validate encryption keys, decrypt ciphertext, or prove restore readiness")
