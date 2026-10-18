@@ -22,12 +22,14 @@ class ControlApiTests(unittest.TestCase):
 
     def test_all_registered_venues_can_be_selected_together(self):
         exchange_ids = list(web_api.VENUES)
-        self.assertEqual(len(exchange_ids), 18)
+        self.assertEqual(len(exchange_ids), 20)
         payload = web_api.EngineStart(
             mode="paper", exchange_ids=exchange_ids, trade_size_usd=5,
             max_loss_usd=2, target_profit_usd=1,
         )
         self.assertEqual(payload.exchange_ids, exchange_ids)
+        self.assertIn("bitmart", web_api.VENUES)
+        self.assertIn("upbit", web_api.VENUES)
         with self.assertRaises(ValueError):
             web_api.EngineStart(
                 mode="paper", exchange_ids=exchange_ids + ["unknown"], trade_size_usd=5,
