@@ -18,14 +18,28 @@ python scripts/postgres_migration_preflight.py --database path\to\arbx_app.sqlit
 - Preserve the JSON report as a release artifact only if your data-handling policy permits it; it contains table counts and structural findings, not row data.
 - The tool never decrypts credentials and cannot establish that the configured encryption key is correct.
 
-## 2. Disposable target requirements
+## 2. Generate a non-executable rehearsal plan
+
+Run the plan generator against the same copied source database:
+
+```powershell
+python scripts/postgres_migration_rehearsal.py --database path\\to\\arbx_app.sqlite3
+```
+
+- Exit `0`: a metadata-only plan was generated; no destination was contacted and no records were imported.
+- Exit `1`: the preflight is blocked or the source schema is incomplete.
+- Exit `2`: source inspection failed; output intentionally omits filesystem exception messages.
+- The JSON contains only table counts, static blocker/warning messages, and review steps. It does not contain a destination URL or row-level values.
+- This command deliberately has no write mode. It does not implement or authorize a migration.
+
+## 3. Disposable target requirements
 
 - Use a new, isolated PostgreSQL database or disposable local service with no production data.
 - Set `ARBX_TEST_POSTGRES_URL` only to a local test host accepted by the integration test (`localhost`, `127.0.0.1`, or `postgres`).
 - Confirm the target is disposable and contains no valuable records before running migration integration tests; the suite applies migrations and writes fixture rows.
 - Never put database URLs, passwords, encryption keys, credential payloads, or session tokens into logs or CI output.
 
-## 3. Required migration rehearsal behavior
+## 4. Required migration rehearsal behavior
 
 The rehearsal implementation must be a separate, explicit command and default to dry-run. Before any write-capable mode exists, tests must prove:
 
@@ -40,7 +54,7 @@ The rehearsal implementation must be a separate, explicit command and default to
 9. Output is metadata-only and never serializes rows, emails, identifiers, password material, token hashes, ciphertext, or verification payloads.
 10. Rollback and restore are demonstrated from backups in a separate rehearsal before any production approval.
 
-## 4. Go/no-go gates before route cutover
+## 5. Go/no-go gates before route cutover
 
 - Reviewed mapping between the legacy `users`/`sessions`/`exchange_credentials` schema and the new `control_api_*` schema.
 - Automated source and destination parity checks, including binary credential preservation.
