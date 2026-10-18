@@ -75,7 +75,7 @@ export default async function handler(request, response) {
   if (venueIds.length < 2 || venueIds.length > EXCHANGES.length ||
       new Set(venueIds).size !== venueIds.length ||
       venueIds.some((id) => !EXCHANGE_BY_ID[id])) {
-    return response.status(400).json({error: "Select 2–18 distinct registered exchanges."});
+    return response.status(400).json({error: "Select 2–20 distinct registered exchanges."});
   }
   if (symbols.length < 1 || symbols.length > MAX_MARKETS ||
       new Set(symbols).size !== symbols.length || symbols.some((symbol) => !isValidSymbol(symbol))) {
