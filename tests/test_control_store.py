@@ -157,3 +157,20 @@ def test_get_valid_session_rejects_expired_and_returns_active_session(tmp_path):
     assert store.get_valid_session("expired-token", now_epoch=100) is None
     active = store.get_valid_session("active-token", now_epoch=100)
     assert active == {"user_id": "session-user", "expires_at": 101}
+
+
+def test_purge_expired_sessions_removes_only_sessions_at_or_before_now(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "control.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="purge-user", email="purge@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.create_session(token_hash="old-session", user_id="purge-user", expires_at=99)
+    store.create_session(token_hash="boundary-session", user_id="purge-user", expires_at=100)
+    store.create_session(token_hash="future-session", user_id="purge-user", expires_at=101)
+
+    assert store.purge_expired_sessions(now_epoch=100) == 2
+    assert store.get_session("old-session") is None
+    assert store.get_session("boundary-session") is None
+    assert store.get_session("future-session")["expires_at"] == 101
