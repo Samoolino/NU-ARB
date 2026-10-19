@@ -659,3 +659,66 @@ def test_engine_session_idempotent_update_preserves_terminal_error_code(tmp_path
     assert row["stopped_at"] == "2026-10-19T01:00:00+00:00"
 
 
+
+
+
+def test_worker_lease_is_exclusive_renewable_and_fenced(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "worker-lease.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="lease-owner", email="lease-owner@example.test",
+        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="lease-session", owner_user_id="lease-owner", mode="paper",
+        phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+
+    first = store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-a", now_epoch=100, lease_seconds=30,
+    )
+    assert first == {
+        "session_id": "lease-session", "worker_id": "worker-a",
+        "lease_expires_at": 130, "fencing_token": 1,
+    }
+    renewed = store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-a", now_epoch=110, lease_seconds=30,
+    )
+    assert renewed["lease_expires_at"] == 140
+    assert renewed["fencing_token"] == 1
+    assert store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-b", now_epoch=120, lease_seconds=30,
+    ) is None
+
+    takeover = store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-b", now_epoch=140, lease_seconds=30,
+    )
+    assert takeover["fencing_token"] == 2
+    assert not store.release_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-a", fencing_token=1,
+    )
+    assert store.release_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-b", fencing_token=2,
+    )
+
+
+def test_terminal_engine_session_cannot_acquire_worker_lease(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-worker-lease.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="terminal-owner", email="terminal-owner@example.test",
+        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="terminal-session", owner_user_id="terminal-owner", mode="simulation",
+        phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    assert store.update_engine_session(
+        session_id="terminal-session", owner_user_id="terminal-owner",
+        phase="STOPPED", updated_at="2026-01-01T00:01:00+00:00",
+    )
+    assert store.claim_engine_worker_lease(
+        session_id="terminal-session", worker_id="worker-a", now_epoch=200, lease_seconds=30,
+    ) is None
