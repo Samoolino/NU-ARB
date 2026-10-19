@@ -446,3 +446,32 @@ def test_engine_lifecycle_routes_fail_closed_for_postgres_without_sqlite_fallbac
         assert not (tmp_path / "engine_test-user.sqlite3").exists()
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_postgres_readiness_stays_closed_until_control_api_parity_is_complete(tmp_path, monkeypatch):
+    """A healthy PostgreSQL connection is insufficient while route parity is unfinished."""
+    from fastapi.testclient import TestClient
+
+    database = tmp_path / "must-not-be-created.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+
+    class HealthyPostgresBackend:
+        dialect = "postgres"
+
+        def health_check(self):
+            return True
+
+    monkeypatch.setattr(web_api, "control_api_backend_from_environment", lambda: HealthyPostgresBackend())
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", False)
+
+    with TestClient(web_api.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503, response.text
+    assert "route parity is not complete" in response.json()["detail"]
+    assert not database.exists()
