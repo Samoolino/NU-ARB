@@ -6,10 +6,13 @@ Scope: Control API identity, sessions, and encrypted exchange-credential metadat
 
 ## Current verified state
 
-- Current PR head verified by CI: `74b8f2bcbf0ca4837dfa90bf3830f84b9e5c65de`.
+- Current PR head verified by CI: `246c6eb4992fc250583137d5db2f9e8e1a68e681`.
 - [Hybrid Core run 39243409825](https://github.com/Samoolino/NU-ARB/actions/runs/39243409825) completed successfully: **11 passed**. Python compilation also completed successfully.
 - [PostgreSQL Integration run 39243409826](https://github.com/Samoolino/NU-ARB/actions/runs/39243409826) completed successfully: **100 passed, 1 warning**. The job started PostgreSQL 16, installed dependencies, compiled Python, and ran the configured PostgreSQL/control API suite.
 - These results verify the two targeted workflows on the current head. They do not prove complete route parity, full repository test coverage, a successful production migration, or live execution readiness.
+- [Hybrid Core run 39289213632](https://github.com/Samoolino/NU-ARB/actions/runs/39289213632) passed on the current head; its compile and Hybrid Core test steps succeeded.
+- [PostgreSQL Integration run 39289214143](https://github.com/Samoolino/NU-ARB/actions/runs/39289214143) passed on the current head; PostgreSQL/control API tests and the complete repository test suite succeeded.
+- Added `tests/test_postgres_engine_routes_fail_closed.py` in commit `246c6eb4992fc250583137d5db2f9e8e1a68e681` to assert that engine state, journal, start, and stop endpoints return HTTP 503 when PostgreSQL is selected before those paths are migrated, and that no SQLite fallback database is created.
 - The current implementation has a `ControlPlaneStore` and versioned PostgreSQL migrations. FastAPI route migration is partial: signup/login/logout/me, exchange listing, capital-source listing, exchange verification persistence, and credential deletion use the injected store when PostgreSQL is selected; SQLite retains the legacy path.
 - The login email normalization regression is covered by the passing PostgreSQL integration suite. PostgreSQL log messages include expected constraint errors from negative test cases; the job still completed successfully.
 - Engine ownership/lifecycle and remaining journal/execution persistence paths require additional parity review. The legacy `TradeJournal` is SQLite-backed; the `BackendTradeJournal` exists and the journal factory can select it, but application call sites and all data paths still require audit and contract evidence.
