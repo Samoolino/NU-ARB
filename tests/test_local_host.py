@@ -41,6 +41,8 @@ class LocalHostTests(unittest.TestCase):
         self.assertIn(b'value="whitebit" selected', response.content)
         self.assertIn(b'value="BTC/USDC"', response.content)
         self.assertIn(b'id="minNetBps"', response.content)
+        self.assertIn(b'id="referenceSignals"', response.content)
+        self.assertIn(b'CoinGecko USD reference differs', response.content)
         self.assertIn(b'fetch("/api/scan?"', response.content)
 
     def test_control_proxy_forwards_only_api_routes_and_adds_local_token(self):
