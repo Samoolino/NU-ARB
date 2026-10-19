@@ -946,12 +946,23 @@ def liveness_probe():
 
 @app.get("/health/ready", include_in_schema=False)
 def readiness_probe():
-    """Control API readiness against its currently configured SQLite persistence.
+    """Check readiness of the explicitly selected persistence backend.
 
-    The PostgreSQL storage adapter is still opt-in and is not used by this API yet,
-    so this probe must not report PostgreSQL readiness on its behalf.
+    SQLite retains its legacy schema-aware check. PostgreSQL is checked directly
+    through its backend health query; this endpoint never falls back across backends.
     """
     db = None
+    kind = os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower()
+    if kind in {"postgres", "postgresql"}:
+        try:
+            backend = control_api_backend_from_environment()
+            if backend.dialect != "postgres" or not backend.health_check():
+                raise HTTPException(status_code=503, detail="Control API persistence is not ready")
+            return {"status": "ready", "storage": "postgres"}
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail="Control API persistence is not ready") from None
+    if kind not in {"sqlite", ""}:
+        raise HTTPException(status_code=503, detail="Control API persistence is not ready")
     try:
         db = _connect()
         row = db.execute("SELECT 1 AS healthy").fetchone()
