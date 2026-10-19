@@ -7,6 +7,8 @@ Migrations `004_engine_session_registry.sql`, `005_engine_session_phase_constrai
 
 This is a persistence contract, **not yet runtime wiring**. Worker-lease APIs are tested at the store layer, but engine lifecycle routes still rely on process-global runtime state and do not claim, heartbeat, release, or recover through these leases. Do not mark engine restart recovery, multi-worker operation, or authorized journal access complete until routes use the registry and an integration test proves that a second process can recover session ownership/state without reading another user's records.
 
+The PostgreSQL journal route now has a staged owner-scoped implementation: it resolves the authenticated user to the registry's owned session IDs, reads trades/PnL by session, and has a two-owner isolation regression test. This path remains behind `POSTGRES_CONTROL_API_PARITY_COMPLETE`; it is not enabled for application traffic. Engine state/start/stop and credential loading still do not have complete PostgreSQL parity, so the global readiness gate must remain false.
+
 ## 1. Persistence cutover boundary
 
 SQLite remains the default. Setting `ARBX_STORAGE_BACKEND=postgres` only constructs a backend object; it does not migrate the control API or `TradeJournal`, prove schema parity, copy data, or switch existing call sites.
