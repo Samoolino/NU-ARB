@@ -1,18 +1,19 @@
 # PostgreSQL Control API Persistence Cutover Plan
 
-Status: **partial route migration committed; full cutover blocked pending CI recovery and current-HEAD verification**  
+Status: **partial route migration committed; targeted current-head CI is green, full cutover remains blocked**  
 Target branch: `phase-a-postgres-foundation`  
 Scope: Control API identity, sessions, and encrypted exchange-credential metadata only.
 
 ## Current verified state
 
-- Current PR head: `a6b65cb09392167f5ff215019ee7372d9021028a`; current-head tests are **not verified**.
-- The latest GitHub Actions jobs on this head (PostgreSQL Integration run [39219149174](https://github.com/Samoolino/NU-ARB/actions/runs/39219149174), Hybrid Core run [39219149070](https://github.com/Samoolino/NU-ARB/actions/runs/39219149070)) failed in about two seconds. The Jobs API reports `runner_id: 0`, empty `steps`, and no log URL. This is evidence that the runner/job did not expose normal execution steps; it is not evidence that pytest ran and failed. The exact infrastructure cause is unknown.
-- The same failure-before-steps pattern is present in earlier runs, including [PostgreSQL Integration 39218920069](https://github.com/Samoolino/NU-ARB/actions/runs/39218920069) and [Hybrid Core 39218920325](https://github.com/Samoolino/NU-ARB/actions/runs/39218920325). Log retrieval previously returned `BlobNotFound`.
-- Workflow definitions use ordinary `ubuntu-latest`, checkout, Python setup, dependency install, compile, and pytest steps. Current evidence does not justify changing workflows, weakening branch protection, or treating these jobs as successful. Recovery requires repository Actions/runner diagnostics from an administrator or GitHub support.
-- Historical code head `cd1ecd9f877895700b50b715bfc22cd0879bdef9` passed [Hybrid Core](https://github.com/Samoolino/NU-ARB/actions/runs/39122717168) and [PostgreSQL Integration](https://github.com/Samoolino/NU-ARB/actions/runs/39122716854). That historical result does not verify current HEAD or prove PostgreSQL-backed public routes.
-- `ControlPlaneStore`, migrations, SQLite compatibility, and regression tests exist. FastAPI route migration is partial: signup/login/logout/me, exchange listing, capital-source listing, exchange verification persistence, and credential deletion use the injected store when PostgreSQL is selected; SQLite retains the legacy schema path.
-- Engine ownership, engine lifecycle, and remaining journal/execution paths have not completed persistence parity. PostgreSQL selection must remain fail-closed for routes not migrated.
+- Current PR head verified by CI: `74b8f2bcbf0ca4837dfa90bf3830f84b9e5c65de`.
+- [Hybrid Core run 39243409825](https://github.com/Samoolino/NU-ARB/actions/runs/39243409825) completed successfully: **11 passed**. Python compilation also completed successfully.
+- [PostgreSQL Integration run 39243409826](https://github.com/Samoolino/NU-ARB/actions/runs/39243409826) completed successfully: **100 passed, 1 warning**. The job started PostgreSQL 16, installed dependencies, compiled Python, and ran the configured PostgreSQL/control API suite.
+- These results verify the two targeted workflows on the current head. They do not prove complete route parity, full repository test coverage, a successful production migration, or live execution readiness.
+- The current implementation has a `ControlPlaneStore` and versioned PostgreSQL migrations. FastAPI route migration is partial: signup/login/logout/me, exchange listing, capital-source listing, exchange verification persistence, and credential deletion use the injected store when PostgreSQL is selected; SQLite retains the legacy path.
+- The login email normalization regression is covered by the passing PostgreSQL integration suite. PostgreSQL log messages include expected constraint errors from negative test cases; the job still completed successfully.
+- Engine ownership/lifecycle and remaining journal/execution persistence paths require additional parity review. The legacy `TradeJournal` is SQLite-backed; the `BackendTradeJournal` exists and the journal factory can select it, but application call sites and all data paths still require audit and contract evidence.
+- Keep PostgreSQL fail-closed for routes that have not completed parity. Do not infer readiness from backend construction or the passing targeted suites.
 - No production migration, deployment, credential import, or live execution is authorized by this plan.
 
 ## Cutover gates
