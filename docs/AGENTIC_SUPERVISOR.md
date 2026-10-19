@@ -12,9 +12,9 @@ Each report contains:
 - `finding`: `INFO`, `WARN`, `REJECT`, or `UNKNOWN`;
 - `observation_id`: identifier for the exact normalized observation being reviewed;
 - `observed_at_ms`: integer timestamp in milliseconds;
-- `summary`: bounded plain-text summary (maximum 500 characters); control characters are stripped before the report is returned.
+- `summary`: bounded plain-text summary (maximum 500 characters); Unicode control/format characters are stripped before the report is returned.
 
-The supervisor accepts at most 20 reports per call. Oversized collections, malformed mappings, duplicate required-role configuration, and invalid timestamps fail closed. Callers should still apply request timeouts and bounded concurrency before reports reach this function.
+Observation identifiers are limited to 256 characters. The supervisor accepts at most 20 reports per call. Oversized collections, malformed mappings, duplicate required-role configuration, and invalid timestamps fail closed. Callers should still apply request timeouts and bounded concurrency before reports reach this function.
 
 The aggregator rejects malformed reports, duplicate roles, mismatched observation IDs, stale/future timestamps, missing required roles, and any `REJECT` or `UNKNOWN` finding. Its successful status is `ADVISORY_ONLY`; it does not expose an execution or live-eligibility flag.
 
