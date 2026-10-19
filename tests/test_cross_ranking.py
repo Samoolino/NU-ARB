@@ -2,6 +2,7 @@ import asyncio
 import pathlib
 import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -75,7 +76,7 @@ class CrossRankingTests(unittest.TestCase):
                 for symbol, (bid, ask) in symbols.items():
                     base, quote = symbol.split("/")
                     markets[symbol] = {"base": base, "quote": quote}
-                    books[symbol] = Book([[bid, 10.0]], [[ask, 10.0]], now)
+                    books[symbol] = Book([[bid, 10.0]], [[ask, 10.0]], now, int(time.time() * 1000), 1)
                 worker = SimpleNamespace(
                     id=venue,
                     ex=SimpleNamespace(markets=markets),

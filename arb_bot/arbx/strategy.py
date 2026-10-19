@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from arbx.market import cross_timestamp_consistent
 from arbx.util import buy_with_quote, sell_base, walk_base
 
 
@@ -74,6 +75,8 @@ def evaluate_cross(sym, bw, sw, bb, sb, size_usd, cfg, now):
         return None
     age = max(now - bb.recv, now - sb.recv) * 1000.0
     if age > cfg.max_book_age_ms:
+        return None
+    if not cross_timestamp_consistent(bb.timestamp_exchange, sb.timestamp_exchange):
         return None
     base = min(size_usd / bb.asks[0][0],
                sum(level[1] for level in bb.asks),
