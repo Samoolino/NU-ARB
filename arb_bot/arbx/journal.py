@@ -163,3 +163,25 @@ class TradeJournal:
 
     def close(self) -> None:
         self.db.close()
+
+
+def create_trade_journal(path: Path | str):
+    """Build the journal selected by explicit storage configuration.
+
+    SQLite remains the default and preserves the legacy journal implementation.
+    PostgreSQL is opt-in via ARBX_STORAGE_BACKEND=postgres and requires the
+    deployment migrations to have been applied separately before startup.
+    """
+    import os
+
+    backend_kind = os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower()
+    if backend_kind == "sqlite":
+        return TradeJournal(path)
+
+    # Import lazily so SQLite-only installations retain their current dependency
+    # footprint and behavior.
+    from arbx.storage import backend_from_environment
+    from arbx.journal_storage import BackendTradeJournal
+
+    backend = backend_from_environment()
+    return BackendTradeJournal(backend)

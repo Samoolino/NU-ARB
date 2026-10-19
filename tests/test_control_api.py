@@ -1,3 +1,4 @@
+import hashlib
 import os
 import pathlib
 import sys
@@ -76,6 +77,27 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).json()["user"]["email"], "person@example.com")
         self.assertEqual(self.client.get("/healthz").status_code, 200)
+        db = web_api._connect()
+        try:
+            probe_table = db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='service_health_probe'"
+            ).fetchone()
+            self.assertIsNone(probe_table)
+        finally:
+            db.close()
+
+    def test_login_matches_email_case_insensitively(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "CaseSensitive@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        self.client.post("/api/v1/auth/logout", headers=self.headers)
+        login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "CASESENSITIVE@EXAMPLE.COM", "password": "another-long-password",
+        })
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["user"]["email"], "casesensitive@example.com")
 
     def test_live_engine_is_operator_disabled_by_default(self):
         response = self.client.post("/api/v1/engine/start", headers=self.headers, json={
@@ -165,3 +187,227 @@ class ControlApiTests(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 409)
         make_exchange.assert_not_called()
+
+    def test_control_plane_store_factory_accepts_injected_backend_without_schema_side_effects(self):
+        from arbx.control_store import ControlPlaneStore
+        from arbx.storage import SQLiteBackend
+
+        injected_path = self.db_path.with_name("injected-control-store.sqlite3")
+        backend = SQLiteBackend(injected_path)
+        store = web_api.control_plane_store_from_environment(backend=backend)
+
+        self.assertIsInstance(store, ControlPlaneStore)
+        self.assertIs(store.backend, backend)
+        self.assertFalse(injected_path.exists())
+
+    def test_fastapi_control_plane_dependency_delegates_to_configured_factory(self):
+        from arbx.control_store import ControlPlaneStore
+
+        with patch.object(web_api, "control_plane_store_from_environment") as factory:
+            expected = object()
+            factory.return_value = expected
+            self.assertIs(web_api.get_control_plane_store(), expected)
+            factory.assert_called_once_with()
+
+    def test_control_plane_store_factory_is_explicit_and_does_not_initialize_sqlite_schema(self):
+        from arbx.control_store import ControlPlaneStore
+
+        with patch.dict(os.environ, {
+            "ARBX_STORAGE_BACKEND": "sqlite",
+            "ARBX_APP_DB": str(self.db_path),
+        }, clear=False):
+            store = web_api.control_plane_store_from_environment()
+        self.assertIsInstance(store, ControlPlaneStore)
+        self.assertFalse(self.db_path.exists())
+
+    def test_postgres_configuration_fails_closed_until_routes_are_wired(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "0",
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "postgresql://localhost/nu_arb_test",
+        }, clear=False)
+        self.env.start()
+
+        response = self.client.get("/health/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(self.db_path.exists())
+
+    def test_postgres_auth_routes_fail_closed_without_creating_sqlite_fallback(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "0",
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "postgresql://localhost/nu_arb_test",
+        }, clear=False)
+        self.env.start()
+
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "postgres-route@example.test", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "postgres-route@example.test", "password": "another-long-password",
+        })
+        me = self.client.get("/api/v1/auth/me", headers=self.headers)
+        exchanges = self.client.get("/api/v1/exchanges", headers=self.headers)
+
+        # Signup/login must fail closed on unavailable PostgreSQL; protected reads
+        # without a session must preserve the normal unauthorized response.
+        self.assertEqual([signup.status_code, login.status_code, me.status_code, exchanges.status_code],
+                         [503, 503, 401, 401])
+        for response in (signup, login, me, exchanges):
+            self.assertNotIn("postgresql://", response.text)
+            self.assertNotIn("password", response.text.lower())
+        self.assertFalse(self.db_path.exists())
+
+    def test_session_expiring_at_current_epoch_is_rejected(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "boundary@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        token = self.client.cookies.get(web_api.SESSION_COOKIE)
+        self.assertTrue(token)
+        digest = web_api.hashlib.sha256(token.encode()).hexdigest()
+        db = web_api._connect()
+        try:
+            db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (int(web_api.time.time()), digest))
+            db.commit()
+        finally:
+            db.close()
+
+        response = self.client.get("/api/v1/auth/me", headers=self.headers)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("expired", response.json()["detail"].lower())
+
+    def test_signup_rejects_case_insensitive_duplicate_email(self):
+        first = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "Duplicate@Example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "duplicate@example.COM", "password": "different-long-password",
+            "password_confirmation": "different-long-password",
+        })
+
+        self.assertEqual(second.status_code, 409)
+        self.assertNotIn("duplicate@example.com", second.text.lower().replace(" ", ""))
+
+    def test_logout_revokes_session_and_clears_cookie(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "logout@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 200)
+
+        logout = self.client.post("/api/v1/auth/logout", headers=self.headers)
+
+        self.assertEqual(logout.status_code, 200)
+        self.assertTrue(logout.json()["ok"])
+        self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 401)
+
+    def test_login_is_case_insensitive_and_rejects_wrong_password(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "LoginCase@example.com", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        self.client.post("/api/v1/auth/logout", headers=self.headers)
+
+        wrong = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "LOGINCASE@example.com", "password": "incorrect-password",
+        })
+        self.assertEqual(wrong.status_code, 401)
+
+        login = self.client.post("/api/v1/auth/login", headers=self.headers, json={
+            "email": "LOGINCASE@example.com", "password": "another-long-password",
+        })
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["user"]["email"], "logincase@example.com")
+        self.assertEqual(self.client.get("/api/v1/auth/me", headers=self.headers).status_code, 200)
+
+    def test_control_plane_factory_requires_postgres_url_without_falling_back(self):
+        with patch.dict(os.environ, {
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "",
+        }, clear=False):
+            with self.assertRaisesRegex(ValueError, "ARBX_DATABASE_URL is required"):
+                web_api.control_plane_store_from_environment()
+        self.assertFalse(self.db_path.exists())
+
+    def test_control_plane_factory_rejects_unknown_backend_without_creating_sqlite(self):
+        with patch.dict(os.environ, {
+            "ARBX_STORAGE_BACKEND": "mysql",
+            "ARBX_DATABASE_URL": "",
+        }, clear=False):
+            with self.assertRaisesRegex(ValueError, "ARBX_STORAGE_BACKEND must be sqlite or postgres"):
+                web_api.control_plane_store_from_environment()
+        self.assertFalse(self.db_path.exists())
+
+    def test_signup_persists_only_hashed_session_token(self):
+        signup = self.client.post("/api/v1/auth/signup", headers=self.headers, json={
+            "email": "session-hash@example.test", "password": "another-long-password",
+            "password_confirmation": "another-long-password",
+        })
+        self.assertEqual(signup.status_code, 200)
+        raw_token = self.client.cookies.get(web_api.SESSION_COOKIE)
+        self.assertTrue(raw_token)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        db = web_api._connect()
+        try:
+            rows = db.execute("SELECT token_hash FROM sessions").fetchall()
+        finally:
+            db.close()
+
+        stored_tokens = [row["token_hash"] for row in rows]
+        self.assertIn(token_hash, stored_tokens)
+        self.assertNotIn(raw_token, stored_tokens)
+
+    def test_postgres_configuration_fails_closed_for_all_identity_bound_routes(self):
+        self.env.stop()
+        self.env = patch.dict(os.environ, {
+            "ENGINE_PROXY_TOKEN": "test-service-token",
+            "CREDENTIAL_ENCRYPTION_KEY": "ab" * 32,
+            "APP_SECURE_COOKIE": "0",
+            "ARBX_LIVE_TRADING_ENABLED": "0",
+            "ARBX_STORAGE_BACKEND": "postgres",
+            "ARBX_DATABASE_URL": "postgresql://localhost/nu_arb_test",
+        }, clear=False)
+        self.env.start()
+
+        requests = [
+            ("get", "/api/v1/capital-sources", None),
+            ("get", "/api/v1/engine/state", None),
+            ("get", "/api/v1/engine/journal", None),
+            ("post", "/api/v1/engine/stop", {}),
+            ("post", "/api/v1/engine/start", {
+                "mode": "paper", "exchange_ids": ["binance"], "trade_size_usd": 5,
+                "max_loss_usd": 2, "target_profit_usd": 1,
+            }),
+        ]
+        responses = [
+            getattr(self.client, method)(path, headers=self.headers, json=payload)
+            if payload is not None else getattr(self.client, method)(path, headers=self.headers)
+            for method, path, payload in requests
+        ]
+
+        # Unauthenticated capital-source requests remain 401; authenticated engine
+        # operations fail closed with 503 when PostgreSQL route parity is incomplete.
+        self.assertEqual([response.status_code for response in responses], [401, 503, 503, 503, 503])
+        for response in responses:
+            self.assertNotIn("postgresql://", response.text)
+        self.assertFalse(self.db_path.exists())
+

@@ -33,6 +33,10 @@ from arbx.permissions import (
 APP_DB = Path(os.getenv("ARBX_APP_DB", "arbx_app.sqlite3"))
 SESSION_COOKIE = "arbx_session"
 SESSION_TTL = 60 * 60 * 24 * 7
+
+# Keep PostgreSQL service readiness closed until all Control API routes and journal paths
+# have completed backend parity and end-to-end verification.
+POSTGRES_CONTROL_API_PARITY_COMPLETE = False
 VERIFICATION_TTL_SECONDS = 5 * 60
 VENUES = {
     "binance": "Binance", "bybit": "Bybit", "okx": "OKX", "kucoin": "KuCoin", "gateio": "Gate.io",
@@ -123,7 +127,74 @@ async def validation_error_without_input(request: Request, exc: RequestValidatio
     return JSONResponse(status_code=422, content={"detail": "Invalid request. Check the required fields and try again."})
 
 
+# PostgreSQL connection/transaction errors must fail closed with a sanitized response.
+# Keep psycopg optional at import time for SQLite-only installations.
+try:
+    from psycopg import Error as _PostgresStorageError
+except ImportError:
+    _PostgresStorageError = None
+
+if _PostgresStorageError is not None:
+    @app.exception_handler(_PostgresStorageError)
+    async def postgres_storage_error_without_details(request: Request, exc: Exception):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Control API persistence is not ready"},
+        )
+
+
+def control_api_backend_from_environment():
+    """Resolve the configured storage backend without changing API persistence.
+
+    This factory is preparatory only: API routes still use _connect() and the
+    SQLite schema until their SQL, transaction, and schema parity is migrated.
+    """
+    from arbx.storage import PostgresBackend, SQLiteBackend
+
+    kind = os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower()
+    if kind == "sqlite":
+        return SQLiteBackend(APP_DB)
+    if kind in {"postgres", "postgresql"}:
+        url = os.getenv("ARBX_DATABASE_URL", "")
+        if not url:
+            raise ValueError("ARBX_DATABASE_URL is required for PostgreSQL storage")
+        return PostgresBackend(url)
+    raise ValueError("ARBX_STORAGE_BACKEND must be sqlite or postgres")
+
+
+def control_plane_store_from_environment(*, backend=None):
+    """Build the shared identity/session/credential store without implicit schema changes.
+
+    Tests and future application wiring may inject a backend explicitly. If omitted,
+    the configured environment backend is resolved. SQLite schema initialization
+    remains an explicit caller action and PostgreSQL schema remains migration-runner-
+    only. This dependency is preparatory: public routes still use _connect() and
+    PostgreSQL remains fail-closed until identity, credential, and engine-ownership
+    route parity is migrated and tested together.
+    """
+    from arbx.control_store import ControlPlaneStore
+    return ControlPlaneStore(backend if backend is not None else control_api_backend_from_environment())
+
+
+def get_control_plane_store():
+    """FastAPI dependency seam for the future coordinated route cutover.
+
+    Routes should depend on this function rather than constructing stores directly,
+    allowing tests to inject a disposable backend with app.dependency_overrides.
+    It intentionally does not initialize schemas or change current route behavior.
+    """
+    return control_plane_store_from_environment()
+
+
 def _connect():
+    # Do not silently write to SQLite when an operator has selected PostgreSQL.
+    # PostgreSQL route/schema parity is not implemented yet; fail closed instead.
+    storage_backend = os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower()
+    if storage_backend not in {"sqlite", ""}:
+        raise HTTPException(
+            status_code=503,
+            detail="Configured persistence backend is not yet supported by the Control API",
+        )
     APP_DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(APP_DB, timeout=10)
     db.row_factory = sqlite3.Row
@@ -156,7 +227,7 @@ def _user(db: sqlite3.Connection, token: str | None):
         raise HTTPException(401, "Sign in required")
     digest = hashlib.sha256(token.encode()).hexdigest()
     row = db.execute("SELECT user_id, expires_at FROM sessions WHERE token_hash=?", (digest,)).fetchone()
-    if not row or row["expires_at"] < int(time.time()):
+    if not row or row["expires_at"] <= int(time.time()):
         if row:
             db.execute("DELETE FROM sessions WHERE token_hash=?", (digest,)); db.commit()
         raise HTTPException(401, "Session expired; sign in again")
@@ -193,6 +264,13 @@ class Login(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
     password: str = Field(min_length=1, max_length=256)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, email):
+        if isinstance(email, str):
+            return email.strip().lower()
+        return email
 
 
 class ExchangeConnect(BaseModel):
@@ -412,15 +490,9 @@ def healthz():
         key_ok = False
     if not token_ok or not key_ok:
         raise HTTPException(503, "Control service configuration is incomplete")
-    db = _connect()
-    try:
-        db.execute("CREATE TABLE IF NOT EXISTS service_health_probe (ok INTEGER NOT NULL)")
-        db.execute("INSERT INTO service_health_probe(ok) VALUES(1)")
-        db.execute("DELETE FROM service_health_probe")
-        db.commit()
-    finally:
-        db.close()
-    return {"status": "ready"}
+    # Keep the orchestrator probe aligned with the selected storage backend.
+    # readiness_probe is read-only and deliberately does not fall back to SQLite.
+    return readiness_probe()
 
 
 @app.get("/api/v1/runtime", dependencies=[Depends(_proxy_auth)])
@@ -431,202 +503,321 @@ def runtime_config():
             "enginePhase": engine_phase}
 
 
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(SESSION_COOKIE, token, httponly=True,
+                        secure=os.getenv("APP_SECURE_COOKIE", "1") == "1",
+                        samesite="lax", max_age=SESSION_TTL, path="/")
+
+
+def _session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _postgres_store_selected() -> bool:
+    return os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower() in {"postgres", "postgresql"}
+
+
+def _store_current_user(request: Request, store) -> str:
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(401, "Sign in required")
+    session = store.get_valid_session(_session_token_hash(token), now_epoch=int(time.time()))
+    if session is None:
+        store.purge_expired_sessions(now_epoch=int(time.time()))
+        raise HTTPException(401, "Session expired; sign in again")
+    if store.get_user(session["user_id"]) is None:
+        raise HTTPException(401, "Session expired; sign in again")
+    return session["user_id"]
+
+
 @app.post("/api/v1/auth/signup", dependencies=[Depends(_proxy_auth)])
-def signup(payload: Signup, response: Response):
+def signup(payload: Signup, response: Response, store=Depends(get_control_plane_store)):
     if payload.password != payload.password_confirmation:
         raise HTTPException(422, "Passwords do not match")
-    db = _connect(); user_id = secrets.token_hex(16); salt = secrets.token_bytes(16)
+    email = payload.email.strip().lower()
+    user_id = secrets.token_hex(16)
+    salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), salt, 310_000)
+    if not _postgres_store_selected():
+        db = _connect()
+        try:
+            db.execute("INSERT INTO users(id,email,salt,password_hash,created_at) VALUES(?,?,?,?,?)",
+                       (user_id, email, salt, digest, datetime.now(timezone.utc).isoformat()))
+            db.commit()
+            _new_session(db, user_id, response)
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(409, "An account with this email already exists") from exc
+        finally:
+            db.close()
+        return {"user": {"id": user_id, "email": email}}
+    token = secrets.token_urlsafe(32)
     try:
-        db.execute("INSERT INTO users(id,email,salt,password_hash,created_at) VALUES(?,?,?,?,?)",
-                   (user_id, payload.email.lower(), salt, digest, datetime.now(timezone.utc).isoformat()))
-        db.commit(); _new_session(db, user_id, response)
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(409, "An account with this email already exists") from exc
-    finally:
-        db.close()
-    return {"user": {"id": user_id, "email": payload.email.lower()}}
+        store.create_user_with_session(
+            user_id=user_id, email=email, salt=salt, password_hash=digest,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            token_hash=_session_token_hash(token), expires_at=int(time.time()) + SESSION_TTL,
+        )
+    except Exception as exc:
+        message = str(exc).lower()
+        if "unique" in message or "duplicate key" in message or "already exists" in message:
+            raise HTTPException(409, "An account with this email already exists") from exc
+        raise
+    _set_session_cookie(response, token)
+    return {"user": {"id": user_id, "email": email}}
 
 
 @app.post("/api/v1/auth/login", dependencies=[Depends(_proxy_auth)])
-def login(payload: Login, response: Response):
-    db = _connect()
-    try:
-        row = db.execute("SELECT id,email,salt,password_hash FROM users WHERE email=?", (payload.email.lower(),)).fetchone()
-        supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
-        if not row or not hmac.compare_digest(supplied, row["password_hash"]):
-            raise HTTPException(401, "Email or password is incorrect")
-        _new_session(db, row["id"], response)
-        return {"user": {"id": row["id"], "email": row["email"]}}
-    finally:
-        db.close()
+def login(payload: Login, response: Response, store=Depends(get_control_plane_store)):
+    if not _postgres_store_selected():
+        db = _connect()
+        try:
+            row = db.execute("SELECT id,email,salt,password_hash FROM users WHERE lower(email)=lower(?)",
+                             (payload.email.strip(),)).fetchone()
+            supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
+            if not row or not hmac.compare_digest(supplied, row["password_hash"]):
+                raise HTTPException(401, "Email or password is incorrect")
+            _new_session(db, row["id"], response)
+            return {"user": {"id": row["id"], "email": row["email"]}}
+        finally:
+            db.close()
+    row = store.get_user_by_email(payload.email.strip().lower())
+    supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
+    if not row or not hmac.compare_digest(supplied, row["password_hash"]):
+        raise HTTPException(401, "Email or password is incorrect")
+    token = secrets.token_urlsafe(32)
+    store.create_session(token_hash=_session_token_hash(token), user_id=row["id"],
+                         expires_at=int(time.time()) + SESSION_TTL)
+    _set_session_cookie(response, token)
+    return {"user": {"id": row["id"], "email": row["email"]}}
 
 
 @app.post("/api/v1/auth/logout", dependencies=[Depends(_proxy_auth)])
-def logout(request: Request, response: Response):
-    db = _connect(); token = request.cookies.get(SESSION_COOKIE)
-    uid = None
-    if token:
-        row = db.execute("SELECT user_id FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
-        uid = row["user_id"] if row else None
-    if uid and uid == engine_owner_id and engine_task is not None and not engine_task.done():
+def logout(request: Request, response: Response, store=Depends(get_control_plane_store)):
+    if not _postgres_store_selected():
+        db = _connect()
+        token = request.cookies.get(SESSION_COOKIE)
+        uid = None
+        if token:
+            row = db.execute("SELECT user_id FROM sessions WHERE token_hash=?",
+                             (_session_token_hash(token),)).fetchone()
+            uid = row["user_id"] if row else None
+        if uid and uid == engine_owner_id and engine_task is not None and not engine_task.done():
+            db.close()
+            raise HTTPException(409, "Stop the engine before signing out")
+        if token:
+            db.execute("DELETE FROM sessions WHERE token_hash=?", (_session_token_hash(token),))
+            db.commit()
         db.close()
+        response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
+        return {"ok": True}
+    token = request.cookies.get(SESSION_COOKIE)
+    session = store.get_session(_session_token_hash(token)) if token else None
+    uid = session["user_id"] if session else None
+    if uid and uid == engine_owner_id and engine_task is not None and not engine_task.done():
         raise HTTPException(409, "Stop the engine before signing out")
     if token:
-        db.execute("DELETE FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),)); db.commit()
-    db.close(); response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
+        store.delete_session(_session_token_hash(token))
+    response.delete_cookie(SESSION_COOKIE, path="/", httponly=True,
+                           secure=os.getenv("APP_SECURE_COOKIE", "1") == "1", samesite="lax")
     return {"ok": True}
 
 
 @app.get("/api/v1/auth/me", dependencies=[Depends(_proxy_auth)])
-def me(request: Request):
-    db = _connect()
-    try:
-        user_id = _current_user(request, db)
-        row = db.execute("SELECT id,email FROM users WHERE id=?", (user_id,)).fetchone()
-        return {"user": dict(row)}
-    finally:
-        db.close()
+def me(request: Request, store=Depends(get_control_plane_store)):
+    if not _postgres_store_selected():
+        db = _connect()
+        try:
+            user_id = _current_user(request, db)
+            row = db.execute("SELECT id,email FROM users WHERE id=?", (user_id,)).fetchone()
+            return {"user": dict(row)}
+        finally:
+            db.close()
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(401, "Sign in required")
+    token_hash = _session_token_hash(token)
+    session = store.get_valid_session(token_hash, now_epoch=int(time.time()))
+    if session is None:
+        store.purge_expired_sessions(now_epoch=int(time.time()))
+        raise HTTPException(401, "Session expired; sign in again")
+    row = store.get_user(session["user_id"])
+    if row is None:
+        raise HTTPException(401, "Session expired; sign in again")
+    return {"user": {"id": row["id"], "email": row["email"]}}
 
 
 @app.get("/api/v1/exchanges", dependencies=[Depends(_proxy_auth)])
-async def exchanges(request: Request):
-    db = _connect()
-    try:
-        uid = _current_user(request, db)
-        rows = {r["exchange_id"]: r for r in db.execute(
-            "SELECT exchange_id,auth_mode,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?", (uid,))}
+async def exchanges(request: Request, store=Depends(get_control_plane_store)):
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+        rows = {r["exchange_id"]: r for r in store.list_credentials(uid)}
+    else:
+        db = _connect()
         try:
-            import ccxt.pro as ccxtpro
-        except Exception:
-            ccxtpro = None
-        result = []
-        for exchange_id, name in VENUES.items():
-            adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
-            cls = getattr(ccxtpro, adapter_id, None) if ccxtpro else None
-            schema = AUTH_SCHEMAS[exchange_id]["modes"]
-            row = rows.get(exchange_id)
-            saved = json.loads(row["verification_json"]) if row else {}
-            fresh = bool(row and _verification_is_fresh(row["last_verified"]))
-            saved_evidence = saved.get("evidence", {})
-            saved_state = row["state"] if row else "NOT_CONFIGURED"
-            if row and not fresh and saved_state not in ("NOT_CONFIGURED", "FAILED", "DISABLED"):
-                saved_state = "STALE"
-            result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
-                           "authenticationModes": schema, "state": saved_state,
-                           "permissionVerificationAvailable": exchange_id in PERMISSION_PROBE_VENUES,
-                           "liveTradingAvailable": exchange_id in LIVE_PERMISSION_VERIFICATION_VENUES,
-                           "lastVerified": row["last_verified"] if row else None,
-                           "verificationFresh": fresh,
-                           "evidence": saved_evidence, "balances": saved.get("balances"),
-                           "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
-                           "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
-                           "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
-                           "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
-                               and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
-        return {"exchanges": result}
-    finally:
-        db.close()
+            uid = _current_user(request, db)
+            rows = {r["exchange_id"]: r for r in db.execute(
+                "SELECT exchange_id,auth_mode,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
+                (uid,))}
+        finally:
+            db.close()
+    try:
+        import ccxt.pro as ccxtpro
+    except Exception:
+        ccxtpro = None
+    result = []
+    for exchange_id, name in VENUES.items():
+        adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
+        cls = getattr(ccxtpro, adapter_id, None) if ccxtpro else None
+        schema = AUTH_SCHEMAS[exchange_id]["modes"]
+        row = rows.get(exchange_id)
+        saved = json.loads(row["verification_json"]) if row else {}
+        fresh = bool(row and _verification_is_fresh(row["last_verified"]))
+        saved_evidence = saved.get("evidence", {})
+        saved_state = row["state"] if row else "NOT_CONFIGURED"
+        if row and not fresh and saved_state not in ("NOT_CONFIGURED", "FAILED", "DISABLED"):
+            saved_state = "STALE"
+        result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
+                       "authenticationModes": schema, "state": saved_state,
+                       "permissionVerificationAvailable": exchange_id in PERMISSION_PROBE_VENUES,
+                       "liveTradingAvailable": exchange_id in LIVE_PERMISSION_VERIFICATION_VENUES,
+                       "lastVerified": row["last_verified"] if row else None,
+                       "verificationFresh": fresh,
+                       "evidence": saved_evidence, "balances": saved.get("balances"),
+                       "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
+                       "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
+                       "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
+                       "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
+                           and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
+    return {"exchanges": result}
 
 
 @app.get("/api/v1/capital-sources", dependencies=[Depends(_proxy_auth)])
-def capital_sources(request: Request):
+def capital_sources(request: Request, store=Depends(get_control_plane_store)):
     """Return only fresh, authenticated balance snapshots; this endpoint never moves funds."""
-    db = _connect()
-    try:
-        uid = _current_user(request, db)
-        rows = db.execute(
-            "SELECT exchange_id,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
-            (uid,),
-        ).fetchall()
-        sources = []
-        for row in rows:
-            if not _verification_is_fresh(row["last_verified"]):
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+        rows = store.list_credentials(uid)
+    else:
+        db = _connect()
+        try:
+            uid = _current_user(request, db)
+            rows = db.execute(
+                "SELECT exchange_id,last_verified,verification_json FROM exchange_credentials WHERE user_id=?", (uid,)
+            ).fetchall()
+        finally:
+            db.close()
+    sources = []
+    for row in rows:
+        if not _verification_is_fresh(row["last_verified"]):
+            continue
+        saved = json.loads(row["verification_json"])
+        evidence = saved.get("evidence", {})
+        if not evidence.get("scannerEligible"):
+            continue
+        for asset, amounts in (saved.get("balances") or {}).items():
+            free = float(amounts.get("free") or 0)
+            used = float(amounts.get("used") or 0)
+            if free <= 0 and used <= 0:
                 continue
-            saved = json.loads(row["verification_json"])
-            evidence = saved.get("evidence", {})
-            if not evidence.get("scannerEligible"):
-                continue
-            for asset, amounts in (saved.get("balances") or {}).items():
-                free = float(amounts.get("free") or 0)
-                used = float(amounts.get("used") or 0)
-                if free <= 0 and used <= 0:
-                    continue
-                sources.append({
-                    "exchangeId": row["exchange_id"], "exchange": VENUES.get(row["exchange_id"], row["exchange_id"]),
-                    "asset": asset, "available": free, "reserved": used, "usable": free,
-                    "valuationUsd": None, "valuationNote": "No external FX valuation is applied",
-                    "lastVerified": row["last_verified"],
-                })
-        return {"sources": sources, "fundsMoved": False}
-    finally:
-        db.close()
+            sources.append({
+                "exchangeId": row["exchange_id"], "exchange": VENUES.get(row["exchange_id"], row["exchange_id"]),
+                "asset": asset, "available": free, "reserved": used, "usable": free,
+                "valuationUsd": None, "valuationNote": "No external FX valuation is applied",
+                "lastVerified": row["last_verified"],
+            })
+    return {"sources": sources, "fundsMoved": False}
 
 
 @app.post("/api/v1/exchanges/{exchange_id}/verify", dependencies=[Depends(_proxy_auth)])
-async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: Request):
+async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: Request,
+                          store=Depends(get_control_plane_store)):
     if exchange_id not in VENUES:
         raise HTTPException(404, "Exchange is not in the supported venue registry")
-    uid = None; db = _connect()
-    try:
-        uid = _current_user(request, db)
-        if engine_owner_id == uid and engine_task is not None and not engine_task.done():
-            raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
-        if not payload.credentials or any(not isinstance(k, str) or not isinstance(v, str) for k, v in payload.credentials.items()):
-            raise HTTPException(422, "Credential fields must be text values")
-        modes = {item["id"]: item for item in AUTH_SCHEMAS[exchange_id]["modes"]}
-        mode = modes.get(payload.auth_mode)
-        if not mode:
-            raise HTTPException(422, "Authentication mode is not supported for this exchange")
-        allowed_fields = {field["name"] for field in mode["fields"]}
-        if set(payload.credentials) != allowed_fields or any(not value.strip() for value in payload.credentials.values()):
-            raise HTTPException(422, "Provide exactly the non-empty credential fields shown for this authentication mode")
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+    else:
+        db = _connect()
         try:
-            exchange = _make_exchange(exchange_id, payload.auth_mode, payload.credentials)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(500, f"Could not initialize adapter: {type(exc).__name__}") from exc
-        try:
-            evidence, balance_summary, book_summary = await _probe_exchange(exchange_id, exchange, payload.symbol)
+            uid = _current_user(request, db)
         finally:
-            try: await exchange.close()
-            except Exception: pass
-        live_eligible = evidence["liveEligible"]
-        scanner_eligible = evidence["scannerEligible"]
-        state = evidence["connectionState"]
-        verified_at = evidence["verifiedAt"]
-        key_preview = payload.credentials.get("apiKey", "")
-        masked = f"{key_preview[:3]}••••{key_preview[-3:]}" if len(key_preview) >= 7 else "••••"
-        encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
-        saved_verification = {"evidence": evidence, "balances": balance_summary,
-                              "orderBook": book_summary, "maskedKey": masked}
-        db.execute("""INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json)
-                      VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
-                      encrypted_credentials=excluded.encrypted_credentials,auth_mode=excluded.auth_mode,state=excluded.state,
-                      last_verified=excluded.last_verified,verification_json=excluded.verification_json""",
-                   (uid, exchange_id, encrypted, payload.auth_mode, state, verified_at,
-                    json.dumps(saved_verification, separators=(",", ":"))))
-        db.commit()
-        return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
-                "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
-                "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
-                "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
+            db.close()
+    if engine_owner_id == uid and engine_task is not None and not engine_task.done():
+        raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
+    if not payload.credentials or any(not isinstance(k, str) or not isinstance(v, str) for k, v in payload.credentials.items()):
+        raise HTTPException(422, "Credential fields must be text values")
+    modes = {item["id"]: item for item in AUTH_SCHEMAS[exchange_id]["modes"]}
+    mode = modes.get(payload.auth_mode)
+    if not mode:
+        raise HTTPException(422, "Authentication mode is not supported for this exchange")
+    allowed_fields = {field["name"] for field in mode["fields"]}
+    if set(payload.credentials) != allowed_fields or any(not value.strip() for value in payload.credentials.values()):
+        raise HTTPException(422, "Provide exactly the non-empty credential fields shown for this authentication mode")
+    try:
+        exchange = _make_exchange(exchange_id, payload.auth_mode, payload.credentials)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Could not initialize adapter: {type(exc).__name__}") from exc
+    try:
+        evidence, balance_summary, book_summary = await _probe_exchange(exchange_id, exchange, payload.symbol)
     finally:
-        db.close()
+        try: await exchange.close()
+        except Exception: pass
+    live_eligible = evidence["liveEligible"]
+    scanner_eligible = evidence["scannerEligible"]
+    state = evidence["connectionState"]
+    verified_at = evidence["verifiedAt"]
+    key_preview = payload.credentials.get("apiKey", "")
+    masked = f"{key_preview[:3]}••••{key_preview[-3:]}" if len(key_preview) >= 7 else "••••"
+    encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
+    saved_verification = {"evidence": evidence, "balances": balance_summary,
+                          "orderBook": book_summary, "maskedKey": masked}
+    if _postgres_store_selected():
+        store.save_credentials(
+            user_id=uid, exchange_id=exchange_id, encrypted_credentials=encrypted,
+            auth_mode=payload.auth_mode, state=state, last_verified=verified_at,
+            verification_json=json.dumps(saved_verification, separators=(",", ":")),
+        )
+    else:
+        db = _connect()
+        try:
+            db.execute("""INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json)
+                          VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
+                          encrypted_credentials=excluded.encrypted_credentials,auth_mode=excluded.auth_mode,state=excluded.state,
+                          last_verified=excluded.last_verified,verification_json=excluded.verification_json""",
+                       (uid, exchange_id, encrypted, payload.auth_mode, state, verified_at,
+                        json.dumps(saved_verification, separators=(",", ":"))))
+            db.commit()
+        finally:
+            db.close()
+    return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
+            "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
+            "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
+            "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
 
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
-def remove_exchange(exchange_id: str, request: Request):
-    db = _connect()
-    try:
-        uid = _current_user(request, db)
-        if engine_owner_id == uid and engine_task is not None and not engine_task.done():
-            raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
-        db.execute("DELETE FROM exchange_credentials WHERE user_id=? AND exchange_id=?", (uid, exchange_id)); db.commit()
-        return {"id": exchange_id, "state": "NOT_CONFIGURED"}
-    finally:
-        db.close()
+def remove_exchange(exchange_id: str, request: Request, store=Depends(get_control_plane_store)):
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+    else:
+        db = _connect()
+        try:
+            uid = _current_user(request, db)
+        finally:
+            db.close()
+    if engine_owner_id == uid and engine_task is not None and not engine_task.done():
+        raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
+    if _postgres_store_selected():
+        store.delete_credentials(uid, exchange_id)
+    else:
+        db = _connect()
+        try:
+            db.execute("DELETE FROM exchange_credentials WHERE user_id=? AND exchange_id=?", (uid, exchange_id))
+            db.commit()
+        finally:
+            db.close()
+    return {"id": exchange_id, "state": "NOT_CONFIGURED"}
 
 
 @app.get("/api/v1/engine/state", dependencies=[Depends(_proxy_auth)])
@@ -760,3 +951,46 @@ def engine_stop(request: Request):
         engine_phase = "STOPPING"
     engine_hub.request_stop()
     return {"status": "STOPPING"}
+
+
+@app.get("/health/live", include_in_schema=False)
+def liveness_probe():
+    """Process liveness only; intentionally does not depend on database availability."""
+    return {"status": "alive"}
+
+
+@app.get("/health/ready", include_in_schema=False)
+def readiness_probe():
+    """Check readiness of the explicitly selected persistence backend.
+
+    SQLite retains its legacy schema-aware check. PostgreSQL is checked directly
+    through its backend health query; this endpoint never falls back across backends.
+    """
+    db = None
+    kind = os.getenv("ARBX_STORAGE_BACKEND", "sqlite").strip().lower()
+    if kind in {"postgres", "postgresql"}:
+        try:
+            backend = control_api_backend_from_environment()
+            if backend.dialect != "postgres" or not backend.health_check():
+                raise HTTPException(status_code=503, detail="Control API persistence is not ready")
+            if not POSTGRES_CONTROL_API_PARITY_COMPLETE:
+                raise HTTPException(
+                    status_code=503,
+                    detail="PostgreSQL Control API route parity is not complete",
+                )
+            return {"status": "ready", "storage": "postgres"}
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail="Control API persistence is not ready") from None
+    if kind not in {"sqlite", ""}:
+        raise HTTPException(status_code=503, detail="Control API persistence is not ready")
+    try:
+        db = _connect()
+        row = db.execute("SELECT 1 AS healthy").fetchone()
+        if row is None or row["healthy"] != 1:
+            raise sqlite3.DatabaseError("health query returned an unexpected result")
+        return {"status": "ready", "storage": "sqlite"}
+    except (sqlite3.Error, OSError):
+        raise HTTPException(status_code=503, detail="Control API persistence is not ready") from None
+    finally:
+        if db is not None:
+            db.close()

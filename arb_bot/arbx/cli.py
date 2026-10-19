@@ -191,8 +191,8 @@ def main(argv=None) -> None:
     elif cmd == "transfer-plan":
         asyncio.run(_transfer_plan(cfg), loop_factory=lf)
     elif cmd == "opportunities":
-        from arbx.journal import TradeJournal
-        journal = TradeJournal(cfg.journal_path.with_suffix(".sqlite3"))
+        from arbx.journal import create_trade_journal
+        journal = create_trade_journal(cfg.journal_path.with_suffix(".sqlite3"))
         try:
             rows = journal.recent_opportunities()
             if not rows:
