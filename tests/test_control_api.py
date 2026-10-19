@@ -259,8 +259,10 @@ class ControlApiTests(unittest.TestCase):
         me = self.client.get("/api/v1/auth/me", headers=self.headers)
         exchanges = self.client.get("/api/v1/exchanges", headers=self.headers)
 
+        # Signup/login must fail closed on unavailable PostgreSQL; protected reads
+        # without a session must preserve the normal unauthorized response.
         self.assertEqual([signup.status_code, login.status_code, me.status_code, exchanges.status_code],
-                         [503, 503, 503, 503])
+                         [503, 503, 401, 401])
         for response in (signup, login, me, exchanges):
             self.assertNotIn("postgresql://", response.text)
             self.assertNotIn("password", response.text.lower())
