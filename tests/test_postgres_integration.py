@@ -196,20 +196,33 @@ def test_postgres_worker_lease_is_exclusive_and_fences_stale_workers(database_ur
         session_id=session_id, owner_user_id=owner_id, mode="paper", phase="CREATED",
         created_at="2026-10-19T00:00:00+00:00", updated_at="2026-10-19T00:00:00+00:00",
     )
-    first = store.claim_engine_worker_lease(
-        session_id=session_id, worker_id=f"worker-a-{suffix}", now_epoch=100, lease_seconds=30,
-    )
-    assert first["fencing_token"] == 1
+    from concurrent.futures import ThreadPoolExecutor
+
+    worker_a = f"worker-a-{suffix}"
+    worker_b = f"worker-b-{suffix}"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(
+            lambda worker: store.claim_engine_worker_lease(
+                session_id=session_id, worker_id=worker, now_epoch=100, lease_seconds=30,
+            ),
+            (worker_a, worker_b),
+        ))
+    winners = [lease for lease in outcomes if lease is not None]
+    assert len(winners) == 1
+    assert winners[0]["fencing_token"] == 1
+    first_worker = winners[0]["worker_id"]
+    second_worker = worker_b if first_worker == worker_a else worker_a
+
     assert store.claim_engine_worker_lease(
-        session_id=session_id, worker_id=f"worker-b-{suffix}", now_epoch=120, lease_seconds=30,
+        session_id=session_id, worker_id=second_worker, now_epoch=120, lease_seconds=30,
     ) is None
     takeover = store.claim_engine_worker_lease(
-        session_id=session_id, worker_id=f"worker-b-{suffix}", now_epoch=130, lease_seconds=30,
+        session_id=session_id, worker_id=second_worker, now_epoch=130, lease_seconds=30,
     )
     assert takeover["fencing_token"] == 2
     assert store.release_engine_worker_lease(
-        session_id=session_id, worker_id=f"worker-a-{suffix}", fencing_token=1,
+        session_id=session_id, worker_id=first_worker, fencing_token=1,
     ) is False
     assert store.release_engine_worker_lease(
-        session_id=session_id, worker_id=f"worker-b-{suffix}", fencing_token=2,
+        session_id=session_id, worker_id=second_worker, fencing_token=2,
     ) is True
