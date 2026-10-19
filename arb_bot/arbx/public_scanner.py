@@ -185,27 +185,28 @@ async def scan_public_spot(
                     if not asks or not bids:
                         raise RuntimeError("EmptyOrderBook")
                     timestamp = book.get("timestamp")
-                    if timestamp is not None:
-                        try:
-                            timestamp = float(timestamp)
-                        except (TypeError, ValueError, OverflowError):
-                            raise RuntimeError("InvalidOrderBookTimestamp") from None
-                        if not math.isfinite(timestamp) or timestamp <= 0:
-                            raise RuntimeError("InvalidOrderBookTimestamp")
-                        now_ms = time.time() * 1000
-                        if timestamp - now_ms > MAX_FUTURE_TIMESTAMP_SKEW_MS:
-                            raise RuntimeError("FutureOrderBookTimestamp")
-                        if now_ms - timestamp > MAX_BOOK_AGE_MS:
-                            raise RuntimeError("StaleOrderBook")
+                    if timestamp is None:
+                        raise RuntimeError("MissingOrderBookTimestamp")
+                    try:
+                        timestamp = float(timestamp)
+                    except (TypeError, ValueError, OverflowError):
+                        raise RuntimeError("InvalidOrderBookTimestamp") from None
+                    if not math.isfinite(timestamp) or timestamp <= 0:
+                        raise RuntimeError("InvalidOrderBookTimestamp")
+                    now_ms = time.time() * 1000
+                    if timestamp - now_ms > MAX_FUTURE_TIMESTAMP_SKEW_MS:
+                        raise RuntimeError("FutureOrderBookTimestamp")
+                    if now_ms - timestamp > MAX_BOOK_AGE_MS:
+                        raise RuntimeError("StaleOrderBook")
                     return symbol, {
                         "asks": asks,
                         "bids": bids,
                         "timestamp": timestamp,
-                        "timestampQuality": "exchange" if timestamp is not None else "missing_exchange_timestamp",
+                        "timestampQuality": "exchange",
                         "receivedAtMs": time.time() * 1000,
                     }, None
                 except Exception as exc:
-                    safe_codes = {"EmptyOrderBook", "InvalidOrderBookTimestamp", "FutureOrderBookTimestamp", "StaleOrderBook"}
+                    safe_codes = {"EmptyOrderBook", "MissingOrderBookTimestamp", "InvalidOrderBookTimestamp", "FutureOrderBookTimestamp", "StaleOrderBook"}
                     code = str(exc) if str(exc) in safe_codes else type(exc).__name__
                     return symbol, None, code
 
