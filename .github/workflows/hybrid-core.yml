@@ -37,18 +37,36 @@ jobs:
           PYTHONPATH: arb_bot
         run: python -m compileall -q arb_bot
 
+      - name: Prepare Python diagnostics
+        if: always()
+        run: mkdir -p artifacts
+
       - name: Run complete Python test suite
+        if: always()
         env:
           PYTHONPATH: arb_bot
-        run: python -m pytest -q tests
+        run: |
+          set -o pipefail
+          python -m pytest -q tests --junitxml=artifacts/python-tests.xml 2>&1 | tee artifacts/python-tests.log
 
       - name: Run offline paper-mode self-test
+        if: always()
         working-directory: arb_bot
         env:
           PYTHONPATH: .
           BOT_MODE: paper
           ARBX_LIVE_TRADING_ENABLED: "0"
-        run: python run.py selftest
+        run: |
+          set -o pipefail
+          python run.py selftest 2>&1 | tee ../artifacts/paper-selftest.log
+
+      - name: Upload Python diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-validation-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
 
   dashboard-validation:
     name: Node dashboard tests
@@ -67,4 +85,14 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Run dashboard tests
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee dashboard-tests.log
+
+      - name: Upload dashboard diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-validation-diagnostics
+          path: dashboard-tests.log
+          if-no-files-found: warn
