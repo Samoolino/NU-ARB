@@ -114,6 +114,10 @@ def test_fenced_append_rejects_stale_worker_after_lease_takeover(tmp_path):
         phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
     )
+    assert control.update_engine_session(
+        session_id="fence-session", owner_user_id="fence-owner", phase="STARTING",
+        updated_at="2026-01-01T00:00:01+00:00",
+    )
     lease_a = control.claim_engine_worker_lease(
         session_id="fence-session", worker_id="worker-a", now_epoch=100, lease_seconds=5,
     )
@@ -161,6 +165,10 @@ def test_fenced_append_rejects_owner_mode_and_expired_lease(tmp_path):
         session_id="fence-session", owner_user_id="fence-owner", mode="paper",
         phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
+    )
+    assert control.update_engine_session(
+        session_id="fence-session", owner_user_id="fence-owner", phase="STARTING",
+        updated_at="2026-01-01T00:00:01+00:00",
     )
     lease = control.claim_engine_worker_lease(
         session_id="fence-session", worker_id="worker-a", now_epoch=100, lease_seconds=5,
