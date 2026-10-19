@@ -36,11 +36,12 @@ def test_engine_routes_fail_closed_when_postgres_parity_is_incomplete(tmp_path, 
             ]
 
         assert [response.status_code for response in responses] == [503, 503, 503, 503]
-        assert all(
-            response.json()["detail"]
-            == "Configured persistence backend is not yet supported by the Control API"
-            for response in responses
-        )
+        assert [response.json()["detail"] for response in responses] == [
+            "Configured persistence backend is not yet supported by the Control API",
+            "Configured persistence backend is not yet supported by the Control API",
+            "PostgreSQL engine lifecycle runtime is not yet supported",
+            "PostgreSQL engine lifecycle runtime is not yet supported",
+        ]
         assert not database.exists()
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
