@@ -841,6 +841,9 @@ def engine_state(request: Request):
 
 @app.get("/api/v1/engine/journal", dependencies=[Depends(_proxy_auth)])
 def engine_journal(request: Request, store=Depends(get_control_plane_store)):
+    # Keep all PostgreSQL Control API routes closed until the complete cutover is verified.
+    if _postgres_store_selected() and not POSTGRES_CONTROL_API_PARITY_COMPLETE:
+        raise HTTPException(503, "Configured persistence backend is not yet supported by the Control API")
     # PostgreSQL reads map the authenticated owner to only their durable sessions.
     if _postgres_store_selected():
         uid = _store_current_user(request, store)
