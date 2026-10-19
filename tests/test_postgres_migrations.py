@@ -33,6 +33,7 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
         "005_engine_session_phase_constraints.sql",
         "006_engine_worker_leases.sql",
         "007_engine_session_owner_updated_index.sql",
+        "008_engine_checkpoints.sql",
     ]
     sql = files[0].read_text(encoding="utf-8")
     assert "provider_evidence" in sql
