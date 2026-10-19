@@ -7,6 +7,9 @@
     },
     "api/control.js": {
       "maxDuration": 60
+    },
+    "api/markets.js": {
+      "maxDuration": 30
     }
   },
   "headers": [
