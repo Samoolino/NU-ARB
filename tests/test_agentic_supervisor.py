@@ -153,3 +153,33 @@ def test_mapping_parser_exception_fails_closed():
     )
     assert result.status == "REJECTED"
     assert "malformed_agent_report" in result.reasons
+
+
+def test_unicode_control_characters_are_removed():
+    reports = baseline()
+    reports[0] = {**reports[0], "summary": "safe\\u009bunsafe\\u202e"}
+    result = aggregate_reports(
+        reports, expected_observation_id="obs-1", now_ms=10000
+    )
+    assert result.status == "ADVISORY_ONLY"
+    summary = next(r.summary for r in result.reports if r.role == "connectivity")
+    assert "\\u009b" not in summary
+    assert "\\u202e" in summary
+
+
+def test_oversized_observation_identifiers_fail_closed():
+    reports = baseline()
+    reports[0] = {**reports[0], "observation_id": "x" * 257}
+    result = aggregate_reports(
+        reports, expected_observation_id="obs-1", now_ms=10000
+    )
+    assert result.status == "REJECTED"
+    assert "malformed_agent_report" in result.reasons
+
+
+def test_oversized_expected_observation_identifier_fails_closed():
+    result = aggregate_reports(
+        baseline(), expected_observation_id="x" * 257, now_ms=10000
+    )
+    assert result.status == "REJECTED"
+    assert "invalid_supervisor_configuration" in result.reasons
