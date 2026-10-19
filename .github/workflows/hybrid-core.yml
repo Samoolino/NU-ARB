@@ -19,11 +19,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: arb_bot/requirements.txt
 
-      - name: Install test dependencies
+      - name: Install declared project and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest ccxt ccxtpro
+          python -m pip install -r arb_bot/requirements.txt pytest
 
       - name: Compile hybrid core
         env:
