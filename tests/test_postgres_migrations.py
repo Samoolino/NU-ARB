@@ -29,6 +29,7 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
         "001_initial_schema.sql",
         "002_plugin_audit.sql",
         "003_control_api_schema.sql",
+        "004_engine_session_registry.sql",
     ]
     sql = files[0].read_text(encoding="utf-8")
     assert "provider_evidence" in sql
@@ -42,6 +43,9 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
     assert "CREATE TABLE IF NOT EXISTS control_api_users" in control_api_sql
     assert "CREATE TABLE IF NOT EXISTS control_api_sessions" in control_api_sql
     assert "CREATE TABLE IF NOT EXISTS control_api_exchange_credentials" in control_api_sql
+    engine_sessions_sql = files[3].read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS control_api_engine_sessions" in engine_sessions_sql
+    assert "CHECK (mode IN ('paper', 'simulation'))" in engine_sessions_sql
 
 
 def test_migration_inventory_rejects_duplicate_versions(tmp_path: Path):
