@@ -626,8 +626,18 @@ def me(request: Request, store=Depends(get_control_plane_store)):
 
 @app.get("/api/v1/exchanges", dependencies=[Depends(_proxy_auth)])
 async def exchanges(request: Request, store=Depends(get_control_plane_store)):
-    uid = _store_current_user(request, store)
-    rows = {r["exchange_id"]: r for r in store.list_credentials(uid)}
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+        rows = {r["exchange_id"]: r for r in store.list_credentials(uid)}
+    else:
+        db = _connect()
+        try:
+            uid = _current_user(request, db)
+            rows = {r["exchange_id"]: r for r in db.execute(
+                "SELECT exchange_id,auth_mode,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
+                (uid,))}
+        finally:
+            db.close()
     try:
         import ccxt.pro as ccxtpro
     except Exception:
@@ -662,9 +672,20 @@ async def exchanges(request: Request, store=Depends(get_control_plane_store)):
 @app.get("/api/v1/capital-sources", dependencies=[Depends(_proxy_auth)])
 def capital_sources(request: Request, store=Depends(get_control_plane_store)):
     """Return only fresh, authenticated balance snapshots; this endpoint never moves funds."""
-    uid = _store_current_user(request, store)
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+        rows = store.list_credentials(uid)
+    else:
+        db = _connect()
+        try:
+            uid = _current_user(request, db)
+            rows = db.execute(
+                "SELECT exchange_id,last_verified,verification_json FROM exchange_credentials WHERE user_id=?", (uid,)
+            ).fetchall()
+        finally:
+            db.close()
     sources = []
-    for row in store.list_credentials(uid):
+    for row in rows:
         if not _verification_is_fresh(row["last_verified"]):
             continue
         saved = json.loads(row["verification_json"])
@@ -690,7 +711,14 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
                           store=Depends(get_control_plane_store)):
     if exchange_id not in VENUES:
         raise HTTPException(404, "Exchange is not in the supported venue registry")
-    uid = _store_current_user(request, store)
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+    else:
+        db = _connect()
+        try:
+            uid = _current_user(request, db)
+        finally:
+            db.close()
     if engine_owner_id == uid and engine_task is not None and not engine_task.done():
         raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
     if not payload.credentials or any(not isinstance(k, str) or not isinstance(v, str) for k, v in payload.credentials.items()):
@@ -722,11 +750,24 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
     encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
     saved_verification = {"evidence": evidence, "balances": balance_summary,
                           "orderBook": book_summary, "maskedKey": masked}
-    store.save_credentials(
-        user_id=uid, exchange_id=exchange_id, encrypted_credentials=encrypted,
-        auth_mode=payload.auth_mode, state=state, last_verified=verified_at,
-        verification_json=json.dumps(saved_verification, separators=(",", ":")),
-    )
+    if _postgres_store_selected():
+        store.save_credentials(
+            user_id=uid, exchange_id=exchange_id, encrypted_credentials=encrypted,
+            auth_mode=payload.auth_mode, state=state, last_verified=verified_at,
+            verification_json=json.dumps(saved_verification, separators=(",", ":")),
+        )
+    else:
+        db = _connect()
+        try:
+            db.execute("""INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json)
+                          VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
+                          encrypted_credentials=excluded.encrypted_credentials,auth_mode=excluded.auth_mode,state=excluded.state,
+                          last_verified=excluded.last_verified,verification_json=excluded.verification_json""",
+                       (uid, exchange_id, encrypted, payload.auth_mode, state, verified_at,
+                        json.dumps(saved_verification, separators=(",", ":"))))
+            db.commit()
+        finally:
+            db.close()
     return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
             "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
             "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
@@ -735,10 +776,25 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
 def remove_exchange(exchange_id: str, request: Request, store=Depends(get_control_plane_store)):
-    uid = _store_current_user(request, store)
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+    else:
+        db = _connect()
+        try:
+            uid = _current_user(request, db)
+        finally:
+            db.close()
     if engine_owner_id == uid and engine_task is not None and not engine_task.done():
         raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
-    store.delete_credentials(uid, exchange_id)
+    if _postgres_store_selected():
+        store.delete_credentials(uid, exchange_id)
+    else:
+        db = _connect()
+        try:
+            db.execute("DELETE FROM exchange_credentials WHERE user_id=? AND exchange_id=?", (uid, exchange_id))
+            db.commit()
+        finally:
+            db.close()
     return {"id": exchange_id, "state": "NOT_CONFIGURED"}
 
 
