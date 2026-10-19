@@ -645,3 +645,36 @@ def test_postgres_engine_state_returns_latest_owned_durable_session(tmp_path, mo
     finally:
         web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("post", "/api/v1/engine/start", {
+            "mode": "paper", "exchange_ids": ["binance"], "trade_size_usd": 1,
+            "max_loss_usd": 1, "target_profit_usd": 1, "require_private_stream": True,
+        }),
+        ("post", "/api/v1/engine/stop", None),
+    ],
+)
+def test_postgres_engine_mutations_remain_disabled_even_if_read_parity_flag_is_set(
+    tmp_path, monkeypatch, method, path, payload
+):
+    """Read-route parity must never accidentally enable process-local engine mutations."""
+    database = tmp_path / "must-not-be-created.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", True)
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = getattr(client, method)(path, json=payload) if payload else getattr(client, method)(path)
+
+        assert response.status_code == 503, response.text
+        assert response.json()["detail"] == "PostgreSQL engine lifecycle runtime is not yet supported"
+        assert not database.exists()
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
