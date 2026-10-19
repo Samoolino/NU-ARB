@@ -455,3 +455,63 @@ def test_postgres_journal_append_is_atomic_with_current_worker_fence(database_ur
             fencing_token=old["fencing_token"], now_epoch=106,
         )
     assert len(journal.recent_trades(session_id)) == 1
+
+
+def test_postgres_fenced_opportunity_and_certification_writes(database_url):
+    from arbx.control_store import ControlPlaneStore
+    from arbx.journal_storage import BackendTradeJournal
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"fenced-evidence-owner-{suffix}"
+    session_id = f"fenced-evidence-session-{suffix}"
+    backend = PostgresBackend(database_url)
+    store = ControlPlaneStore(backend)
+    store.create_user(
+        user_id=owner_id, email=f"{owner_id}@example.invalid", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id=session_id, owner_user_id=owner_id, mode="paper", phase="STARTING",
+        created_at="2026-10-19T00:00:00+00:00", updated_at="2026-10-19T00:00:00+00:00",
+    )
+    old = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=f"evidence-old-{suffix}", now_epoch=100, lease_seconds=5,
+    )
+    new = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=f"evidence-new-{suffix}", now_epoch=105, lease_seconds=10,
+    )
+    assert old is not None and new is not None
+    journal = BackendTradeJournal(backend)
+    opportunity = {
+        "session_id": session_id, "mode": "paper", "strategy": "fixture",
+        "exchange_a": "alpha", "exchange_b": "beta", "symbol": "BTC/USDT",
+        "requested_usd": 10.0, "expected_net_usd": 0.1, "worst_case_net_usd": -0.2,
+        "expected_net_bps": 10.0, "worst_case_net_bps": -20.0, "book_age_ms": 5.0,
+        "decision": "REJECT", "evidence": {"source": "integration"},
+    }
+    certification = {
+        "session_id": session_id, "venue": f"venue-{suffix}", "symbol": "BTC/USDT",
+        "notional_usd": 10.0, "live_eligible": False,
+        "reasons": ["paper_only"], "evidence": {"status": "unverified"},
+    }
+    with pytest.raises(PermissionError):
+        journal.append_opportunity_fenced(
+            opportunity, owner_user_id=owner_id, worker_id=old["worker_id"],
+            fencing_token=old["fencing_token"], now_epoch=106,
+        )
+    with pytest.raises(PermissionError):
+        journal.record_certification_fenced(
+            **certification, owner_user_id=owner_id, worker_id=old["worker_id"],
+            fencing_token=old["fencing_token"], now_epoch=106,
+        )
+    assert journal.append_opportunity_fenced(
+        opportunity, owner_user_id=owner_id, worker_id=new["worker_id"],
+        fencing_token=new["fencing_token"], now_epoch=106,
+    ) > 0
+    assert journal.record_certification_fenced(
+        **certification, owner_user_id=owner_id, worker_id=new["worker_id"],
+        fencing_token=new["fencing_token"], now_epoch=106,
+    ) > 0
+    assert any(row["session_id"] == session_id for row in journal.recent_opportunities())
+    assert journal.latest_certification(certification["venue"])["session_id"] == session_id
