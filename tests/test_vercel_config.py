@@ -11,6 +11,7 @@ class VercelConfigTests(unittest.TestCase):
         self.assertEqual(config.get("outputDirectory"), "public")
         self.assertIn("api/scan.js", config.get("functions", {}))
         self.assertIn("api/control.js", config.get("functions", {}))
+        self.assertIn("api/markets.js", config.get("functions", {}))
 
 
 if __name__ == "__main__":
