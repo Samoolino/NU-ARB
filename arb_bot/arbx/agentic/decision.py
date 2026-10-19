@@ -6,7 +6,7 @@ against engine-owned facts. It never places, cancels, or modifies orders.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Any
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,17 +24,20 @@ def assess_observation(
 ) -> AgentAssessment:
     """Return a fail-closed *advisory* status from normalized engine observations.
 
-    Required fields are `age_ms`, `net_edge_bps`, `books_synchronized`, and
-    `risk_gate_passed`. Missing, malformed, stale, or failed inputs are rejected.
-    This is not a live eligibility decision and cannot authorize execution.
+    Required fields are ``age_ms``, ``net_edge_bps``, ``books_synchronized``,
+    ``risk_gate_passed``, and ``venue_evidence_fresh``. This result is not live
+    eligibility and cannot authorize execution.
     """
-    reasons: list[str] = []
-    try:
-        age_ms = float(observation["age_ms"])
-        edge_bps = float(observation["net_edge_bps"])
-    except (KeyError, TypeError, ValueError):
-        return AgentAssessment("REJECTED", ("required_numeric_evidence_missing",))
+    raw_age = observation.get("age_ms")
+    raw_edge = observation.get("net_edge_bps")
+    if (isinstance(raw_age, bool) or isinstance(raw_edge, bool)
+            or not isinstance(raw_age, (int, float))
+            or not isinstance(raw_edge, (int, float))):
+        return AgentAssessment("REJECTED", ("invalid_numeric_evidence",))
 
+    age_ms = float(raw_age)
+    edge_bps = float(raw_edge)
+    reasons: list[str] = []
     if age_ms < 0:
         reasons.append("invalid_negative_age")
     elif age_ms > max_age_ms:
