@@ -1,5 +1,6 @@
 import pathlib
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -14,8 +15,8 @@ class CoinGeckoReferenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_maps_only_supported_selected_assets_to_usd_reference_prices(self):
         with patch("arbx.coingecko_reference._fetch", return_value={
-            "BTC": {"priceUsd": 80000.0, "updatedAt": 1, "ageSeconds": 4.0},
-            "ETH": {"priceUsd": 2000.0, "updatedAt": 1, "ageSeconds": 8.0},
+            "BTC": {"priceUsd": 80000.0, "updatedAt": time.time() - 4, "ageSeconds": 4.0},
+            "ETH": {"priceUsd": 2000.0, "updatedAt": time.time() - 8, "ageSeconds": 8.0},
         }) as fetch:
             result = await coingecko_reference.get_reference_prices(["BTC/USDT", "ETH/USDC", "MEME/USDT"])
 
@@ -32,8 +33,19 @@ class CoinGeckoReferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["prices"], {})
         self.assertIsNone(result["ageSeconds"])
 
+    async def test_expired_cached_reference_is_not_reused_during_provider_outage(self):
+        coingecko_reference._CACHE["data"] = {
+            "BTC": {"priceUsd": 80000.0, "updatedAt": time.time() - 240, "ageSeconds": 4.0}
+        }
+        coingecko_reference._CACHE["expires"] = 0.0
+        with patch("arbx.coingecko_reference._fetch", side_effect=TimeoutError):
+            result = await coingecko_reference.get_reference_prices(["BTC/USDT"])
+
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["prices"], {})
+
     async def test_cached_reference_avoids_repeated_provider_calls(self):
-        data = {"BTC": {"priceUsd": 80000.0, "updatedAt": 1, "ageSeconds": 4.0}}
+        data = {"BTC": {"priceUsd": 80000.0, "updatedAt": time.time() - 4, "ageSeconds": 4.0}}
         with patch("arbx.coingecko_reference._fetch", return_value=data) as fetch:
             first = await coingecko_reference.get_reference_prices(["BTC/USDT"])
             second = await coingecko_reference.get_reference_prices(["BTC/USDT"])
