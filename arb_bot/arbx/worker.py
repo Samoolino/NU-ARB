@@ -329,7 +329,9 @@ class ExchangeWorker:
                 coordinator.fail('executor returned unsuccessful result')
                 hub.stats.rejects['execution_unsuccessful'] += 1
                 return
-            coordinator.on_fill(o.start, o.start + res.pnl)
+            # TradeResult exposes PnL/final value, not fill quantities. Do not
+            # pass notional/PnL as quantities; that can fabricate overfills.
+            coordinator.on_execution_verified()
             coordinator.require_reconciliation()
             coordinator.on_realized_pnl(res.pnl)
             hub.settle(self.id, o.name, o.start, res, o.worst_bps, (time.perf_counter() - t0) * 1000.0)
