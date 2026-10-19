@@ -45,7 +45,10 @@ def _parse_report(value: Mapping[str, Any]) -> AgentReport | None:
     observed_at_ms = value.get("observed_at_ms")
     summary = value.get("summary")
 
-    if role not in _ALLOWED_ROLES or finding not in _ALLOWED_FINDINGS:
+    # Type-check before set membership: JSON arrays/objects are unhashable.
+    if not isinstance(role, str) or role not in _ALLOWED_ROLES:
+        return None
+    if not isinstance(finding, str) or finding not in _ALLOWED_FINDINGS:
         return None
     if not isinstance(observation_id, str) or not observation_id.strip():
         return None
@@ -83,7 +86,11 @@ def aggregate_reports(
         or isinstance(max_age_ms, bool)
         or not isinstance(max_age_ms, int)
         or max_age_ms < 0
-        or any(role not in _ALLOWED_ROLES for role in required_roles)
+        or not isinstance(required_roles, (tuple, list))
+        or any(
+            not isinstance(role, str) or role not in _ALLOWED_ROLES
+            for role in required_roles
+        )
     ):
         return SupervisorAssessment("REJECTED", ("invalid_supervisor_configuration",), ())
 
@@ -92,7 +99,7 @@ def aggregate_reports(
     seen_roles: set[str] = set()
     try:
         incoming = list(reports)
-    except (TypeError, ValueError):
+    except Exception:
         return SupervisorAssessment("REJECTED", ("invalid_report_collection",), ())
 
     for raw in incoming:
@@ -123,8 +130,4 @@ def aggregate_reports(
         reasons.append("required_agent_role_missing")
     if reasons:
         return SupervisorAssessment("REJECTED", tuple(sorted(set(reasons))), tuple(parsed))
-    return SupervisorAssessment(
-        "ADVISORY_ONLY",
-        (),
-        tuple(parsed),
-    )
+    return SupervisorAssessment("ADVISORY_ONLY", (), tuple(parsed))
