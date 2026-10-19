@@ -133,7 +133,7 @@ class ControlPlaneStore:
             current_phase = current["phase"]
             if phase != current_phase and phase not in ENGINE_SESSION_TRANSITIONS.get(current_phase, frozenset()):
                 raise ValueError(f"invalid engine session transition: {current_phase} -> {phase}")
-            if phase in ENGINE_SESSION_TERMINAL_PHASES and stopped_at is None:
+            if phase in ENGINE_SESSION_TERMINAL_PHASES and current_phase != phase and stopped_at is None:
                 stopped_at = updated_at
             cursor = session.execute(self._sql(
                 """UPDATE control_api_engine_sessions
