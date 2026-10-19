@@ -432,3 +432,59 @@ def test_postgres_migration_enforces_case_insensitive_email_uniqueness():
     sql = migration.read_text(encoding="utf-8").lower()
     assert "create unique index if not exists control_api_users_email_ci_idx" in sql
     assert "on control_api_users(lower(email))" in sql
+
+
+def test_engine_session_registry_persists_owner_and_scopes_listing(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-sessions.sqlite3"))
+    store.initialize()
+    for user_id, email in (("engine-owner-a", "engine-a@example.test"),
+                           ("engine-owner-b", "engine-b@example.test")):
+        store.create_user(user_id=user_id, email=email, salt=b"salt", password_hash=b"hash",
+                          created_at="2026-10-19T00:00:00+00:00")
+    store.register_engine_session(
+        session_id="paper-session-a", owner_user_id="engine-owner-a", mode="paper",
+        phase="RUNNING", created_at="2026-10-19T01:00:00+00:00",
+        updated_at="2026-10-19T01:00:00+00:00", metadata_json='{"source":"test"}',
+    )
+    store.register_engine_session(
+        session_id="paper-session-b", owner_user_id="engine-owner-b", mode="simulation",
+        phase="STOPPED", created_at="2026-10-19T02:00:00+00:00",
+        updated_at="2026-10-19T02:00:00+00:00",
+    )
+
+    assert store.get_engine_session("paper-session-a")["owner_user_id"] == "engine-owner-a"
+    assert [row["session_id"] for row in store.list_engine_sessions("engine-owner-a")] == ["paper-session-a"]
+    assert store.update_engine_session(
+        session_id="paper-session-a", owner_user_id="engine-owner-b", phase="STOPPED",
+        updated_at="2026-10-19T03:00:00+00:00",
+    ) is False
+    assert store.get_engine_session("paper-session-a")["phase"] == "RUNNING"
+    assert store.update_engine_session(
+        session_id="paper-session-a", owner_user_id="engine-owner-a", phase="STOPPED",
+        updated_at="2026-10-19T04:00:00+00:00", stopped_at="2026-10-19T04:00:00+00:00",
+    ) is True
+    assert store.get_engine_session("paper-session-a")["stopped_at"] == "2026-10-19T04:00:00+00:00"
+
+
+def test_engine_session_registry_rejects_live_mode_and_invalid_limits(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-validation.sqlite3"))
+    store.initialize()
+    store.create_user(user_id="engine-user", email="engine-user@example.test", salt=b"salt",
+                      password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00")
+
+    with pytest.raises(ValueError):
+        store.register_engine_session(
+            session_id="live-session", owner_user_id="engine-user", mode="live", phase="RUNNING",
+            created_at="2026-10-19T00:00:00+00:00", updated_at="2026-10-19T00:00:00+00:00",
+        )
+    with pytest.raises(ValueError):
+        store.list_engine_sessions("engine-user", limit=0)
+
+
+def test_engine_session_postgres_migration_has_owner_fk_and_non_live_constraint():
+    from pathlib import Path
+    migration = Path(__file__).parents[1] / "migrations" / "postgres" / "004_engine_session_registry.sql"
+    sql = migration.read_text(encoding="utf-8").lower()
+    assert "owner_user_id text not null references control_api_users(id) on delete cascade" in sql
+    assert "check (mode in ('paper', 'simulation'))" in sql
+    assert "control_api_engine_sessions_owner_created_idx" in sql
