@@ -491,6 +491,19 @@ def _session_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def _store_current_user(request: Request, store) -> str:
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(401, "Sign in required")
+    session = store.get_valid_session(_session_token_hash(token), now_epoch=int(time.time()))
+    if session is None:
+        store.purge_expired_sessions(now_epoch=int(time.time()))
+        raise HTTPException(401, "Session expired; sign in again")
+    if store.get_user(session["user_id"]) is None:
+        raise HTTPException(401, "Session expired; sign in again")
+    return session["user_id"]
+
+
 @app.post("/api/v1/auth/signup", dependencies=[Depends(_proxy_auth)])
 def signup(payload: Signup, response: Response, store=Depends(get_control_plane_store)):
     if payload.password != payload.password_confirmation:
@@ -563,77 +576,64 @@ def me(request: Request, store=Depends(get_control_plane_store)):
 
 
 @app.get("/api/v1/exchanges", dependencies=[Depends(_proxy_auth)])
-async def exchanges(request: Request):
-    db = _connect()
+async def exchanges(request: Request, store=Depends(get_control_plane_store)):
+    uid = _store_current_user(request, store)
+    rows = {r["exchange_id"]: r for r in store.list_credentials(uid)}
     try:
-        uid = _current_user(request, db)
-        rows = {r["exchange_id"]: r for r in db.execute(
-            "SELECT exchange_id,auth_mode,state,last_verified,verification_json FROM exchange_credentials WHERE user_id=?", (uid,))}
-        try:
-            import ccxt.pro as ccxtpro
-        except Exception:
-            ccxtpro = None
-        result = []
-        for exchange_id, name in VENUES.items():
-            adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
-            cls = getattr(ccxtpro, adapter_id, None) if ccxtpro else None
-            schema = AUTH_SCHEMAS[exchange_id]["modes"]
-            row = rows.get(exchange_id)
-            saved = json.loads(row["verification_json"]) if row else {}
-            fresh = bool(row and _verification_is_fresh(row["last_verified"]))
-            saved_evidence = saved.get("evidence", {})
-            saved_state = row["state"] if row else "NOT_CONFIGURED"
-            if row and not fresh and saved_state not in ("NOT_CONFIGURED", "FAILED", "DISABLED"):
-                saved_state = "STALE"
-            result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
-                           "authenticationModes": schema, "state": saved_state,
-                           "permissionVerificationAvailable": exchange_id in PERMISSION_PROBE_VENUES,
-                           "liveTradingAvailable": exchange_id in LIVE_PERMISSION_VERIFICATION_VENUES,
-                           "lastVerified": row["last_verified"] if row else None,
-                           "verificationFresh": fresh,
-                           "evidence": saved_evidence, "balances": saved.get("balances"),
-                           "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
-                           "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
-                           "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
-                           "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
-                               and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
-        return {"exchanges": result}
-    finally:
-        db.close()
+        import ccxt.pro as ccxtpro
+    except Exception:
+        ccxtpro = None
+    result = []
+    for exchange_id, name in VENUES.items():
+        adapter_id = PYTHON_ADAPTERS.get(exchange_id, exchange_id)
+        cls = getattr(ccxtpro, adapter_id, None) if ccxtpro else None
+        schema = AUTH_SCHEMAS[exchange_id]["modes"]
+        row = rows.get(exchange_id)
+        saved = json.loads(row["verification_json"]) if row else {}
+        fresh = bool(row and _verification_is_fresh(row["last_verified"]))
+        saved_evidence = saved.get("evidence", {})
+        saved_state = row["state"] if row else "NOT_CONFIGURED"
+        if row and not fresh and saved_state not in ("NOT_CONFIGURED", "FAILED", "DISABLED"):
+            saved_state = "STALE"
+        result.append({"id": exchange_id, "name": name, "adapterAvailable": bool(cls),
+                       "authenticationModes": schema, "state": saved_state,
+                       "permissionVerificationAvailable": exchange_id in PERMISSION_PROBE_VENUES,
+                       "liveTradingAvailable": exchange_id in LIVE_PERMISSION_VERIFICATION_VENUES,
+                       "lastVerified": row["last_verified"] if row else None,
+                       "verificationFresh": fresh,
+                       "evidence": saved_evidence, "balances": saved.get("balances"),
+                       "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
+                       "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
+                       "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
+                       "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
+                           and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
+    return {"exchanges": result}
 
 
 @app.get("/api/v1/capital-sources", dependencies=[Depends(_proxy_auth)])
-def capital_sources(request: Request):
+def capital_sources(request: Request, store=Depends(get_control_plane_store)):
     """Return only fresh, authenticated balance snapshots; this endpoint never moves funds."""
-    db = _connect()
-    try:
-        uid = _current_user(request, db)
-        rows = db.execute(
-            "SELECT exchange_id,last_verified,verification_json FROM exchange_credentials WHERE user_id=?",
-            (uid,),
-        ).fetchall()
-        sources = []
-        for row in rows:
-            if not _verification_is_fresh(row["last_verified"]):
+    uid = _store_current_user(request, store)
+    sources = []
+    for row in store.list_credentials(uid):
+        if not _verification_is_fresh(row["last_verified"]):
+            continue
+        saved = json.loads(row["verification_json"])
+        evidence = saved.get("evidence", {})
+        if not evidence.get("scannerEligible"):
+            continue
+        for asset, amounts in (saved.get("balances") or {}).items():
+            free = float(amounts.get("free") or 0)
+            used = float(amounts.get("used") or 0)
+            if free <= 0 and used <= 0:
                 continue
-            saved = json.loads(row["verification_json"])
-            evidence = saved.get("evidence", {})
-            if not evidence.get("scannerEligible"):
-                continue
-            for asset, amounts in (saved.get("balances") or {}).items():
-                free = float(amounts.get("free") or 0)
-                used = float(amounts.get("used") or 0)
-                if free <= 0 and used <= 0:
-                    continue
-                sources.append({
-                    "exchangeId": row["exchange_id"], "exchange": VENUES.get(row["exchange_id"], row["exchange_id"]),
-                    "asset": asset, "available": free, "reserved": used, "usable": free,
-                    "valuationUsd": None, "valuationNote": "No external FX valuation is applied",
-                    "lastVerified": row["last_verified"],
-                })
-        return {"sources": sources, "fundsMoved": False}
-    finally:
-        db.close()
+            sources.append({
+                "exchangeId": row["exchange_id"], "exchange": VENUES.get(row["exchange_id"], row["exchange_id"]),
+                "asset": asset, "available": free, "reserved": used, "usable": free,
+                "valuationUsd": None, "valuationNote": "No external FX valuation is applied",
+                "lastVerified": row["last_verified"],
+            })
+    return {"sources": sources, "fundsMoved": False}
 
 
 @app.post("/api/v1/exchanges/{exchange_id}/verify", dependencies=[Depends(_proxy_auth)])
