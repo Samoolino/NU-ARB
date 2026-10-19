@@ -58,6 +58,7 @@ class ControlPlaneStore:
                 error_code TEXT,
                 metadata_json TEXT NOT NULL DEFAULT '{}')""",
             "CREATE INDEX IF NOT EXISTS control_api_engine_sessions_owner_created_idx ON control_api_engine_sessions(owner_user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS control_api_engine_sessions_owner_updated_idx ON control_api_engine_sessions(owner_user_id, updated_at DESC, created_at DESC, session_id ASC)",
             """CREATE TABLE IF NOT EXISTS control_api_engine_worker_leases (
                 session_id TEXT PRIMARY KEY REFERENCES control_api_engine_sessions(session_id) ON DELETE CASCADE,
                 worker_id TEXT NOT NULL,
