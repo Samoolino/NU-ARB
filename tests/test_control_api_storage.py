@@ -555,6 +555,7 @@ def test_postgres_engine_journal_reads_only_sessions_owned_by_authenticated_user
 
     monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
     monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", True)
     store = ControlPlaneStore(SQLiteBackend(tmp_path / "journal-owner-scope.sqlite3"))
     store.initialize()
     for user_id, email in (("journal-owner-a", "journal-a@example.test"),
