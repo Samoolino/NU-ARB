@@ -49,7 +49,10 @@ def _fetch(ids: list[str]) -> dict:
 
 async def get_reference_prices(symbols: list[str]) -> dict:
     """Fetch a bounded, cached CoinGecko reference snapshot, failing soft on outages."""
-    wanted = sorted({symbol.split("/", 1)[0] for symbol in symbols if "/" in symbol and symbol.split("/", 1)[0] in COIN_IDS})
+    requested_pairs = sorted({symbol for symbol in symbols if "/" in symbol
+                              and symbol.split("/", 1)[0] in COIN_IDS
+                              and symbol.split("/", 1)[1] in {"USDT", "USDC", "DAI"}})
+    wanted = sorted({symbol.split("/", 1)[0] for symbol in requested_pairs})
     if not wanted:
         return {"status": "unavailable", "provider": "CoinGecko", "prices": {}, "ageSeconds": None}
     now = time.monotonic()
@@ -64,12 +67,10 @@ async def get_reference_prices(symbols: list[str]) -> dict:
             if not isinstance(cached, dict) or not cached:
                 return {"status": "unavailable", "provider": "CoinGecko", "prices": {}, "ageSeconds": None}
     prices = {}
-    for symbol in wanted:
-        entry = cached.get(symbol)
+    for pair in requested_pairs:
+        entry = cached.get(pair.split("/", 1)[0])
         if isinstance(entry, dict):
-            prices[f"{symbol}/USDT"] = entry["priceUsd"]
-            prices[f"{symbol}/USDC"] = entry["priceUsd"]
-            prices[f"{symbol}/DAI"] = entry["priceUsd"]
+            prices[pair] = entry["priceUsd"]
     ages = [cached[symbol]["ageSeconds"] for symbol in wanted
             if isinstance(cached.get(symbol), dict)]
     return {"status": "available" if prices else "unavailable", "provider": "CoinGecko", "prices": prices,
