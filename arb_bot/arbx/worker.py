@@ -313,7 +313,7 @@ class ExchangeWorker:
                 return
             t0 = time.perf_counter()
             coordinator = ExecutionCoordinator()
-            if not coordinator.gate(expected_net_usd=o.expected_final - o.start, worst_case_net_usd=o.worst_final - o.start, min_profit_usd=max(0.0, getattr(cfg, 'min_profit_usd', 0.0)), min_worst_profit_usd=max(0.0, getattr(cfg, 'min_worst_profit_usd', 0.0))):
+            if not coordinator.gate(expected_net_usd=o.expected_final - o.start, worst_case_net_usd=o.worst_final - o.start, min_profit_usd=max(0.0, getattr(self.cfg, 'min_profit_usd', 0.0)), min_worst_profit_usd=max(0.0, getattr(self.cfg, 'min_worst_profit_usd', 0.0))):
                 hub.stats.rejects['execution_profitability_gate'] += 1
                 return
             coordinator.on_submission()
@@ -329,8 +329,9 @@ class ExchangeWorker:
                 coordinator.fail('executor returned unsuccessful result')
                 hub.stats.rejects['execution_unsuccessful'] += 1
                 return
-            coordinator.on_fill(o.start, o.start + res.pnl)
-            coordinator.require_reconciliation()
+            # TradeResult exposes PnL/final value, not fill quantities. Do not
+            # pass notional/PnL as quantities; that can fabricate overfills.
+            coordinator.on_executor_success()
             coordinator.on_realized_pnl(res.pnl)
             hub.settle(self.id, o.name, o.start, res, o.worst_bps, (time.perf_counter() - t0) * 1000.0)
             if coordinator.halted:

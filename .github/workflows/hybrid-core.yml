@@ -8,9 +8,14 @@ on:
       - architecture/native-adapter-core
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  hybrid-core:
+  python-validation:
+    name: Python compile, tests, and offline paper self-test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,18 +24,75 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: arb_bot/requirements.txt
 
-      - name: Install test dependencies
+      - name: Install declared project and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest ccxt ccxtpro
+          python -m pip install -r arb_bot/requirements.txt pytest
 
-      - name: Compile hybrid core
+      - name: Compile Python source
         env:
           PYTHONPATH: arb_bot
         run: python -m compileall -q arb_bot
 
-      - name: Run hybrid core tests
+      - name: Prepare Python diagnostics
+        if: always()
+        run: mkdir -p artifacts
+
+      - name: Run complete Python test suite
+        if: always()
         env:
           PYTHONPATH: arb_bot
-        run: python -m pytest -q tests/test_hybrid_engine.py
+        run: |
+          set -o pipefail
+          python -m pytest -q tests --junitxml=artifacts/python-tests.xml 2>&1 | tee artifacts/python-tests.log
+
+      - name: Run offline paper-mode self-test
+        if: always()
+        working-directory: arb_bot
+        env:
+          PYTHONPATH: .
+          BOT_MODE: paper
+          ARBX_LIVE_TRADING_ENABLED: "0"
+        run: |
+          set -o pipefail
+          python run.py selftest 2>&1 | tee ../artifacts/paper-selftest.log
+
+      - name: Upload Python diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-validation-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+
+  dashboard-validation:
+    name: Node dashboard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dashboard dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run dashboard tests
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee dashboard-tests.log
+
+      - name: Upload dashboard diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-validation-diagnostics
+          path: dashboard-tests.log
+          if-no-files-found: warn

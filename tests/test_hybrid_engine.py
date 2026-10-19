@@ -134,3 +134,49 @@ def test_execution_coordinator_halts_on_negative_pnl():
     coordinator.on_realized_pnl(-0.01)
     assert coordinator.halted
     assert coordinator.state == ExecutionState.HALTED
+
+
+
+def test_execution_coordinator_fails_closed_on_non_finite_profitability():
+    from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
+
+    coordinator = ExecutionCoordinator()
+    assert not coordinator.gate(
+        expected_net_usd=float("nan"),
+        worst_case_net_usd=0.01,
+        min_profit_usd=0.0,
+    )
+    assert coordinator.halted
+    assert coordinator.state == ExecutionState.HALTED
+    assert coordinator.events[-1]["reason"] == "invalid_profitability_evidence"
+
+
+def test_execution_coordinator_rejects_non_finite_fill_quantities():
+    import pytest
+    from arbx.hybrid.execution import ExecutionCoordinator
+
+    coordinator = ExecutionCoordinator()
+    for requested, filled in ((float("nan"), 0.0), (1.0, float("nan")), (float("inf"), 0.5)):
+        with pytest.raises(ValueError):
+            coordinator.on_fill(requested, filled)
+
+
+def test_execution_coordinator_halts_on_non_finite_realized_pnl():
+    from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
+
+    coordinator = ExecutionCoordinator()
+    coordinator.on_realized_pnl(float("nan"))
+    assert coordinator.halted
+    assert coordinator.state == ExecutionState.HALTED
+    assert coordinator.events[-1]["reason"] == "invalid_realized_pnl"
+
+
+
+def test_execution_coordinator_keeps_executor_success_in_reconciliation_without_fabricated_fill_sizes():
+    from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
+
+    coordinator = ExecutionCoordinator()
+    coordinator.on_submission(order_id="paper-cycle")
+    coordinator.on_executor_success()
+    assert coordinator.state == ExecutionState.RECONCILING
+    assert coordinator.events[-1]["executor_result"] == "ok"

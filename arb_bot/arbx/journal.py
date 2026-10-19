@@ -81,7 +81,9 @@ class TradeJournal:
 
     def realized(self, session_id: str) -> float:
         row = self.db.execute(
-            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM trades WHERE session_id=? AND execution_status='FILLED'",
+            "SELECT COALESCE(SUM(net_pnl), 0) AS pnl FROM trades WHERE session_id=? "
+            "AND execution_status='FILLED' "
+            "AND verification_status IN ('PAPER_SIMULATION', 'FILL_RESULT_RECORDED', 'RECONCILED')",
             (session_id,),
         ).fetchone()
         return float(row["pnl"])
