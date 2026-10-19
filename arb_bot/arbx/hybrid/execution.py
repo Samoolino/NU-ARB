@@ -122,6 +122,14 @@ class ExecutionCoordinator:
             )
         return self.state
 
+    def on_execution_verified(self, *, verification: str = "executor_result_ok") -> None:
+        """Record a successful executor result when native fill sizes are unavailable.
+
+        This status transition intentionally does not fabricate requested/filled
+        quantities. Use on_fill() only when actual quantities are available.
+        """
+        self.transition(ExecutionState.FILLED, verification=verification)
+
     def require_reconciliation(self) -> None:
         self.transition(ExecutionState.RECONCILING)
 
