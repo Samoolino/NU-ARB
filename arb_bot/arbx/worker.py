@@ -331,8 +331,7 @@ class ExchangeWorker:
                 return
             # TradeResult exposes PnL/final value, not fill quantities. Do not
             # pass notional/PnL as quantities; that can fabricate overfills.
-            coordinator.on_execution_verified()
-            coordinator.require_reconciliation()
+            coordinator.on_executor_success()
             coordinator.on_realized_pnl(res.pnl)
             hub.settle(self.id, o.name, o.start, res, o.worst_bps, (time.perf_counter() - t0) * 1000.0)
             if coordinator.halted:
