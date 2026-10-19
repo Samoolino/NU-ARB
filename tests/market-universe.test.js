@@ -39,3 +39,8 @@ test("supports bounded paging for large token/platform catalogs", () => {
   assert.deepEqual(parseUniversePage("1000","100",1000),{page:1000,perPage:100});
   assert.equal(parseUniversePage("1001","100",1000),null);
 });
+
+test("does not propose a self-quoted pair for a stablecoin ticker", () => {
+  const [usdt] = normalizeCoinMarketRows([{id:"tether",symbol:"usdt",name:"Tether"}]);
+  assert.deepEqual(usdt.candidateSpotPairs, ["USDT/USDC", "USDT/DAI"]);
+});
