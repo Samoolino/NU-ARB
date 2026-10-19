@@ -151,10 +151,19 @@ def test_control_store_engine_registry_round_trips_on_postgres(database_url):
 
     session_id = f"paper-session-{suffix}"
     store.register_engine_session(
-        session_id=session_id, owner_user_id=owner_id, mode="paper", phase="RUNNING",
+        session_id=session_id, owner_user_id=owner_id, mode="paper", phase="CREATED",
         created_at="2026-10-19T01:00:00+00:00",
         updated_at="2026-10-19T01:00:00+00:00", metadata_json='{"origin":"integration"}',
     )
+    for phase, timestamp in (
+        ("STARTING", "2026-10-19T01:00:01+00:00"),
+        ("PREFLIGHTING", "2026-10-19T01:00:02+00:00"),
+        ("RUNNING", "2026-10-19T01:00:03+00:00"),
+    ):
+        assert store.update_engine_session(
+            session_id=session_id, owner_user_id=owner_id,
+            phase=phase, updated_at=timestamp,
+        )
 
     assert store.get_engine_session(session_id)["owner_user_id"] == owner_id
     assert [row["session_id"] for row in store.list_engine_sessions(owner_id)] == [session_id]
