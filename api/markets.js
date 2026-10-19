@@ -3,7 +3,10 @@ import { EXCHANGES, EXCHANGE_BY_ID } from "../lib/exchange-registry.js";
 import { normalizeCoinListRows, normalizeCoinMarketRows, normalizeVenueMarketRows, parseUniversePage } from "../lib/market-universe.js";
 
 const COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets";
-const MAX_VENUES_PER_REQUEST = 4;
+const MAX_VENUES_PER_REQUEST = 2;
+const VENUE_CATALOG_TTL_MS = 60_000;
+const venueCatalogCache = new Map();
+const venueCatalogInFlight = new Map();
 let coinListCache = null;
 let coinListCacheUntil = 0;
 
@@ -51,15 +54,31 @@ export default async function handler(request, response) {
     if (venueIds.length < 1 || venueIds.length > MAX_VENUES_PER_REQUEST || venueIds.some((id) => !EXCHANGE_BY_ID[id] || typeof ccxt[id] !== "function")) {
       return response.status(400).json({ error: `Select 1–${MAX_VENUES_PER_REQUEST} registered venues with available CCXT REST adapters`, registeredVenueCount: EXCHANGES.length });
     }
-    const settled = await Promise.allSettled(venueIds.map(async (id) => {
-      const exchange = new ccxt[id]({ enableRateLimit: true, timeout: 8000, options: { defaultType: "spot" } });
+    const venues = [];
+    for (const id of venueIds) {
       try {
-        await exchange.loadMarkets();
-        const rows = normalizeVenueMarketRows(id, Object.values(exchange.markets));
-        return { id, name: EXCHANGE_BY_ID[id].name, status: "available", totalSpotPairs: rows.length, rows };
-      } finally { try { await exchange.close(); } catch {} }
-    }));
-    const venues = settled.map((result, index) => result.status === "fulfilled" ? result.value : ({ id: venueIds[index], name: EXCHANGE_BY_ID[venueIds[index]].name, status: "unavailable", totalSpotPairs: 0, rows: [], error: result.reason?.name || "RequestError" }));
+        const cached = venueCatalogCache.get(id);
+        if (cached && Date.now() < cached.expiresAt) { venues.push({ ...cached.value, cacheHit: true }); continue; }
+        let pending = venueCatalogInFlight.get(id);
+        if (!pending) {
+          pending = (async () => {
+            const exchange = new ccxt[id]({ enableRateLimit: true, timeout: 8000, options: { defaultType: "spot" } });
+            try {
+              await exchange.loadMarkets();
+              const rows = normalizeVenueMarketRows(id, Object.values(exchange.markets));
+              const value = { id, name: EXCHANGE_BY_ID[id].name, status: "available", totalSpotPairs: rows.length, rows };
+              venueCatalogCache.set(id, { value, expiresAt: Date.now() + VENUE_CATALOG_TTL_MS });
+              return value;
+            } finally { try { await exchange.close(); } catch {} }
+          })();
+          venueCatalogInFlight.set(id, pending);
+        }
+        try { venues.push(await pending); }
+        finally { venueCatalogInFlight.delete(id); }
+      } catch (error) {
+        venues.push({ id, name: EXCHANGE_BY_ID[id].name, status: "unavailable", totalSpotPairs: 0, rows: [], error: error?.name || "RequestError" });
+      }
+    }
     return response.status(200).json({ source: "ccxt_rest_market_catalog", dataType: "venue_listings_not_streaming_prices", venues, maxVenuesPerRequest: MAX_VENUES_PER_REQUEST, note: "Market catalogs verify listings, not persistent WebSocket health or token contract/network identity." });
   }
   return response.status(400).json({ error: "source must be coingecko or venues" });
