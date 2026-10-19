@@ -41,6 +41,20 @@ def test_non_finite_numeric_evidence_fails_closed():
         assert "invalid_numeric_evidence" in result.reasons
 
 
+def test_unrepresentably_large_numeric_evidence_fails_closed():
+    obs = good_observation()
+    obs["age_ms"] = 10**10000
+    result = assess_observation(obs)
+    assert result.status == "REJECTED"
+    assert "invalid_numeric_evidence" in result.reasons
+
+
+def test_unrepresentably_large_threshold_fails_closed():
+    result = assess_observation(good_observation(), max_age_ms=10**10000)
+    assert result.status == "REJECTED"
+    assert "invalid_threshold_configuration" in result.reasons
+
+
 def test_stale_book_is_rejected():
     obs = good_observation()
     obs["age_ms"] = 2000
