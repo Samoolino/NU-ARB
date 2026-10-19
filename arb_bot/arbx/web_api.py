@@ -477,7 +477,7 @@ def _current_user(request: Request, db: sqlite3.Connection):
 
 @app.get("/api/v1/health", dependencies=[Depends(_proxy_auth)])
 def health():
-    enabled = False"
+    enabled = False
     return {"service": "arbx-control-api", "status": "available", "execution_enabled": enabled}
 
 
@@ -497,9 +497,9 @@ def healthz():
 
 @app.get("/api/v1/runtime", dependencies=[Depends(_proxy_auth)])
 def runtime_config():
-    return {"liveTradingEnabled": False",
+    return {"liveTradingEnabled": False,
             "executionActive": bool(engine_task and not engine_task.done()),
-            "executionEnabled": False",
+            "executionEnabled": False,
             "enginePhase": engine_phase}
 
 
@@ -687,7 +687,7 @@ async def exchanges(request: Request, store=Depends(get_control_plane_store)):
                        "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
                        "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
                        "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
-                           and False"})
+                           and False})
     return {"exchanges": result}
 
 
@@ -793,7 +793,7 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
     return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
             "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
             "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
-            "executionEnabled": live_eligible and False"}
+            "executionEnabled": live_eligible and False}
 
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
@@ -837,7 +837,7 @@ def engine_state(request: Request):
     return {"status": status, "mode": engine_hub.cfg.mode,
             "stats": stats,
             "error": engine_error,
-            "executionEnabled": engine_hub.cfg.mode == "live" and False"}
+            "executionEnabled": engine_hub.cfg.mode == "live" and False}
 
 
 @app.get("/api/v1/engine/journal", dependencies=[Depends(_proxy_auth)])
