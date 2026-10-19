@@ -24,6 +24,13 @@ def test_migrations_are_idempotent(database_url):
     with psycopg.connect(database_url) as conn:
         versions = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
     assert versions == [("001",), ("002",), ("003",), ("004",), ("005",), ("006",), ("007",)]
+    with psycopg.connect(database_url) as conn:
+        indexes = {
+            row[0] for row in conn.execute(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()"
+            ).fetchall()
+        }
+    assert "control_api_engine_sessions_owner_updated_idx" in indexes
 
 
 def test_foreign_key_and_unique_constraints_are_enforced(database_url):
