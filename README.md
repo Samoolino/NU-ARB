@@ -28,7 +28,7 @@ Set these Railway service variables:
 - `APP_SECURE_COOKIE=1`.
 - `ENGINE_PROXY_TOKEN`: a long random service-to-service secret.
 - `CREDENTIAL_ENCRYPTION_KEY`: a stable 32-byte key encoded as 64 hex characters. Generate with `python -c "import secrets; print(secrets.token_hex(32))"` and back it up offline. Do not rotate it after credentials have been stored unless you migrate those credentials; changing it makes them unreadable.
-- `ARBX_LIVE_TRADING_ENABLED=0` initially. Keep it disabled until HTTPS, storage, exchange permissions, and the live preflight are verified.
+- `ARBX_LIVE_TRADING_ENABLED=0` is retained for configuration compatibility only. Live order submission is disabled in this build; setting the variable to `1` does not enable it.
 
 In Vercel Production, set `ARBX_CONTROL_API_URL` to the Railway HTTPS origin (for example `https://arb-control-production.up.railway.app`) and set `ENGINE_PROXY_TOKEN` to the same sensitive secret used in Railway. Redeploy after setting these variables. Keep Preview disconnected from production secrets; use a separate test service and token if account flows need Preview testing.
 
