@@ -278,3 +278,37 @@ def test_postgres_engine_state_route_uses_real_database_and_owner_scope(database
     finally:
         web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+def test_latest_engine_session_query_is_owner_scoped_and_update_ordered(database_url):
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"latest-query-owner-{suffix}"
+    foreign_id = f"latest-query-foreign-{suffix}"
+    store = ControlPlaneStore(PostgresBackend(database_url))
+    for user_id in (owner_id, foreign_id):
+        store.create_user(
+            user_id=user_id, email=f"{user_id}@example.invalid", salt=b"salt",
+            password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+        )
+    store.register_engine_session(
+        session_id=f"created-latest-{suffix}", owner_user_id=owner_id, mode="paper",
+        phase="STOPPED", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T01:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id=f"updated-latest-{suffix}", owner_user_id=owner_id, mode="simulation",
+        phase="RUNNING", created_at="2026-10-18T00:00:00+00:00",
+        updated_at="2026-10-19T02:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id=f"foreign-latest-{suffix}", owner_user_id=foreign_id, mode="paper",
+        phase="RUNNING", created_at="2026-10-20T00:00:00+00:00",
+        updated_at="2026-10-20T00:00:00+00:00",
+    )
+
+    latest = store.get_latest_engine_session(owner_id)
+    assert latest is not None
+    assert latest["session_id"] == f"updated-latest-{suffix}"
+    assert latest["owner_user_id"] == owner_id
