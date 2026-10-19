@@ -53,3 +53,22 @@ def test_readiness_rejects_non_postgres_backend_for_postgres_selection(monkeypat
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Control API persistence is not ready"}
+
+
+
+def test_readiness_sanitizes_unexpected_postgres_backend_errors(monkeypatch):
+    """Unexpected backend exceptions must fail readiness closed, not leak a 500."""
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", True)
+
+    def broken_backend():
+        raise RuntimeError("private database connection details")
+
+    monkeypatch.setattr(web_api, "control_api_backend_from_environment", broken_backend)
+
+    with TestClient(web_api.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Control API persistence is not ready"}
+    assert "private database connection details" not in response.text
