@@ -131,11 +131,11 @@ def test_duplicate_required_roles_are_invalid_configuration():
 
 def test_summary_control_characters_are_removed():
     reports = baseline()
-    reports[0] = {**reports[0], "summary": "line1\\nline2\\x1b[31m"}
+    reports[0] = {**reports[0], "summary": "line1\nline2\x1b[31m"}
     result = aggregate_reports(
         reports, expected_observation_id="obs-1", now_ms=10000
     )
     assert result.status == "ADVISORY_ONLY"
     summary = next(r.summary for r in result.reports if r.role == "connectivity")
-    assert "\\n" not in summary
-    assert "\\x1b" not in summary
+    assert "\n" not in summary
+    assert "\x1b" not in summary
