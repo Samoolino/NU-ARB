@@ -402,7 +402,9 @@ class ControlApiTests(unittest.TestCase):
             for method, path, payload in requests
         ]
 
-        self.assertEqual([response.status_code for response in responses], [503] * len(requests))
+        # Unauthenticated capital-source requests remain 401; authenticated engine
+        # operations fail closed with 503 when PostgreSQL route parity is incomplete.
+        self.assertEqual([response.status_code for response in responses], [401, 503, 503, 503, 503])
         for response in responses:
             self.assertNotIn("postgresql://", response.text)
         self.assertFalse(self.db_path.exists())
