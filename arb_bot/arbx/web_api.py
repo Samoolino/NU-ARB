@@ -127,6 +127,22 @@ async def validation_error_without_input(request: Request, exc: RequestValidatio
     return JSONResponse(status_code=422, content={"detail": "Invalid request. Check the required fields and try again."})
 
 
+# PostgreSQL connection/transaction errors must fail closed with a sanitized response.
+# Keep psycopg optional at import time for SQLite-only installations.
+try:
+    from psycopg import Error as _PostgresStorageError
+except ImportError:
+    _PostgresStorageError = None
+
+if _PostgresStorageError is not None:
+    @app.exception_handler(_PostgresStorageError)
+    async def postgres_storage_error_without_details(request: Request, exc: Exception):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Control API persistence is not ready"},
+        )
+
+
 def control_api_backend_from_environment():
     """Resolve the configured storage backend without changing API persistence.
 
