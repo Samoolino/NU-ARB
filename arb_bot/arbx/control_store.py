@@ -141,7 +141,7 @@ class ControlPlaneStore:
                 stopped_at = None
             cursor = session.execute(self._sql(
                 """UPDATE control_api_engine_sessions
-                   SET phase=?, updated_at=?, stopped_at=COALESCE(?, stopped_at), error_code=?,
+                   SET phase=?, updated_at=?, stopped_at=COALESCE(?, stopped_at), error_code=COALESCE(?, error_code),
                        metadata_json=COALESCE(?, metadata_json)
                    WHERE session_id=? AND owner_user_id=?"""
             ), (phase, updated_at, stopped_at, error_code, metadata_json, session_id, owner_user_id))
