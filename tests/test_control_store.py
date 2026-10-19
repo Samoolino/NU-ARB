@@ -722,3 +722,33 @@ def test_terminal_engine_session_cannot_acquire_worker_lease(tmp_path):
     assert store.claim_engine_worker_lease(
         session_id="terminal-session", worker_id="worker-a", now_epoch=200, lease_seconds=30,
     ) is None
+
+
+
+def test_terminal_transition_releases_worker_lease_and_invalidates_old_owner(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-lease-release.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="lease-stop-owner", email="lease-stop-owner@example.test",
+        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="lease-stop-session", owner_user_id="lease-stop-owner", mode="paper",
+        phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    lease = store.claim_engine_worker_lease(
+        session_id="lease-stop-session", worker_id="worker-stop", now_epoch=100, lease_seconds=30,
+    )
+    assert lease is not None
+    assert store.update_engine_session(
+        session_id="lease-stop-session", owner_user_id="lease-stop-owner",
+        phase="STOPPED", updated_at="2026-01-01T00:01:00+00:00",
+    )
+    assert store.release_engine_worker_lease(
+        session_id="lease-stop-session", worker_id="worker-stop",
+        fencing_token=lease["fencing_token"],
+    ) is False
+    assert store.claim_engine_worker_lease(
+        session_id="lease-stop-session", worker_id="worker-new", now_epoch=200, lease_seconds=30,
+    ) is None
