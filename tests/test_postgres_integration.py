@@ -318,6 +318,7 @@ def test_latest_engine_session_query_is_owner_scoped_and_update_ordered(database
 def test_postgres_credential_loader_is_owner_scoped_and_decrypts_only_requested_credentials(database_url, monkeypatch):
     """Use the real PostgreSQL store to prove owner scoping and encrypted credential loading."""
     import json
+    import secrets
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from arbx import web_api
     from arbx.control_store import ControlPlaneStore
@@ -337,7 +338,7 @@ def test_postgres_credential_loader_is_owner_scoped_and_decrypts_only_requested_
     monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", key.hex())
 
     def encrypted(payload):
-        nonce = bytes(range(12))
+        nonce = secrets.token_bytes(12)
         return nonce + AESGCM(key).encrypt(
             nonce, json.dumps(payload, separators=(",", ":")).encode(),
             b"arbx-exchange-credentials-v1",
@@ -360,5 +361,5 @@ def test_postgres_credential_loader_is_owner_scoped_and_decrypts_only_requested_
     assert loaded == {"binance": {"apiKey": "owner-key", "secret": "owner-secret"}}
     assert "foreign-key" not in repr(loaded)
     assert web_api._load_user_credentials(store, owner_id, []) == {}
-    with pytest.raises(Exception, match="Could not unlock saved exchange credentials"):
+    with pytest.raises(web_api.HTTPException, match="Missing saved credentials for bybit"):
         web_api._load_user_credentials(store, owner_id, ["bybit"])
