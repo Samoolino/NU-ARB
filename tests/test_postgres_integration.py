@@ -23,7 +23,7 @@ def test_migrations_are_idempotent(database_url):
     assert run_postgres_migrations(database_url) == []
     with psycopg.connect(database_url) as conn:
         versions = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-    assert versions == [("001",), ("002",), ("003",), ("004",), ("005",)]
+    assert versions == [("001",), ("002",), ("003",), ("004",), ("005",), ("006",)]
 
 
 def test_foreign_key_and_unique_constraints_are_enforced(database_url):
@@ -177,3 +177,39 @@ def test_control_store_engine_registry_round_trips_on_postgres(database_url):
         updated_at="2026-10-19T03:00:00+00:00", stopped_at="2026-10-19T03:00:00+00:00",
     ) is True
     assert store.get_engine_session(session_id)["phase"] == "STOPPED"
+
+
+
+def test_postgres_worker_lease_is_exclusive_and_fences_stale_workers(database_url):
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"lease-owner-{suffix}"
+    session_id = f"lease-session-{suffix}"
+    store = ControlPlaneStore(PostgresBackend(database_url))
+    store.create_user(
+        user_id=owner_id, email=f"{owner_id}@example.invalid", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id=session_id, owner_user_id=owner_id, mode="paper", phase="CREATED",
+        created_at="2026-10-19T00:00:00+00:00", updated_at="2026-10-19T00:00:00+00:00",
+    )
+    first = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=f"worker-a-{suffix}", now_epoch=100, lease_seconds=30,
+    )
+    assert first["fencing_token"] == 1
+    assert store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=f"worker-b-{suffix}", now_epoch=120, lease_seconds=30,
+    ) is None
+    takeover = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=f"worker-b-{suffix}", now_epoch=130, lease_seconds=30,
+    )
+    assert takeover["fencing_token"] == 2
+    assert store.release_engine_worker_lease(
+        session_id=session_id, worker_id=f"worker-a-{suffix}", fencing_token=1,
+    ) is False
+    assert store.release_engine_worker_lease(
+        session_id=session_id, worker_id=f"worker-b-{suffix}", fencing_token=2,
+    ) is True
