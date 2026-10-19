@@ -825,11 +825,10 @@ def engine_state(request: Request, store=Depends(get_control_plane_store)):
         if not POSTGRES_CONTROL_API_PARITY_COMPLETE:
             raise HTTPException(503, "Configured persistence backend is not yet supported by the Control API")
         uid = _store_current_user(request, store)
-        sessions = store.list_engine_sessions(uid, limit=500)
-        if not sessions:
+        current = store.get_latest_engine_session(uid)
+        if current is None:
             return {"status": "STOPPED", "mode": None, "stats": None, "sessionId": None,
                     "error": None, "executionEnabled": False}
-        current = max(sessions, key=lambda item: (str(item.get("updated_at", "")), str(item.get("session_id", ""))))
         return {"status": current["phase"], "mode": current["mode"], "stats": None,
                 "sessionId": current["session_id"], "error": current.get("error_code"),
                 "executionEnabled": False}
