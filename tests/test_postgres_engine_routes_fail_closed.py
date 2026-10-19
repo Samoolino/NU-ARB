@@ -32,9 +32,10 @@ def test_engine_routes_fail_closed_when_postgres_parity_is_incomplete(tmp_path, 
                         "cross_live": False,
                     },
                 ),
+                client.post("/api/v1/engine/stop"),
             ]
 
-        assert [response.status_code for response in responses] == [503, 503, 503]
+        assert [response.status_code for response in responses] == [503, 503, 503, 503]
         assert all(
             response.json()["detail"]
             == "Configured persistence backend is not yet supported by the Control API"
