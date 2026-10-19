@@ -752,3 +752,39 @@ def test_terminal_transition_releases_worker_lease_and_invalidates_old_owner(tmp
     assert store.claim_engine_worker_lease(
         session_id="lease-stop-session", worker_id="worker-new", now_epoch=200, lease_seconds=30,
     ) is None
+
+
+def test_latest_engine_session_orders_by_update_time_and_owner(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "latest-engine-session.sqlite3"))
+    store.initialize()
+    for user_id, email in (
+        ("latest-owner", "latest-owner@example.test"),
+        ("latest-other", "latest-other@example.test"),
+    ):
+        store.create_user(
+            user_id=user_id, email=email, salt=b"salt", password_hash=b"hash",
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+    store.register_engine_session(
+        session_id="newer-created-but-stale", owner_user_id="latest-owner", mode="paper",
+        phase="STOPPED", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T01:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="older-created-but-latest-update", owner_user_id="latest-owner", mode="simulation",
+        phase="RUNNING", created_at="2026-10-18T00:00:00+00:00",
+        updated_at="2026-10-19T02:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="foreign-latest", owner_user_id="latest-other", mode="paper",
+        phase="RUNNING", created_at="2026-10-20T00:00:00+00:00",
+        updated_at="2026-10-20T00:00:00+00:00",
+    )
+
+    latest = store.get_latest_engine_session("latest-owner")
+    assert latest is not None
+    assert latest["session_id"] == "older-created-but-latest-update"
+    assert latest["owner_user_id"] == "latest-owner"
+    assert store.get_latest_engine_session("latest-owner-missing") is None
+    with pytest.raises(ValueError, match="owner is required"):
+        store.get_latest_engine_session("")
