@@ -590,3 +590,40 @@ def test_terminal_session_timestamp_is_stable_on_idempotent_update(tmp_path):
         phase="STOPPED", updated_at="2026-10-19T02:00:00+00:00",
     )
     assert store.get_engine_session("terminal-time-session")["stopped_at"] == first
+
+
+def test_engine_session_terminal_timestamp_cannot_be_set_early_or_overwritten(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-timestamp-immutable.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="immutable-time-owner", email="immutable-time@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        mode="paper", phase="RUNNING", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+
+    # Caller-supplied terminal time must not be recorded before a terminal phase.
+    store.update_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        phase="STOPPING", updated_at="2026-10-19T00:30:00+00:00",
+        stopped_at="2026-10-19T00:15:00+00:00",
+    )
+    assert store.get_engine_session("immutable-time-session")["stopped_at"] is None
+
+    store.update_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T01:00:00+00:00",
+    )
+    first = store.get_engine_session("immutable-time-session")["stopped_at"]
+    assert first == "2026-10-19T01:00:00+00:00"
+
+    # Idempotent terminal updates cannot rewrite the original stop time.
+    store.update_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T02:00:00+00:00",
+        stopped_at="2026-10-19T01:30:00+00:00",
+    )
+    assert store.get_engine_session("immutable-time-session")["stopped_at"] == first
