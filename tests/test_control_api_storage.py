@@ -537,7 +537,7 @@ def test_runtime_never_advertises_live_execution_as_enabled(monkeypatch):
     try:
         with TestClient(web_api.app) as client:
             runtime = client.get("/api/v1/runtime")
-            health = client.get("/health")
+            health = client.get("/api/v1/health")
         assert runtime.status_code == 200, runtime.text
         assert runtime.json()["liveTradingEnabled"] is False
         assert runtime.json()["executionEnabled"] is False
