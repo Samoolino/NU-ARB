@@ -152,6 +152,75 @@ class BackendTradeJournal:
         values[6] = self._json_parameter(record.get("symbols", []))
         return self._insert_id("trades", TRADE_COLUMNS, values)
 
+    def append_fenced(
+        self, record: dict[str, Any], *, owner_user_id: str, worker_id: str,
+        fencing_token: int, now_epoch: int,
+    ) -> int:
+        """Append a paper/simulation journal row under the current worker fence.
+
+        Ownership, phase, lease expiry and fencing token are checked in the same
+        database transaction as the insert. A separate preflight lease check is
+        deliberately insufficient because takeover could occur between check
+        and write. Callers must use this method for worker-originated journal rows.
+        """
+        if not isinstance(record, dict):
+            raise ValueError("journal record is required")
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id is required")
+        if not isinstance(worker_id, str) or not worker_id.strip():
+            raise ValueError("worker_id is required")
+        if isinstance(fencing_token, bool) or not isinstance(fencing_token, int) or fencing_token < 1:
+            raise ValueError("fencing_token must be a positive integer")
+        if isinstance(now_epoch, bool) or not isinstance(now_epoch, int) or now_epoch < 0:
+            raise ValueError("now_epoch must be a non-negative integer")
+        session_id = record.get("session_id")
+        mode = record.get("mode")
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError("session_id is required")
+        if mode not in {"paper", "simulation"}:
+            raise ValueError("fenced journal writes require paper or simulation mode")
+
+        p = self._placeholder()
+        lock = " FOR UPDATE" if self.dialect == "postgres" else ""
+        with self.backend.transaction() as db:
+            session = db.fetch_one(
+                "SELECT owner_user_id, mode, phase FROM control_api_engine_sessions "
+                "WHERE session_id=" + p + lock,
+                (session_id,),
+            )
+            lease = db.fetch_one(
+                "SELECT worker_id, lease_expires_at, fencing_token "
+                "FROM control_api_engine_worker_leases WHERE session_id=" + p + lock,
+                (session_id,),
+            )
+            if (
+                session is None
+                or session["owner_user_id"] != owner_user_id
+                or session["mode"] != mode
+                or session["phase"] not in {"STARTING", "PREFLIGHTING", "RUNNING"}
+                or lease is None
+                or lease["worker_id"] != worker_id
+                or lease["fencing_token"] != fencing_token
+                or lease["lease_expires_at"] <= now_epoch
+            ):
+                raise PermissionError("journal write rejected: current worker fence is not valid")
+
+            values = [record.get(key) for key in TRADE_COLUMNS]
+            values[5] = self._json_parameter(record.get("path", []))
+            values[6] = self._json_parameter(record.get("symbols", []))
+            names = ", ".join(TRADE_COLUMNS)
+            marks = ", ".join(p for _ in TRADE_COLUMNS)
+            statement = f"INSERT INTO trades ({names}) VALUES ({marks})"
+            if self.dialect == "postgres":
+                statement += " RETURNING id"
+            cursor = db.execute(statement, tuple(values))
+            if self.dialect == "postgres":
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("fenced journal insert did not return an id")
+                return int(row["id"] if isinstance(row, dict) else row[0])
+            return int(cursor.lastrowid)
+
     def append_opportunity(self, record: dict[str, Any]) -> int:
         values = [record.get(key) for key in OPPORTUNITY_COLUMNS]
         values[-1] = self._json_parameter(record.get("evidence", {}))
