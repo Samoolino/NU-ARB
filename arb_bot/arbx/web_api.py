@@ -245,6 +245,13 @@ class Login(BaseModel):
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
     password: str = Field(min_length=1, max_length=256)
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, email):
+        if isinstance(email, str):
+            return email.strip().lower()
+        return email
+
 
 class ExchangeConnect(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
