@@ -110,6 +110,22 @@ class PublicScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(v["status"] == "unavailable" for v in result["venues"]))
         self.assertTrue(all("StaleOrderBook" in v["errors"].values() for v in result["venues"]))
 
+    async def test_rejects_order_books_without_exchange_timestamps(self):
+        class UntimestampedExchange(FakeExchange):
+            async def fetch_order_book(self, symbol, limit):
+                book = await super().fetch_order_book(symbol, limit)
+                book["timestamp"] = None
+                return book
+
+        result = await scan_public_spot(
+            ["binance", "bybit"], ["BTC/USDT"], notional_usd=100,
+            exchange_factory=UntimestampedExchange,
+            reference_price_provider=fake_reference_prices,
+        )
+
+        self.assertEqual(result["opportunities"], [])
+        self.assertTrue(all("MissingOrderBookTimestamp" in v["errors"].values() for v in result["venues"]))
+
     async def test_rejects_order_book_timestamps_far_in_the_future(self):
         class FutureExchange(FakeExchange):
             async def fetch_order_book(self, symbol, limit):
