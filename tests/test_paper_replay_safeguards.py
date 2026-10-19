@@ -13,7 +13,7 @@ RECORDED_BOOK_EVENTS = (
     {
         "venue": "venue-a",
         "symbol": "BTC/USDT",
-        "timestamp": 1_800_000_000_000,
+        "timestamp": 1_792_281_600_000,
         "nonce": 101,
         "bids": [[100.0, 2.0], [99.9, 2.0], [99.8, 2.0]],
         "asks": [[100.1, 2.0], [100.2, 2.0], [100.3, 2.0]],
