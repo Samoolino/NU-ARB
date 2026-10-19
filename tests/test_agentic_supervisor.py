@@ -79,6 +79,17 @@ def test_malformed_report_fails_closed():
     assert "malformed_agent_report" in result.reasons
 
 
+def test_unhashable_role_and_finding_fail_closed():
+    for field, value in (("role", ["connectivity"]), ("finding", {"ok": True})):
+        reports = baseline()
+        reports[0] = {**reports[0], field: value}
+        result = aggregate_reports(
+            reports, expected_observation_id="obs-1", now_ms=10000
+        )
+        assert result.status == "REJECTED"
+        assert "malformed_agent_report" in result.reasons
+
+
 def test_duplicate_role_fails_closed():
     reports = baseline() + [report("connectivity")]
     result = aggregate_reports(
