@@ -139,3 +139,17 @@ def test_summary_control_characters_are_removed():
     summary = next(r.summary for r in result.reports if r.role == "connectivity")
     assert "\n" not in summary
     assert "\x1b" not in summary
+
+
+def test_mapping_parser_exception_fails_closed():
+    class ExplodingDict(dict):
+        def get(self, key, default=None):
+            raise RuntimeError("untrusted mapping failed")
+
+    reports = baseline()
+    reports[0] = ExplodingDict(reports[0])
+    result = aggregate_reports(
+        reports, expected_observation_id="obs-1", now_ms=10000
+    )
+    assert result.status == "REJECTED"
+    assert "malformed_agent_report" in result.reasons
