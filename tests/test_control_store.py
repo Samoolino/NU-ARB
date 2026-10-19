@@ -566,3 +566,27 @@ def test_engine_session_registry_allows_idempotent_phase_update_and_failure_term
             session_id="failure-session", owner_user_id="failure-owner",
             phase="RUNNING", updated_at="2026-10-19T02:00:00+00:00",
         )
+
+
+def test_terminal_session_timestamp_is_stable_on_idempotent_update(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-timestamp.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="terminal-time-owner", email="terminal-time@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="terminal-time-session", owner_user_id="terminal-time-owner",
+        mode="paper", phase="RUNNING", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    store.update_engine_session(
+        session_id="terminal-time-session", owner_user_id="terminal-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T01:00:00+00:00",
+    )
+    first = store.get_engine_session("terminal-time-session")["stopped_at"]
+    store.update_engine_session(
+        session_id="terminal-time-session", owner_user_id="terminal-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T02:00:00+00:00",
+    )
+    assert store.get_engine_session("terminal-time-session")["stopped_at"] == first
