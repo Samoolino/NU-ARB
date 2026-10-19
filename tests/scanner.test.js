@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { bookTimestampError, isValidSymbol, readFiniteNumber, scanAllVenues, scanBooks } from "../lib/scanner.js";
 import { EXCHANGES, EXCHANGE_BY_ID } from "../lib/exchange-registry.js";
 
-test("registers the 18 requested public spot venues without duplicate ids", () => {
-  assert.equal(EXCHANGES.length, 18);
-  assert.equal(new Set(EXCHANGES.map((exchange) => exchange.id)).size, 18);
+test("registers the 20 requested public spot venues without duplicate ids", () => {
+  assert.equal(EXCHANGES.length, 20);
+  assert.equal(new Set(EXCHANGES.map((exchange) => exchange.id)).size, 20);
   assert.equal(EXCHANGE_BY_ID.cryptocom.name, "Crypto.com Exchange");
 });
 
