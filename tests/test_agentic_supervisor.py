@@ -164,7 +164,7 @@ def test_unicode_control_characters_are_removed():
     assert result.status == "ADVISORY_ONLY"
     summary = next(r.summary for r in result.reports if r.role == "connectivity")
     assert "\\u009b" not in summary
-    assert "\\u202e" in summary
+    assert "\\u202e" not in summary
 
 
 def test_oversized_observation_identifiers_fail_closed():
