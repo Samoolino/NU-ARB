@@ -683,6 +683,7 @@ def test_postgres_engine_mutations_remain_disabled_even_if_read_parity_flag_is_s
 
 def test_postgres_two_user_api_isolation_for_identity_exchange_and_capital_views(tmp_path, monkeypatch):
     """Authenticated API views must expose only the caller's identity and credential evidence."""
+    import json
     from datetime import datetime, timezone
     from fastapi.testclient import TestClient
     from arbx.control_store import ControlPlaneStore
