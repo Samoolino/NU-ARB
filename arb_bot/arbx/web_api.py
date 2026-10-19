@@ -686,8 +686,7 @@ async def exchanges(request: Request, store=Depends(get_control_plane_store)):
                        "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
                        "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
                        "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
-                       "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
-                           and False})
+                       "executionEnabled": False})
     return {"exchanges": result}
 
 
@@ -793,7 +792,7 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
     return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
             "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
             "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
-            "executionEnabled": live_eligible and False}
+            "executionEnabled": False}
 
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
@@ -837,7 +836,7 @@ def engine_state(request: Request):
     return {"status": status, "mode": engine_hub.cfg.mode,
             "stats": stats,
             "error": engine_error,
-            "executionEnabled": engine_hub.cfg.mode == "live" and False}
+            "executionEnabled": False}
 
 
 @app.get("/api/v1/engine/journal", dependencies=[Depends(_proxy_auth)])
