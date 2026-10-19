@@ -363,3 +363,46 @@ def test_postgres_credential_loader_is_owner_scoped_and_decrypts_only_requested_
     assert web_api._load_user_credentials(store, owner_id, []) == {}
     with pytest.raises(web_api.HTTPException, match="Missing saved credentials for bybit"):
         web_api._load_user_credentials(store, owner_id, ["bybit"])
+
+
+
+def test_postgres_lifecycle_transition_requires_current_worker_fence(database_url):
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"fenced-route-owner-{suffix}"
+    session_id = f"fenced-route-session-{suffix}"
+    store = ControlPlaneStore(PostgresBackend(database_url))
+    store.create_user(
+        user_id=owner_id, email=f"{owner_id}@example.invalid", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id=session_id, owner_user_id=owner_id, mode="simulation", phase="CREATED",
+        created_at="2026-10-19T00:00:00+00:00", updated_at="2026-10-19T00:00:00+00:00",
+    )
+    old = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=f"worker-old-{suffix}", now_epoch=100, lease_seconds=10,
+    )
+    assert old is not None
+    assert store.transition_engine_session_with_lease(
+        session_id=session_id, owner_user_id=owner_id, worker_id=old["worker_id"],
+        fencing_token=old["fencing_token"], phase="STARTING",
+        updated_at="2026-10-19T00:00:01+00:00", now_epoch=101,
+    )
+    new_worker = f"worker-new-{suffix}"
+    takeover = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=new_worker, now_epoch=110, lease_seconds=10,
+    )
+    assert takeover is not None and takeover["fencing_token"] == 2
+    assert not store.transition_engine_session_with_lease(
+        session_id=session_id, owner_user_id=owner_id, worker_id=old["worker_id"],
+        fencing_token=old["fencing_token"], phase="PREFLIGHTING",
+        updated_at="2026-10-19T00:00:02+00:00", now_epoch=111,
+    )
+    assert store.transition_engine_session_with_lease(
+        session_id=session_id, owner_user_id=owner_id, worker_id=new_worker,
+        fencing_token=takeover["fencing_token"], phase="PREFLIGHTING",
+        updated_at="2026-10-19T00:00:03+00:00", now_epoch=111,
+    )
