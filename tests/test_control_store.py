@@ -488,3 +488,22 @@ def test_engine_session_postgres_migration_has_owner_fk_and_non_live_constraint(
     assert "owner_user_id text not null references control_api_users(id) on delete cascade" in sql
     assert "check (mode in ('paper', 'simulation'))" in sql
     assert "control_api_engine_sessions_owner_created_idx" in sql
+
+
+def test_deleting_engine_session_owner_cascades_registry_row(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-cascade.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="session-owner", email="session-owner@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="owned-paper-session", owner_user_id="session-owner", mode="paper",
+        phase="STOPPED", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+
+    with store.backend.transaction() as session:
+        session.execute("DELETE FROM control_api_users WHERE id=?", ("session-owner",))
+
+    assert store.get_engine_session("owned-paper-session") is None
