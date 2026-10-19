@@ -79,8 +79,11 @@ Until these gates pass, status is **not approved for production PostgreSQL cutov
 Important limits:
 - The new method is an opt-in safe write path; it does not automatically rewrite all existing journal callers.
 - Existing `append` remains for compatibility and must not be used for worker-originated writes once a supervised worker is integrated.
-- Opportunity and venue-certification writes also need fenced variants before the worker may use them.
+- Fenced variants now also exist for opportunity and venue-certification writes; worker call sites still need migration to these methods and disposable-PostgreSQL coverage.
 - No worker loop or PostgreSQL start/stop route is enabled by this change.
 - The new PostgreSQL integration test and full suite must pass in CI before this change is considered verified.
 
 Do not treat this as proof that all consequential side effects are fenced. The release gate remains closed.
+
+
+The evidence write methods are now `append_opportunity_fenced` and `record_certification_fenced`. Both use the same transaction-bound session/lease validation helper and reject stale worker identities. Contract coverage was added for stale-worker rejection and successful writes by the current worker. These additions have not yet been verified by a successful CI run.
