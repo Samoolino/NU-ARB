@@ -32,6 +32,7 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
         "004_engine_session_registry.sql",
         "005_engine_session_phase_constraints.sql",
         "006_engine_worker_leases.sql",
+        "007_engine_session_owner_updated_index.sql",
     ]
     sql = files[0].read_text(encoding="utf-8")
     assert "provider_evidence" in sql
@@ -55,6 +56,9 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
     assert "control_api_engine_worker_leases" in leases_sql
     assert "fencing_token BIGINT NOT NULL CHECK (fencing_token >= 1)" in leases_sql
     assert "ON DELETE CASCADE" in leases_sql
+    latest_index_sql = files[6].read_text(encoding="utf-8")
+    assert "control_api_engine_sessions_owner_updated_idx" in latest_index_sql
+    assert "updated_at DESC, created_at DESC, session_id ASC" in latest_index_sql
 
 
 def test_migration_inventory_rejects_duplicate_versions(tmp_path: Path):
