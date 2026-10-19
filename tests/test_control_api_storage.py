@@ -344,3 +344,39 @@ def test_default_sqlite_signup_remains_compatible_with_legacy_engine_auth(tmp_pa
             assert db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_sqlite_login_normalizes_whitespace_around_email(tmp_path, monkeypatch):
+    """SQLite and PostgreSQL auth routes must accept the same normalized email."""
+    database = tmp_path / "sqlite-login-normalization.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.delenv("ARBX_STORAGE_BACKEND", raising=False)
+    monkeypatch.delenv("ARBX_DATABASE_URL", raising=False)
+    monkeypatch.setenv("APP_SECURE_COOKIE", "0")
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            signup = client.post(
+                "/api/v1/auth/signup",
+                json={
+                    "email": "login-normalization@example.test",
+                    "password": "a-long-test-password",
+                    "password_confirmation": "a-long-test-password",
+                },
+            )
+            assert signup.status_code == 200, signup.text
+            client.cookies.clear()
+
+            login = client.post(
+                "/api/v1/auth/login",
+                json={
+                    "email": "  login-normalization@example.test  ",
+                    "password": "a-long-test-password",
+                },
+            )
+            assert login.status_code == 200, login.text
+            me_response = client.get("/api/v1/auth/me")
+            assert me_response.status_code == 200, me_response.text
+            assert me_response.json()["user"]["email"] == "login-normalization@example.test"
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
