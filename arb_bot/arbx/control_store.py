@@ -171,6 +171,62 @@ class ControlPlaneStore:
                 ), (session_id,))
             return True
 
+    def transition_engine_session_with_lease(
+        self, *, session_id: str, owner_user_id: str, worker_id: str,
+        fencing_token: int, phase: str, updated_at: str, now_epoch: int,
+        error_code: str | None = None, metadata_json: str | None = None,
+    ) -> bool:
+        """Atomically apply an owned lifecycle transition only with a current worker fence.
+
+        The session row is locked before checking the lease and changing phase. A
+        stale worker, expired lease, wrong owner, or mismatched fencing token cannot
+        advance lifecycle state. Terminal transitions remove the lease in this
+        same transaction.
+        """
+        if phase not in ENGINE_SESSION_PHASES:
+            raise ValueError(f"invalid engine session phase: {phase}")
+        if not isinstance(worker_id, str) or not worker_id.strip():
+            raise ValueError("worker_id is required")
+        if isinstance(fencing_token, bool) or not isinstance(fencing_token, int) or fencing_token < 1:
+            raise ValueError("fencing_token must be a positive integer")
+        if isinstance(now_epoch, bool) or not isinstance(now_epoch, int) or now_epoch < 0:
+            raise ValueError("now_epoch must be a non-negative integer")
+        with self.backend.transaction() as session:
+            lock = " FOR UPDATE" if self.backend.dialect == "postgres" else ""
+            current = session.fetch_one(self._sql(
+                "SELECT phase FROM control_api_engine_sessions WHERE session_id=? AND owner_user_id=?" + lock
+            ), (session_id, owner_user_id))
+            if current is None:
+                return False
+            lease = session.fetch_one(self._sql(
+                "SELECT worker_id, lease_expires_at, fencing_token FROM control_api_engine_worker_leases "
+                "WHERE session_id=?" + lock
+            ), (session_id,))
+            if (
+                lease is None
+                or lease["worker_id"] != worker_id
+                or lease["fencing_token"] != fencing_token
+                or lease["lease_expires_at"] <= now_epoch
+            ):
+                return False
+            current_phase = current["phase"]
+            if phase != current_phase and phase not in ENGINE_SESSION_TRANSITIONS.get(current_phase, frozenset()):
+                raise ValueError(f"invalid engine session transition: {current_phase} -> {phase}")
+            stopped_at = updated_at if phase in ENGINE_SESSION_TERMINAL_PHASES and current_phase != phase else None
+            cursor = session.execute(self._sql(
+                """UPDATE control_api_engine_sessions
+                   SET phase=?, updated_at=?, stopped_at=COALESCE(?, stopped_at),
+                       error_code=COALESCE(?, error_code), metadata_json=COALESCE(?, metadata_json)
+                   WHERE session_id=? AND owner_user_id=?"""
+            ), (phase, updated_at, stopped_at, error_code, metadata_json, session_id, owner_user_id))
+            if cursor.rowcount != 1:
+                return False
+            if phase in ENGINE_SESSION_TERMINAL_PHASES and current_phase != phase:
+                session.execute(self._sql(
+                    "DELETE FROM control_api_engine_worker_leases WHERE session_id=?"
+                ), (session_id,))
+            return True
+
     def claim_engine_worker_lease(self, *, session_id: str, worker_id: str,
                                   now_epoch: int, lease_seconds: int) -> dict[str, Any] | None:
         """Atomically claim/renew a worker lease and return its fencing token.
