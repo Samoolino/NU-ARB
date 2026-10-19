@@ -50,4 +50,8 @@ Keep the prior application artifact and database snapshot. Prefer forward-fix mi
 
 ## Current release gate
 
-The latest PR head has not passed verified CI. Its latest workflow jobs ended before any steps were reported, with no logs available. Do not treat this as a successful test run or infer a code failure from it. Obtain GitHub Actions runner/check annotations from the repository owner or GitHub support, then rerun the required workflows and record the actual results. No production migration or live execution is approved by this runbook.
+Targeted CI on PR head `74b8f2bcbf0ca4837dfa90bf3830f84b9e5c65de` is green:
+- [Hybrid Core run 39243409825](https://github.com/Samoolino/NU-ARB/actions/runs/39243409825): 11 passed; compile step succeeded.
+- [PostgreSQL Integration run 39243409826](https://github.com/Samoolino/NU-ARB/actions/runs/39243409826): 100 passed, 1 warning; PostgreSQL 16 started and the configured test suite executed.
+
+These runs establish success only for their configured test subsets. They do not complete persistence parity, full repository test coverage, independent review, or backup/restore evidence. Keep PostgreSQL opt-in and fail-closed until all cutover gates are evidenced. No production migration or live execution is approved by this runbook.
