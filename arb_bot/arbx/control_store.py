@@ -150,7 +150,13 @@ class ControlPlaneStore:
                        metadata_json=COALESCE(?, metadata_json)
                    WHERE session_id=? AND owner_user_id=?"""
             ), (phase, updated_at, stopped_at, error_code, metadata_json, session_id, owner_user_id))
-            return cursor.rowcount == 1
+            if cursor.rowcount != 1:
+                return False
+            if phase in ENGINE_SESSION_TERMINAL_PHASES and current_phase != phase:
+                session.execute(self._sql(
+                    "DELETE FROM control_api_engine_worker_leases WHERE session_id=?"
+                ), (session_id,))
+            return True
 
     def claim_engine_worker_lease(self, *, session_id: str, worker_id: str,
                                   now_epoch: int, lease_seconds: int) -> dict[str, Any] | None:
