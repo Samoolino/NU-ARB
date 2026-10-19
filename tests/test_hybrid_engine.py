@@ -172,11 +172,11 @@ def test_execution_coordinator_halts_on_non_finite_realized_pnl():
 
 
 
-def test_execution_coordinator_records_verified_executor_result_without_fabricated_fill_sizes():
+def test_execution_coordinator_keeps_executor_success_in_reconciliation_without_fabricated_fill_sizes():
     from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
 
     coordinator = ExecutionCoordinator()
     coordinator.on_submission(order_id="paper-cycle")
-    coordinator.on_execution_verified()
-    assert coordinator.state == ExecutionState.FILLED
-    assert coordinator.events[-1]["verification"] == "executor_result_ok"
+    coordinator.on_executor_success()
+    assert coordinator.state == ExecutionState.RECONCILING
+    assert coordinator.events[-1]["executor_result"] == "ok"
