@@ -26,3 +26,10 @@ def test_frontend_has_no_retired_pilot_copy():
 def test_frontend_exposes_operator_surfaces():
     for needle in ("#market", "#opportunities", "#accountPanel", "#engineBox"):
         assert needle in HTML
+
+
+def test_frontend_exposes_paginated_token_market_and_venue_catalog_tables():
+    for needle in ("marketUniverse", "universeRows", "venueCatalogRows", "loadTokenUniverse", "verifyVenueCatalogs", "/api/markets?"):
+        assert needle in HTML
+    assert "CoinGecko page" in HTML
+    assert "unverified" in HTML
