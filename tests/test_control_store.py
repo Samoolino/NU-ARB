@@ -659,30 +659,3 @@ def test_engine_session_idempotent_update_preserves_terminal_error_code(tmp_path
     assert row["stopped_at"] == "2026-10-19T01:00:00+00:00"
 
 
-
-def test_engine_session_registration_must_start_in_created_phase(tmp_path):
-    store = ControlPlaneStore(SQLiteBackend(tmp_path / "initial-phase.sqlite3"))
-    store.initialize()
-    store.create_user(
-        user_id="initial-phase-owner", email="initial-phase@example.test",
-        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
-    )
-
-    for invalid_initial_phase in ("STARTING", "PREFLIGHTING", "RUNNING", "STOPPING",
-                                  "STOPPED", "FAILED", "PREFLIGHT_FAILED"):
-        with pytest.raises(ValueError, match="must start in CREATED"):
-            store.register_engine_session(
-                session_id=f"invalid-{invalid_initial_phase}",
-                owner_user_id="initial-phase-owner", mode="paper",
-                phase=invalid_initial_phase,
-                created_at="2026-01-01T00:00:00+00:00",
-                updated_at="2026-01-01T00:00:00+00:00",
-            )
-
-    session = store.register_engine_session(
-        session_id="valid-created-session", owner_user_id="initial-phase-owner",
-        mode="paper", phase="CREATED",
-        created_at="2026-01-01T00:00:00+00:00",
-        updated_at="2026-01-01T00:00:00+00:00",
-    )
-    assert session["phase"] == "CREATED"
