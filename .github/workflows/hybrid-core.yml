@@ -8,9 +8,14 @@ on:
       - architecture/native-adapter-core
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  hybrid-core:
+  python-validation:
+    name: Python compile, tests, and offline paper self-test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,12 +32,39 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r arb_bot/requirements.txt pytest
 
-      - name: Compile hybrid core
+      - name: Compile Python source
         env:
           PYTHONPATH: arb_bot
         run: python -m compileall -q arb_bot
 
-      - name: Run hybrid and agentic guardrail tests
+      - name: Run complete Python test suite
         env:
           PYTHONPATH: arb_bot
-        run: python -m pytest -q tests/test_hybrid_engine.py tests/test_agentic_decision.py tests/test_agentic_supervisor.py
+        run: python -m pytest -q tests
+
+      - name: Run offline paper-mode self-test
+        working-directory: arb_bot
+        env:
+          PYTHONPATH: .
+          BOT_MODE: paper
+          ARBX_LIVE_TRADING_ENABLED: "0"
+        run: python run.py selftest
+
+  dashboard-validation:
+    name: Node dashboard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dashboard dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run dashboard tests
+        run: npm test
