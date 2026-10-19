@@ -134,3 +134,17 @@ def test_execution_coordinator_halts_on_negative_pnl():
     coordinator.on_realized_pnl(-0.01)
     assert coordinator.halted
     assert coordinator.state == ExecutionState.HALTED
+
+
+def test_ccxt_rest_adapter_never_claims_websocket_or_private_stream_capabilities():
+    import asyncio
+    from arbx.hybrid.adapters import CCXTAdapter
+
+    capabilities = asyncio.run(CCXTAdapter("binance").get_capabilities())
+
+    assert capabilities.ccxt is True
+    assert capabilities.ccxt_pro is False
+    assert capabilities.websocket is False
+    assert capabilities.native_websocket is False
+    assert capabilities.user_stream is False
+    assert capabilities.balance_stream is False
