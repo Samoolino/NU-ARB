@@ -117,6 +117,35 @@ class BackendTradeJournal:
             )
         return float(row["pnl"] if row else 0.0)
 
+    def recent_trades(self, session_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent trades for exactly one session, newest first.
+
+        Requiring a session identifier prevents this persistence helper from
+        accidentally exposing a cross-session journal. Authorization and mapping
+        an authenticated owner to their session IDs remain the API caller's job.
+        """
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError("session_id must be a non-empty string")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("trade history limit must be between 1 and 100")
+
+        p = self._placeholder()
+        columns = (
+            "id, session_id, timestamp, mode, exchange_a, exchange_b, strategy, path, symbols, "
+            "requested_quantity, executed_quantity, average_fill_price, fees, gross_pnl, slippage, "
+            "net_pnl, latency_ms, book_age_ms, execution_status, verification_status, risk_decision, "
+            "failure_reason, target_before, target_after, cumulative_realized_pnl"
+        )
+        with self.backend.transaction() as db:
+            rows = db.fetch_all(
+                f"SELECT {columns} FROM trades WHERE session_id={p} ORDER BY id DESC LIMIT {p}",
+                (session_id, limit),
+            )
+        for row in rows:
+            row["path"] = _json_value(row.get("path"))
+            row["symbols"] = _json_value(row.get("symbols"))
+        return rows
+
     def append(self, record: dict[str, Any]) -> int:
         values = [record.get(key) for key in TRADE_COLUMNS]
         values[5] = self._json_parameter(record.get("path", []))
