@@ -406,3 +406,52 @@ def test_postgres_lifecycle_transition_requires_current_worker_fence(database_ur
         fencing_token=takeover["fencing_token"], phase="PREFLIGHTING",
         updated_at="2026-10-19T00:00:03+00:00", now_epoch=111,
     )
+
+
+def test_postgres_journal_append_is_atomic_with_current_worker_fence(database_url):
+    from arbx.control_store import ControlPlaneStore
+    from arbx.journal_storage import BackendTradeJournal
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"fenced-journal-owner-{suffix}"
+    session_id = f"fenced-journal-session-{suffix}"
+    backend = PostgresBackend(database_url)
+    store = ControlPlaneStore(backend)
+    store.create_user(
+        user_id=owner_id, email=f"{owner_id}@example.invalid", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id=session_id, owner_user_id=owner_id, mode="simulation", phase="CREATED",
+        created_at="2026-10-19T00:00:00+00:00", updated_at="2026-10-19T00:00:00+00:00",
+    )
+    assert store.update_engine_session(
+        session_id=session_id, owner_user_id=owner_id, phase="STARTING",
+        updated_at="2026-10-19T00:00:01+00:00",
+    )
+    old = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=f"worker-old-{suffix}", now_epoch=100, lease_seconds=5,
+    )
+    assert old is not None
+    journal = BackendTradeJournal(backend)
+    record = {
+        "session_id": session_id, "mode": "simulation", "exchange_a": "fixture",
+        "strategy": "integration", "net_pnl": 0.0, "execution_status": "PAPER_RECORDED",
+        "verification_status": "unverified", "cumulative_realized_pnl": 0.0,
+    }
+    assert journal.append_fenced(
+        record, owner_user_id=owner_id, worker_id=old["worker_id"],
+        fencing_token=old["fencing_token"], now_epoch=101,
+    ) > 0
+    new_worker = f"worker-new-{suffix}"
+    takeover = store.claim_engine_worker_lease(
+        session_id=session_id, worker_id=new_worker, now_epoch=105, lease_seconds=10,
+    )
+    assert takeover is not None and takeover["fencing_token"] > old["fencing_token"]
+    with pytest.raises(PermissionError):
+        journal.append_fenced(
+            record, owner_user_id=owner_id, worker_id=old["worker_id"],
+            fencing_token=old["fencing_token"], now_epoch=106,
+        )
+    assert len(journal.recent_trades(session_id)) == 1
