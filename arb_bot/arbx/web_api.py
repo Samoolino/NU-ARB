@@ -637,12 +637,12 @@ def capital_sources(request: Request, store=Depends(get_control_plane_store)):
 
 
 @app.post("/api/v1/exchanges/{exchange_id}/verify", dependencies=[Depends(_proxy_auth)])
-async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: Request):
+async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: Request,
+                          store=Depends(get_control_plane_store)):
     if exchange_id not in VENUES:
         raise HTTPException(404, "Exchange is not in the supported venue registry")
-    uid = None; db = _connect()
+    uid = _store_current_user(request, store)
     try:
-        uid = _current_user(request, db)
         if engine_owner_id == uid and engine_task is not None and not engine_task.done():
             raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
         if not payload.credentials or any(not isinstance(k, str) or not isinstance(v, str) for k, v in payload.credentials.items()):
@@ -674,32 +674,24 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
         encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
         saved_verification = {"evidence": evidence, "balances": balance_summary,
                               "orderBook": book_summary, "maskedKey": masked}
-        db.execute("""INSERT INTO exchange_credentials(user_id,exchange_id,encrypted_credentials,auth_mode,state,last_verified,verification_json)
-                      VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,exchange_id) DO UPDATE SET
-                      encrypted_credentials=excluded.encrypted_credentials,auth_mode=excluded.auth_mode,state=excluded.state,
-                      last_verified=excluded.last_verified,verification_json=excluded.verification_json""",
-                   (uid, exchange_id, encrypted, payload.auth_mode, state, verified_at,
-                    json.dumps(saved_verification, separators=(",", ":"))))
-        db.commit()
+        store.save_credentials(
+            user_id=uid, exchange_id=exchange_id, encrypted_credentials=encrypted,
+            auth_mode=payload.auth_mode, state=state, last_verified=verified_at,
+            verification_json=json.dumps(saved_verification, separators=(",", ":")),
+        )
         return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
                 "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
                 "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
                 "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
-    finally:
-        db.close()
 
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
-def remove_exchange(exchange_id: str, request: Request):
-    db = _connect()
-    try:
-        uid = _current_user(request, db)
-        if engine_owner_id == uid and engine_task is not None and not engine_task.done():
-            raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
-        db.execute("DELETE FROM exchange_credentials WHERE user_id=? AND exchange_id=?", (uid, exchange_id)); db.commit()
-        return {"id": exchange_id, "state": "NOT_CONFIGURED"}
-    finally:
-        db.close()
+def remove_exchange(exchange_id: str, request: Request, store=Depends(get_control_plane_store)):
+    uid = _store_current_user(request, store)
+    if engine_owner_id == uid and engine_task is not None and not engine_task.done():
+        raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
+    store.delete_credentials(uid, exchange_id)
+    return {"id": exchange_id, "state": "NOT_CONFIGURED"}
 
 
 @app.get("/api/v1/engine/state", dependencies=[Depends(_proxy_auth)])
