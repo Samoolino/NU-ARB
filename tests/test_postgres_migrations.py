@@ -47,7 +47,7 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
     engine_sessions_sql = files[3].read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS control_api_engine_sessions" in engine_sessions_sql
     assert "CHECK (mode IN ('paper', 'simulation'))" in engine_sessions_sql
-    phase_sql = files["005_engine_session_phase_constraints.sql"]
+    phase_sql = files[4].read_text(encoding="utf-8")
     assert "control_api_engine_sessions_phase_check" in phase_sql
     assert "'PREFLIGHT_FAILED'" in phase_sql
 
