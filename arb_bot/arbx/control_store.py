@@ -133,8 +133,12 @@ class ControlPlaneStore:
             current_phase = current["phase"]
             if phase != current_phase and phase not in ENGINE_SESSION_TRANSITIONS.get(current_phase, frozenset()):
                 raise ValueError(f"invalid engine session transition: {current_phase} -> {phase}")
-            if phase in ENGINE_SESSION_TERMINAL_PHASES and current_phase != phase and stopped_at is None:
+            # Terminal timestamps are server-owned and immutable: a caller must
+            # not set one before termination or rewrite it on an idempotent update.
+            if phase in ENGINE_SESSION_TERMINAL_PHASES and current_phase != phase:
                 stopped_at = updated_at
+            else:
+                stopped_at = None
             cursor = session.execute(self._sql(
                 """UPDATE control_api_engine_sessions
                    SET phase=?, updated_at=?, stopped_at=COALESCE(?, stopped_at), error_code=?,
