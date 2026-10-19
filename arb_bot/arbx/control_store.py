@@ -58,6 +58,11 @@ class ControlPlaneStore:
                 error_code TEXT,
                 metadata_json TEXT NOT NULL DEFAULT '{}')""",
             "CREATE INDEX IF NOT EXISTS control_api_engine_sessions_owner_created_idx ON control_api_engine_sessions(owner_user_id, created_at)",
+            """CREATE TABLE IF NOT EXISTS control_api_engine_worker_leases (
+                session_id TEXT PRIMARY KEY REFERENCES control_api_engine_sessions(session_id) ON DELETE CASCADE,
+                worker_id TEXT NOT NULL,
+                lease_expires_at INTEGER NOT NULL,
+                fencing_token INTEGER NOT NULL CHECK(fencing_token >= 1))""",
             """CREATE TABLE IF NOT EXISTS control_api_exchange_credentials (
                 user_id TEXT NOT NULL REFERENCES control_api_users(id) ON DELETE CASCADE,
                 exchange_id TEXT NOT NULL, encrypted_credentials BLOB NOT NULL,
@@ -145,6 +150,58 @@ class ControlPlaneStore:
                        metadata_json=COALESCE(?, metadata_json)
                    WHERE session_id=? AND owner_user_id=?"""
             ), (phase, updated_at, stopped_at, error_code, metadata_json, session_id, owner_user_id))
+            return cursor.rowcount == 1
+
+    def claim_engine_worker_lease(self, *, session_id: str, worker_id: str,
+                                  now_epoch: int, lease_seconds: int) -> dict[str, Any] | None:
+        """Atomically claim/renew a worker lease and return its fencing token.
+
+        A competing worker cannot take a live lease. A takeover after expiry
+        increments the fencing token, allowing downstream writes to reject stale
+        workers. Callers must use unique worker IDs per process incarnation.
+        """
+        if not isinstance(worker_id, str) or not worker_id.strip():
+            raise ValueError("worker_id is required")
+        if isinstance(now_epoch, bool) or not isinstance(now_epoch, int) or now_epoch < 0:
+            raise ValueError("now_epoch must be a non-negative integer")
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 1 <= lease_seconds <= 300:
+            raise ValueError("lease_seconds must be between 1 and 300")
+        with self.backend.transaction() as session:
+            lock = " FOR UPDATE" if self.backend.dialect == "postgres" else ""
+            engine = session.fetch_one(self._sql(
+                "SELECT phase FROM control_api_engine_sessions WHERE session_id=?" + lock
+            ), (session_id,))
+            if engine is None or engine["phase"] in ENGINE_SESSION_TERMINAL_PHASES:
+                return None
+            return session.fetch_one(self._sql(
+                """INSERT INTO control_api_engine_worker_leases
+                       (session_id, worker_id, lease_expires_at, fencing_token)
+                   VALUES(?,?,?,1)
+                   ON CONFLICT(session_id) DO UPDATE SET
+                       fencing_token=CASE
+                           WHEN control_api_engine_worker_leases.worker_id=excluded.worker_id
+                           THEN control_api_engine_worker_leases.fencing_token
+                           ELSE control_api_engine_worker_leases.fencing_token+1
+                       END,
+                       worker_id=excluded.worker_id,
+                       lease_expires_at=excluded.lease_expires_at
+                   WHERE control_api_engine_worker_leases.lease_expires_at<=?
+                      OR control_api_engine_worker_leases.worker_id=?
+                   RETURNING session_id, worker_id, lease_expires_at, fencing_token"""
+            ), (session_id, worker_id, now_epoch + lease_seconds, now_epoch, worker_id))
+
+    def release_engine_worker_lease(self, *, session_id: str, worker_id: str,
+                                    fencing_token: int) -> bool:
+        """Release only the lease still owned by this worker incarnation."""
+        if not isinstance(worker_id, str) or not worker_id.strip():
+            raise ValueError("worker_id is required")
+        if isinstance(fencing_token, bool) or not isinstance(fencing_token, int) or fencing_token < 1:
+            raise ValueError("fencing_token must be a positive integer")
+        with self.backend.transaction() as session:
+            cursor = session.execute(self._sql(
+                """DELETE FROM control_api_engine_worker_leases
+                   WHERE session_id=? AND worker_id=? AND fencing_token=?"""
+            ), (session_id, worker_id, fencing_token))
             return cursor.rowcount == 1
 
     def create_user(self, *, user_id: str, email: str, salt: bytes,
