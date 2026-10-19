@@ -875,10 +875,9 @@ async def engine_start(payload: EngineStart, request: Request):
     if not payload.require_private_stream:
         raise HTTPException(422, "The authenticated engine requires a verified private balance stream in both paper and live modes")
     if payload.mode == "live":
-        if os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") != "1":
-            raise HTTPException(503, "Live execution is disabled by the control-service operator")
-        if payload.live_confirmation != "I ACCEPT REAL ORDERS":
-            raise HTTPException(422, 'For live mode, type exactly: "I ACCEPT REAL ORDERS"')
+        # This release supports paper/simulation validation only. An environment
+        # flag or request confirmation must not unlock real-order submission.
+        raise HTTPException(503, "Live execution is disabled in this build")
 
     global engine_owner_id, engine_hub, engine_task, engine_phase, engine_error, engine_stop_requested
     async with engine_lock:
