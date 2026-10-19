@@ -831,3 +831,30 @@ def test_lifecycle_transition_requires_current_unexpired_worker_fence(tmp_path):
         worker_id="worker-second", fencing_token=second["fencing_token"],
         phase="PREFLIGHTING", updated_at="2026-10-19T00:00:04+00:00", now_epoch=112,
     )
+
+
+def test_expired_lease_increments_fence_even_when_same_worker_reclaims(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "same-worker-expiry.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="same-worker-owner", email="same-worker@example.test",
+        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="same-worker-session", owner_user_id="same-worker-owner",
+        mode="paper", phase="RUNNING", created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    first = store.claim_engine_worker_lease(
+        session_id="same-worker-session", worker_id="worker-incarnation-a",
+        now_epoch=100, lease_seconds=30,
+    )
+    assert first["fencing_token"] == 1
+
+    # The lease has expired. Reclaiming with the same worker ID must not revive
+    # the old fence, because a paused process may still have stale work in flight.
+    reclaimed = store.claim_engine_worker_lease(
+        session_id="same-worker-session", worker_id="worker-incarnation-a",
+        now_epoch=130, lease_seconds=30,
+    )
+    assert reclaimed["fencing_token"] == 2
