@@ -57,6 +57,22 @@
       </div>
       <div class="actions"><label class="toggle"><input id="auto" type="checkbox" checked> Auto refresh · 15s</label><button class="button secondary" id="refresh" type="button">Refresh now</button><button class="button primary" id="scan" type="submit">Scan market</button></div>
     </form></section>
+    <section id="marketUniverse" style="margin-top:22px" aria-labelledby="universeTitle">
+      <div class="section-head"><h2 id="universeTitle">Token &amp; venue market directory</h2><span>Reference prices are not executable quotes</span></div>
+      <div class="controls" style="align-items:end">
+        <div class="field small"><label for="universePage">COINGECKO PAGE</label><input id="universePage" type="number" min="1" max="100" value="1"></div>
+        <div class="field small"><label for="universeSize">ROWS</label><select id="universeSize"><option>25</option><option selected>50</option><option>100</option></select></div>
+        <div class="actions"><button class="button secondary" id="loadTokenUniverse" type="button">Load token page</button><button class="button primary" id="verifyVenueCatalogs" type="button">Verify Binance + Bybit listings</button></div>
+      </div>
+      <p class="account-note" id="universeStatus" role="status" aria-live="polite">Load a CoinGecko global market page or verify venue spot listings.</p>
+      <div class="panel table-wrap"><table class="opps" style="min-width:850px"><thead><tr><th>Rank</th><th>Token</th><th>CoinGecko ID</th><th>USD reference</th><th>24h volume USD</th><th>24h change</th><th>Candidate pair</th><th>Action</th></tr></thead><tbody id="universeRows"><tr><td colspan="8" class="empty">Token market page not loaded.</td></tr></tbody></table></div>
+      <div class="section-head"><h2>Token identities &amp; network contracts</h2><span>CoinGecko platform directory</span></div>
+      <div class="controls" style="align-items:end"><div class="field small"><label for="chainPage">TOKEN PAGE</label><input id="chainPage" type="number" min="1" max="1000" value="1"></div><button class="button secondary" id="loadChainTokens" type="button">Load token + network page</button></div>
+      <div class="panel table-wrap"><table class="opps" style="min-width:750px"><thead><tr><th>Token</th><th>CoinGecko ID</th><th>Symbol</th><th>Platform / network</th><th>Contract address</th></tr></thead><tbody id="chainRows"><tr><td colspan="5" class="empty">Token platform directory not loaded.</td></tr></tbody></table></div>
+      <div class="section-head"><h2>Verified venue listing catalog</h2><span>Public REST metadata</span></div>
+      <p class="account-note">This checks active spot pairs quoted in USDT, USDC or DAI. Tickers do not establish token contract or blockchain-network identity, and catalog checks do not establish WebSocket health.</p>
+      <div class="panel table-wrap"><table class="opps" style="min-width:620px"><thead><tr><th>Venue</th><th>Status</th><th>Active spot pairs</th><th>Sample pairs</th></tr></thead><tbody id="venueCatalogRows"><tr><td colspan="4" class="empty">Listing verification has not run.</td></tr></tbody></table></div>
+    </section>
     <div id="error" class="error-banner" role="status"></div>
     <section class="venues" aria-label="Exchange order books">
       <article class="panel" id="venueACard"><div class="venue-head"><div class="venue-name"><span class="venue-code">A</span><span data-venue-name="a">Binance</span><span class="venue-code">PUBLIC REST</span></div><div class="venue-status"><i class="dot"></i><span>Waiting</span></div></div><div class="book"><div><label>Best bid</label><div class="price bid" data-price="a-bid">—</div></div><div><label>Best ask</label><div class="price ask" data-price="a-ask">—</div></div></div><div class="latency" data-latency="a">Snapshot latency —</div></article>
@@ -245,6 +261,40 @@
         $("scan").textContent = "Scan market";
       }
     }
+
+    async function loadTokenUniverse() {
+      const page = Number($("universePage").value), perPage = Number($("universeSize").value);
+      $("universeStatus").textContent = "Loading CoinGecko market references…";
+      try {
+        const r = await fetch("/api/markets?source=coingecko&page="+page+"&perPage="+perPage,{cache:"no-store"});
+        const d = await r.json(); if(!r.ok) throw new Error(d.error||"Market directory unavailable");
+        const body=$("universeRows"); body.replaceChildren();
+        for(const c of d.rows||[]) {
+          const tr=document.createElement("tr");
+          for(const v of [c.marketCapRank??"—",c.name+" ("+c.symbol+")",c.id,c.currentPriceUsd==null?"—":"$"+currency(c.currentPriceUsd,6),c.volume24hUsd==null?"—":"$"+currency(c.volume24hUsd,0),c.change24hPct==null?"—":currency(c.change24hPct,2)+"%",c.candidateSpotPairs?.[0]||"—"]) {const td=document.createElement("td");td.textContent=String(v);tr.append(td);}
+          const td=document.createElement("td"),b=document.createElement("button");b.type="button";b.className="button secondary";b.textContent="Add candidate";
+          b.addEventListener("click",()=>{const pair=c.candidateSpotPairs?.[0];if(!pair)return;const select=$("markets");let o=Array.from(select.options).find(x=>x.value===pair);if(!o){o=document.createElement("option");o.value=pair;o.textContent=pair+" · unverified";select.append(o);}if(selectedValues(select).length>=12&&!o.selected){$("universeStatus").textContent="Maximum 12 selected markets.";return;}o.selected=true;$("universeStatus").textContent=pair+" added as a candidate; venue listing still needs verification.";});td.append(b);tr.append(td);body.append(tr);
+        }
+        $("universeStatus").textContent="CoinGecko page "+d.page+" loaded: "+d.rows.length+" global market references. Candidate pairs are not verified listings.";
+      } catch(e) {$("universeStatus").textContent=e.message||"Market directory unavailable";}
+    }
+    async function loadChainTokens() {
+      const page=Number($("chainPage").value);$("universeStatus").textContent="Loading token identity and platform metadata…";
+      try {const r=await fetch("/api/markets?source=tokens&page="+page+"&perPage=50",{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"Token platform directory unavailable");const body=$("chainRows");body.replaceChildren();
+        for(const token of d.rows||[]){const platforms=token.platforms?.length?token.platforms:[{network:"—",contractAddress:"—"}];for(const platform of platforms){const tr=document.createElement("tr");for(const value of [token.name,token.id,token.symbol,platform.network,platform.contractAddress]){const td=document.createElement("td");td.textContent=String(value);tr.append(td);}body.append(tr);}}
+        $("universeStatus").textContent="Token/platform page "+d.page+" · "+d.rows.length+" token identities from "+d.totalRows+" indexed assets. Contract metadata is not proof of exchange listing or bridge equivalence.";
+      }catch(e){$("universeStatus").textContent=e.message||"Token platform directory unavailable";}
+    }
+    async function verifyVenueCatalogs() {
+      $("universeStatus").textContent="Checking Binance and Bybit public spot listings…";
+      try {
+        const r=await fetch("/api/markets?source=venues&venues=binance,bybit",{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"Venue catalog unavailable");
+        const body=$("venueCatalogRows");body.replaceChildren();
+        for(const v of d.venues||[]){const tr=document.createElement("tr");for(const value of [v.name,v.status,v.totalSpotPairs,(v.rows||[]).slice(0,6).map(x=>x.symbol).join(", ")||"—"]){const td=document.createElement("td");td.textContent=String(value);tr.append(td);}body.append(tr);}
+        $("universeStatus").textContent="Listing catalog loaded for "+(d.venues||[]).filter(v=>v.status==="available").length+"/2 venues. REST metadata only; streaming health is separate.";
+      } catch(e){$("universeStatus").textContent=e.message||"Venue catalog unavailable";}
+    }
+
 
     async function control(path, options = {}) {
       const query = new URLSearchParams({path});
@@ -512,6 +562,9 @@
     $("exchangeA").addEventListener("change", () => { syncVenueNames(); scan(); });
     $("exchangeB").addEventListener("change", () => { syncVenueNames(); scan(); });
     for (const field of ["symbol", "size", "feeA", "feeB"]) $(field).addEventListener("change", scan);
+    $("loadChainTokens").addEventListener("click", loadChainTokens);
+    $("loadTokenUniverse").addEventListener("click", loadTokenUniverse);
+    $("verifyVenueCatalogs").addEventListener("click", verifyVenueCatalogs);
     $("controls").addEventListener("submit", scan);
     $("refresh").addEventListener("click", scan);
     $("auto").addEventListener("change", () => {
