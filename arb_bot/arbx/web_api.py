@@ -907,6 +907,14 @@ def engine_journal(request: Request, store=Depends(get_control_plane_store)):
 
 @app.post("/api/v1/engine/start", dependencies=[Depends(_proxy_auth)])
 async def engine_start(payload: EngineStart, request: Request):
+    # Durable PostgreSQL read routes do not imply multi-worker lifecycle parity.
+    # Keep mutations explicitly closed until leases, heartbeats, fencing and recovery
+    # are wired into the engine runner itself.
+    if _postgres_store_selected():
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL engine lifecycle runtime is not yet supported",
+        )
     if not payload.require_private_stream:
         raise HTTPException(422, "The authenticated engine requires a verified private balance stream in both paper and live modes")
     if payload.mode == "live":
@@ -973,6 +981,12 @@ async def engine_start(payload: EngineStart, request: Request):
 @app.post("/api/v1/engine/stop", dependencies=[Depends(_proxy_auth)])
 def engine_stop(request: Request):
     global engine_phase, engine_stop_requested
+    # Do not let a readiness/read-route feature flag enable process-local stop logic.
+    if _postgres_store_selected():
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL engine lifecycle runtime is not yet supported",
+        )
     db = _connect()
     try:
         uid = _current_user(request, db)
