@@ -33,6 +33,10 @@ from arbx.permissions import (
 APP_DB = Path(os.getenv("ARBX_APP_DB", "arbx_app.sqlite3"))
 SESSION_COOKIE = "arbx_session"
 SESSION_TTL = 60 * 60 * 24 * 7
+
+# Keep PostgreSQL service readiness closed until all Control API routes and journal paths
+# have completed backend parity and end-to-end verification.
+POSTGRES_CONTROL_API_PARITY_COMPLETE = False
 VERIFICATION_TTL_SECONDS = 5 * 60
 VENUES = {
     "binance": "Binance", "bybit": "Bybit", "okx": "OKX", "kucoin": "KuCoin", "gateio": "Gate.io",
@@ -953,6 +957,11 @@ def readiness_probe():
             backend = control_api_backend_from_environment()
             if backend.dialect != "postgres" or not backend.health_check():
                 raise HTTPException(status_code=503, detail="Control API persistence is not ready")
+            if not POSTGRES_CONTROL_API_PARITY_COMPLETE:
+                raise HTTPException(
+                    status_code=503,
+                    detail="PostgreSQL Control API route parity is not complete",
+                )
             return {"status": "ready", "storage": "postgres"}
         except (OSError, ValueError):
             raise HTTPException(status_code=503, detail="Control API persistence is not ready") from None
