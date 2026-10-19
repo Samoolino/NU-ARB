@@ -106,3 +106,36 @@ def test_agent_report_cannot_grant_execution_authority():
     assert result.status == "ADVISORY_ONLY"
     assert not hasattr(result, "live_eligible")
     assert not hasattr(result, "execute")
+
+
+def test_report_collection_is_bounded():
+    reports = (report("connectivity") for _ in range(1000000))
+    result = aggregate_reports(
+        reports, expected_observation_id="obs-1", now_ms=10000
+    )
+    assert result.status == "REJECTED"
+    assert "too_many_agent_reports" in result.reasons
+    assert result.reports == ()
+
+
+def test_duplicate_required_roles_are_invalid_configuration():
+    result = aggregate_reports(
+        baseline(),
+        expected_observation_id="obs-1",
+        now_ms=10000,
+        required_roles=("connectivity", "connectivity"),
+    )
+    assert result.status == "REJECTED"
+    assert "invalid_supervisor_configuration" in result.reasons
+
+
+def test_summary_control_characters_are_removed():
+    reports = baseline()
+    reports[0] = {**reports[0], "summary": "line1\\nline2\\x1b[31m"}
+    result = aggregate_reports(
+        reports, expected_observation_id="obs-1", now_ms=10000
+    )
+    assert result.status == "ADVISORY_ONLY"
+    summary = next(r.summary for r in result.reports if r.role == "connectivity")
+    assert "\\n" not in summary
+    assert "\\x1b" not in summary
