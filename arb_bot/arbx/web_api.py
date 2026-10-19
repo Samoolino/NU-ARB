@@ -253,6 +253,35 @@ def _decrypt(blob: bytes) -> bytes:
     return AESGCM(key).decrypt(blob[:12], blob[12:], b"arbx-exchange-credentials-v1")
 
 
+def _load_user_credentials(store, user_id: str, exchange_ids: list[str]) -> dict[str, dict[str, str]]:
+    """Decrypt only the requested user's persisted credentials from the selected store.
+
+    The caller must supply the already-authenticated user ID. This helper accepts
+    a ControlPlaneStore rather than opening a database itself, so PostgreSQL
+    selection can never fall back to the legacy SQLite credential table.
+    """
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise HTTPException(401, "Authentication required")
+    if len(exchange_ids) != len(set(exchange_ids)):
+        raise HTTPException(422, "Duplicate exchange IDs are not allowed")
+    credentials_by_id: dict[str, dict[str, str]] = {}
+    for exchange_id in exchange_ids:
+        row = store.get_credentials(user_id, exchange_id)
+        if row is None:
+            raise HTTPException(409, f"Missing saved credentials for {exchange_id}")
+        try:
+            decoded = json.loads(_decrypt(row["encrypted_credentials"]).decode())
+            if not isinstance(decoded, dict) or not decoded or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in decoded.items()
+            ):
+                raise ValueError("invalid credential payload")
+            credentials_by_id[exchange_id] = decoded
+        except Exception as exc:
+            raise HTTPException(503, "Could not unlock saved exchange credentials") from exc
+    return credentials_by_id
+
+
 class Signup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
@@ -477,7 +506,7 @@ def _current_user(request: Request, db: sqlite3.Connection):
 
 @app.get("/api/v1/health", dependencies=[Depends(_proxy_auth)])
 def health():
-    enabled = os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"
+    enabled = False
     return {"service": "arbx-control-api", "status": "available", "execution_enabled": enabled}
 
 
@@ -497,9 +526,9 @@ def healthz():
 
 @app.get("/api/v1/runtime", dependencies=[Depends(_proxy_auth)])
 def runtime_config():
-    return {"liveTradingEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
+    return {"liveTradingEnabled": False,
             "executionActive": bool(engine_task and not engine_task.done()),
-            "executionEnabled": os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1",
+            "executionEnabled": False,
             "enginePhase": engine_phase}
 
 
@@ -686,8 +715,7 @@ async def exchanges(request: Request, store=Depends(get_control_plane_store)):
                        "orderBook": saved.get("orderBook"), "maskedKey": saved.get("maskedKey"),
                        "scannerEligible": fresh and bool(saved_evidence.get("scannerEligible")),
                        "liveEligible": fresh and bool(saved_evidence.get("liveEligible")),
-                       "executionEnabled": fresh and bool(saved_evidence.get("liveEligible"))
-                           and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"})
+                       "executionEnabled": False})
     return {"exchanges": result}
 
 
@@ -793,7 +821,7 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
     return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
             "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
             "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
-            "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
+            "executionEnabled": False}
 
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
@@ -821,7 +849,18 @@ def remove_exchange(exchange_id: str, request: Request, store=Depends(get_contro
 
 
 @app.get("/api/v1/engine/state", dependencies=[Depends(_proxy_auth)])
-def engine_state(request: Request):
+def engine_state(request: Request, store=Depends(get_control_plane_store)):
+    if _postgres_store_selected():
+        if not POSTGRES_CONTROL_API_PARITY_COMPLETE:
+            raise HTTPException(503, "Configured persistence backend is not yet supported by the Control API")
+        uid = _store_current_user(request, store)
+        current = store.get_latest_engine_session(uid)
+        if current is None:
+            return {"status": "STOPPED", "mode": None, "stats": None, "sessionId": None,
+                    "error": None, "executionEnabled": False}
+        return {"status": current["phase"], "mode": current["mode"], "stats": None,
+                "sessionId": current["session_id"], "error": current.get("error_code"),
+                "executionEnabled": False}
     db = _connect()
     try:
         uid = _current_user(request, db)
@@ -837,11 +876,36 @@ def engine_state(request: Request):
     return {"status": status, "mode": engine_hub.cfg.mode,
             "stats": stats,
             "error": engine_error,
-            "executionEnabled": engine_hub.cfg.mode == "live" and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
+            "executionEnabled": False}
 
 
 @app.get("/api/v1/engine/journal", dependencies=[Depends(_proxy_auth)])
-def engine_journal(request: Request):
+def engine_journal(request: Request, store=Depends(get_control_plane_store)):
+    # Keep all PostgreSQL Control API routes closed until the complete cutover is verified.
+    if _postgres_store_selected() and not POSTGRES_CONTROL_API_PARITY_COMPLETE:
+        raise HTTPException(503, "Configured persistence backend is not yet supported by the Control API")
+    # PostgreSQL reads map the authenticated owner to only their durable sessions.
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+        sessions = store.list_engine_sessions(uid, limit=500)
+        if not sessions:
+            return {"trades": [], "realizedNetPnl": 0.0, "scope": "owned durable engine sessions"}
+        from arbx.journal_storage import BackendTradeJournal
+        from arbx.storage import backend_from_environment
+        journal = BackendTradeJournal(backend_from_environment())
+        try:
+            trades = []
+            realized_total = 0.0
+            for engine_session in sessions:
+                session_id = engine_session["session_id"]
+                trades.extend(journal.recent_trades(session_id, limit=100))
+                realized_total += journal.realized(session_id)
+            trades.sort(key=lambda record: (str(record.get("timestamp", "")), int(record.get("id", 0))), reverse=True)
+            return {"trades": trades[:100], "realizedNetPnl": realized_total,
+                    "scope": "owned durable engine sessions"}
+        finally:
+            journal.close()
+
     db = _connect()
     try:
         uid = _current_user(request, db)
@@ -872,13 +936,20 @@ def engine_journal(request: Request):
 
 @app.post("/api/v1/engine/start", dependencies=[Depends(_proxy_auth)])
 async def engine_start(payload: EngineStart, request: Request):
+    # Durable PostgreSQL read routes do not imply multi-worker lifecycle parity.
+    # Keep mutations explicitly closed until leases, heartbeats, fencing and recovery
+    # are wired into the engine runner itself.
+    if _postgres_store_selected():
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL engine lifecycle runtime is not yet supported",
+        )
     if not payload.require_private_stream:
         raise HTTPException(422, "The authenticated engine requires a verified private balance stream in both paper and live modes")
     if payload.mode == "live":
-        if os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") != "1":
-            raise HTTPException(503, "Live execution is disabled by the control-service operator")
-        if payload.live_confirmation != "I ACCEPT REAL ORDERS":
-            raise HTTPException(422, 'For live mode, type exactly: "I ACCEPT REAL ORDERS"')
+        # This release supports paper/simulation validation only. An environment
+        # flag or request confirmation must not unlock real-order submission.
+        raise HTTPException(503, "Live execution is disabled in this build")
 
     global engine_owner_id, engine_hub, engine_task, engine_phase, engine_error, engine_stop_requested
     async with engine_lock:
@@ -939,6 +1010,12 @@ async def engine_start(payload: EngineStart, request: Request):
 @app.post("/api/v1/engine/stop", dependencies=[Depends(_proxy_auth)])
 def engine_stop(request: Request):
     global engine_phase, engine_stop_requested
+    # Do not let a readiness/read-route feature flag enable process-local stop logic.
+    if _postgres_store_selected():
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL engine lifecycle runtime is not yet supported",
+        )
     db = _connect()
     try:
         uid = _current_user(request, db)
@@ -979,7 +1056,11 @@ def readiness_probe():
                     detail="PostgreSQL Control API route parity is not complete",
                 )
             return {"status": "ready", "storage": "postgres"}
-        except (OSError, ValueError):
+        except HTTPException:
+            raise
+        except Exception:
+            # Backend driver errors vary by implementation; never leak connection
+            # details or let an unexpected exception turn readiness into HTTP 500.
             raise HTTPException(status_code=503, detail="Control API persistence is not ready") from None
     if kind not in {"sqlite", ""}:
         raise HTTPException(status_code=503, detail="Control API persistence is not ready")

@@ -432,3 +432,402 @@ def test_postgres_migration_enforces_case_insensitive_email_uniqueness():
     sql = migration.read_text(encoding="utf-8").lower()
     assert "create unique index if not exists control_api_users_email_ci_idx" in sql
     assert "on control_api_users(lower(email))" in sql
+
+
+def test_engine_session_registry_persists_owner_and_scopes_listing(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-sessions.sqlite3"))
+    store.initialize()
+    for user_id, email in (("engine-owner-a", "engine-a@example.test"),
+                           ("engine-owner-b", "engine-b@example.test")):
+        store.create_user(user_id=user_id, email=email, salt=b"salt", password_hash=b"hash",
+                          created_at="2026-10-19T00:00:00+00:00")
+    store.register_engine_session(
+        session_id="paper-session-a", owner_user_id="engine-owner-a", mode="paper",
+        phase="RUNNING", created_at="2026-10-19T01:00:00+00:00",
+        updated_at="2026-10-19T01:00:00+00:00", metadata_json='{"source":"test"}',
+    )
+    store.register_engine_session(
+        session_id="paper-session-b", owner_user_id="engine-owner-b", mode="simulation",
+        phase="STOPPED", created_at="2026-10-19T02:00:00+00:00",
+        updated_at="2026-10-19T02:00:00+00:00",
+    )
+
+    assert store.get_engine_session("paper-session-a")["owner_user_id"] == "engine-owner-a"
+    assert [row["session_id"] for row in store.list_engine_sessions("engine-owner-a")] == ["paper-session-a"]
+    assert store.update_engine_session(
+        session_id="paper-session-a", owner_user_id="engine-owner-b", phase="STOPPED",
+        updated_at="2026-10-19T03:00:00+00:00",
+    ) is False
+    assert store.get_engine_session("paper-session-a")["phase"] == "RUNNING"
+    assert store.update_engine_session(
+        session_id="paper-session-a", owner_user_id="engine-owner-a", phase="STOPPED",
+        updated_at="2026-10-19T04:00:00+00:00", stopped_at="2026-10-19T04:00:00+00:00",
+    ) is True
+    assert store.get_engine_session("paper-session-a")["stopped_at"] == "2026-10-19T04:00:00+00:00"
+
+
+def test_engine_session_registry_rejects_live_mode_and_invalid_limits(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-validation.sqlite3"))
+    store.initialize()
+    store.create_user(user_id="engine-user", email="engine-user@example.test", salt=b"salt",
+                      password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00")
+
+    with pytest.raises(ValueError):
+        store.register_engine_session(
+            session_id="live-session", owner_user_id="engine-user", mode="live", phase="RUNNING",
+            created_at="2026-10-19T00:00:00+00:00", updated_at="2026-10-19T00:00:00+00:00",
+        )
+    with pytest.raises(ValueError):
+        store.list_engine_sessions("engine-user", limit=0)
+
+
+def test_engine_session_postgres_migration_has_owner_fk_and_non_live_constraint():
+    from pathlib import Path
+    migration = Path(__file__).parents[1] / "migrations" / "postgres" / "004_engine_session_registry.sql"
+    sql = migration.read_text(encoding="utf-8").lower()
+    assert "owner_user_id text not null references control_api_users(id) on delete cascade" in sql
+    assert "check (mode in ('paper', 'simulation'))" in sql
+    assert "control_api_engine_sessions_owner_created_idx" in sql
+
+
+def test_deleting_engine_session_owner_cascades_registry_row(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-cascade.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="session-owner", email="session-owner@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="owned-paper-session", owner_user_id="session-owner", mode="paper",
+        phase="STOPPED", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+
+    with store.backend.transaction() as session:
+        session.execute("DELETE FROM control_api_users WHERE id=?", ("session-owner",))
+
+    assert store.get_engine_session("owned-paper-session") is None
+
+
+def test_engine_session_registry_rejects_unknown_phases_and_terminal_restart(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-state-machine.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="state-machine-owner", email="state-machine@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="phase"):
+        store.register_engine_session(
+            session_id="invalid-phase-session", owner_user_id="state-machine-owner",
+            mode="paper", phase="RUNNING_BUT_UNSAFE",
+            created_at="2026-10-19T00:00:00+00:00",
+            updated_at="2026-10-19T00:00:00+00:00",
+        )
+
+    store.register_engine_session(
+        session_id="terminal-session", owner_user_id="state-machine-owner",
+        mode="paper", phase="STOPPED",
+        created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    with pytest.raises(ValueError, match="transition"):
+        store.update_engine_session(
+            session_id="terminal-session", owner_user_id="state-machine-owner",
+            phase="RUNNING", updated_at="2026-10-19T01:00:00+00:00",
+        )
+    assert store.get_engine_session("terminal-session")["phase"] == "STOPPED"
+
+
+def test_engine_session_registry_allows_idempotent_phase_update_and_failure_terminal(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-failure-state.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="failure-owner", email="failure-owner@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="failure-session", owner_user_id="failure-owner",
+        mode="simulation", phase="RUNNING",
+        created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    assert store.update_engine_session(
+        session_id="failure-session", owner_user_id="failure-owner",
+        phase="RUNNING", updated_at="2026-10-19T00:30:00+00:00",
+    ) is True
+    assert store.update_engine_session(
+        session_id="failure-session", owner_user_id="failure-owner",
+        phase="FAILED", updated_at="2026-10-19T01:00:00+00:00",
+        error_code="WORKER_FAILED",
+    ) is True
+    with pytest.raises(ValueError, match="transition"):
+        store.update_engine_session(
+            session_id="failure-session", owner_user_id="failure-owner",
+            phase="RUNNING", updated_at="2026-10-19T02:00:00+00:00",
+        )
+
+
+def test_terminal_session_timestamp_is_stable_on_idempotent_update(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-timestamp.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="terminal-time-owner", email="terminal-time@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="terminal-time-session", owner_user_id="terminal-time-owner",
+        mode="paper", phase="RUNNING", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    store.update_engine_session(
+        session_id="terminal-time-session", owner_user_id="terminal-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T01:00:00+00:00",
+    )
+    first = store.get_engine_session("terminal-time-session")["stopped_at"]
+    store.update_engine_session(
+        session_id="terminal-time-session", owner_user_id="terminal-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T02:00:00+00:00",
+    )
+    assert store.get_engine_session("terminal-time-session")["stopped_at"] == first
+
+
+def test_engine_session_terminal_timestamp_cannot_be_set_early_or_overwritten(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-timestamp-immutable.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="immutable-time-owner", email="immutable-time@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        mode="paper", phase="RUNNING", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+
+    # Caller-supplied terminal time must not be recorded before a terminal phase.
+    store.update_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        phase="STOPPING", updated_at="2026-10-19T00:30:00+00:00",
+        stopped_at="2026-10-19T00:15:00+00:00",
+    )
+    assert store.get_engine_session("immutable-time-session")["stopped_at"] is None
+
+    store.update_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T01:00:00+00:00",
+    )
+    first = store.get_engine_session("immutable-time-session")["stopped_at"]
+    assert first == "2026-10-19T01:00:00+00:00"
+
+    # Idempotent terminal updates cannot rewrite the original stop time.
+    store.update_engine_session(
+        session_id="immutable-time-session", owner_user_id="immutable-time-owner",
+        phase="STOPPED", updated_at="2026-10-19T02:00:00+00:00",
+        stopped_at="2026-10-19T01:30:00+00:00",
+    )
+    assert store.get_engine_session("immutable-time-session")["stopped_at"] == first
+
+
+def test_engine_session_idempotent_update_preserves_terminal_error_code(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-error-code.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="terminal-error-owner", email="terminal-error@example.test",
+        salt=b"salt", password_hash=b"hash",
+        created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="terminal-error-session", owner_user_id="terminal-error-owner",
+        mode="paper", phase="RUNNING",
+        created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    store.update_engine_session(
+        session_id="terminal-error-session", owner_user_id="terminal-error-owner",
+        phase="FAILED", updated_at="2026-10-19T01:00:00+00:00",
+        error_code="WORKER_FAILED",
+    )
+
+    # An idempotent update must not erase diagnostic evidence accidentally.
+    store.update_engine_session(
+        session_id="terminal-error-session", owner_user_id="terminal-error-owner",
+        phase="FAILED", updated_at="2026-10-19T02:00:00+00:00",
+    )
+    row = store.get_engine_session("terminal-error-session")
+    assert row["error_code"] == "WORKER_FAILED"
+    assert row["stopped_at"] == "2026-10-19T01:00:00+00:00"
+
+
+
+
+
+def test_worker_lease_is_exclusive_renewable_and_fenced(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "worker-lease.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="lease-owner", email="lease-owner@example.test",
+        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="lease-session", owner_user_id="lease-owner", mode="paper",
+        phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+
+    first = store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-a", now_epoch=100, lease_seconds=30,
+    )
+    assert first == {
+        "session_id": "lease-session", "worker_id": "worker-a",
+        "lease_expires_at": 130, "fencing_token": 1,
+    }
+    renewed = store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-a", now_epoch=110, lease_seconds=30,
+    )
+    assert renewed["lease_expires_at"] == 140
+    assert renewed["fencing_token"] == 1
+    assert store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-b", now_epoch=120, lease_seconds=30,
+    ) is None
+
+    takeover = store.claim_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-b", now_epoch=140, lease_seconds=30,
+    )
+    assert takeover["fencing_token"] == 2
+    assert not store.release_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-a", fencing_token=1,
+    )
+    assert store.release_engine_worker_lease(
+        session_id="lease-session", worker_id="worker-b", fencing_token=2,
+    )
+
+
+def test_terminal_engine_session_cannot_acquire_worker_lease(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-worker-lease.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="terminal-owner", email="terminal-owner@example.test",
+        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="terminal-session", owner_user_id="terminal-owner", mode="simulation",
+        phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    assert store.update_engine_session(
+        session_id="terminal-session", owner_user_id="terminal-owner",
+        phase="STOPPED", updated_at="2026-01-01T00:01:00+00:00",
+    )
+    assert store.claim_engine_worker_lease(
+        session_id="terminal-session", worker_id="worker-a", now_epoch=200, lease_seconds=30,
+    ) is None
+
+
+
+def test_terminal_transition_releases_worker_lease_and_invalidates_old_owner(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-lease-release.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="lease-stop-owner", email="lease-stop-owner@example.test",
+        salt=b"salt", password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="lease-stop-session", owner_user_id="lease-stop-owner", mode="paper",
+        phase="CREATED", created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    lease = store.claim_engine_worker_lease(
+        session_id="lease-stop-session", worker_id="worker-stop", now_epoch=100, lease_seconds=30,
+    )
+    assert lease is not None
+    assert store.update_engine_session(
+        session_id="lease-stop-session", owner_user_id="lease-stop-owner",
+        phase="STOPPED", updated_at="2026-01-01T00:01:00+00:00",
+    )
+    assert store.release_engine_worker_lease(
+        session_id="lease-stop-session", worker_id="worker-stop",
+        fencing_token=lease["fencing_token"],
+    ) is False
+    assert store.claim_engine_worker_lease(
+        session_id="lease-stop-session", worker_id="worker-new", now_epoch=200, lease_seconds=30,
+    ) is None
+
+
+def test_latest_engine_session_orders_by_update_time_and_owner(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "latest-engine-session.sqlite3"))
+    store.initialize()
+    for user_id, email in (
+        ("latest-owner", "latest-owner@example.test"),
+        ("latest-other", "latest-other@example.test"),
+    ):
+        store.create_user(
+            user_id=user_id, email=email, salt=b"salt", password_hash=b"hash",
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+    store.register_engine_session(
+        session_id="newer-created-but-stale", owner_user_id="latest-owner", mode="paper",
+        phase="STOPPED", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T01:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="older-created-but-latest-update", owner_user_id="latest-owner", mode="simulation",
+        phase="RUNNING", created_at="2026-10-18T00:00:00+00:00",
+        updated_at="2026-10-19T02:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="foreign-latest", owner_user_id="latest-other", mode="paper",
+        phase="RUNNING", created_at="2026-10-20T00:00:00+00:00",
+        updated_at="2026-10-20T00:00:00+00:00",
+    )
+
+    latest = store.get_latest_engine_session("latest-owner")
+    assert latest is not None
+    assert latest["session_id"] == "older-created-but-latest-update"
+    assert latest["owner_user_id"] == "latest-owner"
+    assert store.get_latest_engine_session("latest-owner-missing") is None
+    with pytest.raises(ValueError, match="owner is required"):
+        store.get_latest_engine_session("")
+
+
+
+def test_lifecycle_transition_requires_current_unexpired_worker_fence(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "fenced-lifecycle.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="fenced-owner", email="fenced-owner@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="fenced-session", owner_user_id="fenced-owner", mode="paper",
+        phase="CREATED", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    first = store.claim_engine_worker_lease(
+        session_id="fenced-session", worker_id="worker-first", now_epoch=100, lease_seconds=10,
+    )
+    assert first is not None
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="fenced-owner",
+        worker_id="worker-first", fencing_token=first["fencing_token"],
+        phase="STARTING", updated_at="2026-10-19T00:00:01+00:00", now_epoch=101,
+    )
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="someone-else",
+        worker_id="worker-first", fencing_token=first["fencing_token"],
+        phase="PREFLIGHTING", updated_at="2026-10-19T00:00:02+00:00", now_epoch=102,
+    ) is False
+    second = store.claim_engine_worker_lease(
+        session_id="fenced-session", worker_id="worker-second", now_epoch=111, lease_seconds=10,
+    )
+    assert second is not None and second["fencing_token"] == 2
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="fenced-owner",
+        worker_id="worker-first", fencing_token=first["fencing_token"],
+        phase="PREFLIGHTING", updated_at="2026-10-19T00:00:03+00:00", now_epoch=112,
+    ) is False
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="fenced-owner",
+        worker_id="worker-second", fencing_token=second["fencing_token"],
+        phase="PREFLIGHTING", updated_at="2026-10-19T00:00:04+00:00", now_epoch=112,
+    )

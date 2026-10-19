@@ -381,3 +381,369 @@ def test_sqlite_login_normalizes_whitespace_around_email(tmp_path, monkeypatch):
             assert me_response.json()["user"]["email"] == "login-normalization@example.test"
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_engine_journal_route_fails_closed_for_postgres_without_sqlite_fallback(tmp_path, monkeypatch):
+    """Unmigrated journal reads must not silently return legacy SQLite data."""
+    database = tmp_path / "legacy-engine-journal.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = client.get("/api/v1/engine/journal")
+
+        assert response.status_code == 503, response.text
+        assert "not yet supported" in response.json()["detail"]
+        assert not database.exists()
+        assert not (tmp_path / "engine_test-user.sqlite3").exists()
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("get", "/api/v1/engine/state", None),
+        ("post", "/api/v1/engine/stop", None),
+        (
+            "post",
+            "/api/v1/engine/start",
+            {
+                "mode": "paper",
+                "exchange_ids": ["binance"],
+                "trade_size_usd": 1,
+                "max_loss_usd": 1,
+                "target_profit_usd": 1,
+                "require_private_stream": True,
+            },
+        ),
+    ],
+)
+def test_engine_lifecycle_routes_fail_closed_for_postgres_without_sqlite_fallback(
+    tmp_path, monkeypatch, method, path, payload
+):
+    """Lifecycle routes must not initialize or read SQLite when PostgreSQL is selected."""
+    database = tmp_path / "legacy-engine-state.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = getattr(client, method)(path, json=payload) if payload else getattr(client, method)(path)
+
+        assert response.status_code == 503, response.text
+        assert "not yet supported" in response.json()["detail"]
+        assert not database.exists()
+        assert not (tmp_path / "engine_test-user.sqlite3").exists()
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_postgres_readiness_stays_closed_until_control_api_parity_is_complete(tmp_path, monkeypatch):
+    """A healthy PostgreSQL connection is insufficient while route parity is unfinished."""
+    from fastapi.testclient import TestClient
+
+    database = tmp_path / "must-not-be-created.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+
+    class HealthyPostgresBackend:
+        dialect = "postgres"
+
+        def health_check(self):
+            return True
+
+    monkeypatch.setattr(web_api, "control_api_backend_from_environment", lambda: HealthyPostgresBackend())
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", False)
+
+    with TestClient(web_api.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503, response.text
+    assert "route parity is not complete" in response.json()["detail"]
+    assert not database.exists()
+
+
+def test_signup_store_rolls_back_user_when_initial_session_insert_fails(tmp_path):
+    """Account creation must be atomic: no orphaned user if session persistence fails."""
+    import sqlite3
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "signup-atomicity.sqlite3"))
+    store.initialize()
+    with store.backend.transaction() as db:
+        db.execute(
+            """CREATE TRIGGER reject_initial_session
+               BEFORE INSERT ON control_api_sessions
+               BEGIN SELECT RAISE(ABORT, 'injected session write failure'); END"""
+        )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_user_with_session(
+            user_id="atomic-user",
+            email="atomic@example.test",
+            salt=b"0123456789abcdef",
+            password_hash=b"test-password-hash",
+            created_at="2026-10-19T00:00:00+00:00",
+            token_hash="hashed-session-token",
+            expires_at=2_000_000_000,
+        )
+
+    assert store.get_user_by_email("atomic@example.test") is None
+    assert store.get_session("hashed-session-token") is None
+
+
+def test_live_engine_start_is_disabled_even_when_environment_flag_is_set(monkeypatch):
+    monkeypatch.setenv("ARBX_LIVE_TRADING_ENABLED", "1")
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = client.post(
+                "/api/v1/engine/start",
+                json={
+                    "mode": "live",
+                    "exchange_ids": ["binance", "bybit"],
+                    "trade_size_usd": 1,
+                    "max_loss_usd": 1,
+                    "target_profit_usd": 10,
+                    "require_private_stream": True,
+                    "cross_live": True,
+                    "live_confirmation": "I ACCEPT REAL ORDERS",
+                },
+            )
+        assert response.status_code == 503, response.text
+        assert "disabled in this build" in response.json()["detail"]
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_runtime_never_advertises_live_execution_as_enabled(monkeypatch):
+    monkeypatch.setenv("ARBX_LIVE_TRADING_ENABLED", "1")
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            runtime = client.get("/api/v1/runtime")
+            health = client.get("/api/v1/health")
+        assert runtime.status_code == 200, runtime.text
+        assert runtime.json()["liveTradingEnabled"] is False
+        assert runtime.json()["executionEnabled"] is False
+        assert health.status_code == 200, health.text
+        assert health.json()["execution_enabled"] is False
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_postgres_engine_journal_reads_only_sessions_owned_by_authenticated_user(tmp_path, monkeypatch):
+    """Journal reads must resolve the cookie owner to only their session IDs."""
+    from fastapi.testclient import TestClient
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", True)
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "journal-owner-scope.sqlite3"))
+    store.initialize()
+    for user_id, email in (("journal-owner-a", "journal-a@example.test"),
+                           ("journal-owner-b", "journal-b@example.test")):
+        store.create_user(user_id=user_id, email=email, salt=b"0123456789abcdef",
+                          password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00")
+    store.create_session(token_hash=web_api._session_token_hash("journal-owner-a-token"),
+                         user_id="journal-owner-a", expires_at=2_000_000_000)
+    store.register_engine_session(session_id="owned-session-a", owner_user_id="journal-owner-a",
+                                  mode="paper", phase="STOPPED", created_at="2026-10-18T00:00:00Z",
+                                  updated_at="2026-10-18T00:00:00Z")
+    store.register_engine_session(session_id="foreign-session-b", owner_user_id="journal-owner-b",
+                                  mode="simulation", phase="STOPPED", created_at="2026-10-18T00:00:00Z",
+                                  updated_at="2026-10-18T00:00:00Z")
+
+    class FakeJournal:
+        requested_sessions = []
+        def __init__(self, backend):
+            assert backend.dialect == "sqlite"
+        def recent_trades(self, session_id, limit=100):
+            self.requested_sessions.append(session_id)
+            return [{"id": 1, "session_id": session_id, "timestamp": "2026-10-18T00:00:00Z", "net_pnl": 3.5}]
+        def realized(self, session_id):
+            return 3.5 if session_id == "owned-session-a" else 999.0
+        def close(self):
+            return None
+
+    import arbx.journal_storage
+    import arbx.storage
+    monkeypatch.setattr(arbx.journal_storage, "BackendTradeJournal", FakeJournal)
+    monkeypatch.setattr(arbx.storage, "backend_from_environment",
+                        lambda: SQLiteBackend(tmp_path / "journal-data.sqlite3"))
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, "journal-owner-a-token")
+            response = client.get("/api/v1/engine/journal")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert [trade["session_id"] for trade in body["trades"]] == ["owned-session-a"]
+        assert body["realizedNetPnl"] == 3.5
+        assert body["scope"] == "owned durable engine sessions"
+        assert FakeJournal.requested_sessions == ["owned-session-a"]
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+def test_postgres_engine_state_returns_latest_owned_durable_session(tmp_path, monkeypatch):
+    """State reads the authenticated user's durable session, never another owner's."""
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", True)
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-state-owner-scope.sqlite3"))
+    store.initialize()
+    for user_id, email in (("state-owner-a", "state-a@example.test"),
+                           ("state-owner-b", "state-b@example.test")):
+        store.create_user(user_id=user_id, email=email, salt=b"0123456789abcdef",
+                          password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00")
+    store.create_session(token_hash=web_api._session_token_hash("state-owner-a-token"),
+                         user_id="state-owner-a", expires_at=2_000_000_000)
+    store.register_engine_session(session_id="owned-old", owner_user_id="state-owner-a", mode="paper",
+                                  phase="STOPPED", created_at="2026-10-17T00:00:00Z",
+                                  updated_at="2026-10-17T00:00:00Z")
+    store.register_engine_session(session_id="owned-latest", owner_user_id="state-owner-a", mode="simulation",
+                                  phase="RUNNING", created_at="2026-10-18T00:00:00Z",
+                                  updated_at="2026-10-18T00:00:00Z")
+    store.register_engine_session(session_id="foreign-session", owner_user_id="state-owner-b", mode="paper",
+                                  phase="RUNNING", created_at="2026-10-19T00:00:00Z",
+                                  updated_at="2026-10-19T00:00:00Z")
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, "state-owner-a-token")
+            response = client.get("/api/v1/engine/state")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["sessionId"] == "owned-latest"
+        assert body["status"] == "RUNNING"
+        assert body["mode"] == "simulation"
+        assert body["executionEnabled"] is False
+        assert body["stats"] is None
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("post", "/api/v1/engine/start", {
+            "mode": "paper", "exchange_ids": ["binance"], "trade_size_usd": 1,
+            "max_loss_usd": 1, "target_profit_usd": 1, "require_private_stream": True,
+        }),
+        ("post", "/api/v1/engine/stop", None),
+    ],
+)
+def test_postgres_engine_mutations_remain_disabled_even_if_read_parity_flag_is_set(
+    tmp_path, monkeypatch, method, path, payload
+):
+    """Read-route parity must never accidentally enable process-local engine mutations."""
+    database = tmp_path / "must-not-be-created.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", True)
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = getattr(client, method)(path, json=payload) if payload else getattr(client, method)(path)
+
+        assert response.status_code == 503, response.text
+        assert response.json()["detail"] == "PostgreSQL engine lifecycle runtime is not yet supported"
+        assert not database.exists()
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+
+def test_postgres_two_user_api_isolation_for_identity_exchange_and_capital_views(tmp_path, monkeypatch):
+    """Authenticated API views must expose only the caller's identity and credential evidence."""
+    import json
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "two-user-api-isolation.sqlite3"))
+    store.initialize()
+    now = datetime.now(timezone.utc).isoformat()
+    for user_id, email in (("api-owner-a", "api-a@example.test"),
+                           ("api-owner-b", "api-b@example.test")):
+        store.create_user(user_id=user_id, email=email, salt=b"0123456789abcdef",
+                          password_hash=b"not-used-by-this-test", created_at=now)
+    for token, user_id in (("api-owner-a-token", "api-owner-a"),
+                           ("api-owner-b-token", "api-owner-b")):
+        store.create_session(token_hash=web_api._session_token_hash(token),
+                             user_id=user_id, expires_at=2_000_000_000)
+
+    def verification(asset, free, used):
+        return json.dumps({
+            "evidence": {"scannerEligible": True, "liveEligible": False},
+            "balances": {asset: {"free": free, "used": used, "total": free + used}},
+            "maskedKey": "abc•••xyz",
+        })
+
+    store.save_credentials(user_id="api-owner-a", exchange_id="binance",
+                           encrypted_credentials=b"ciphertext-a", auth_mode="hmac", state="CONNECTED",
+                           last_verified=now, verification_json=verification("USDT", 12.5, 2.0))
+    store.save_credentials(user_id="api-owner-b", exchange_id="binance",
+                           encrypted_credentials=b"ciphertext-b", auth_mode="hmac", state="CONNECTED",
+                           last_verified=now, verification_json=verification("BTC", 0.75, 0.25))
+
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, "api-owner-a-token")
+            identity = client.get("/api/v1/auth/me")
+            exchanges = client.get("/api/v1/exchanges")
+            capital = client.get("/api/v1/capital-sources")
+
+        assert identity.status_code == 200, identity.text
+        assert identity.json()["user"] == {"id": "api-owner-a", "email": "api-a@example.test"}
+        assert exchanges.status_code == 200, exchanges.text
+        binance = next(item for item in exchanges.json()["exchanges"] if item["id"] == "binance")
+        assert binance["state"] == "CONNECTED"
+        assert binance["balances"] == {"USDT": {"free": 12.5, "used": 2.0, "total": 14.5}}
+        assert "ciphertext-a" not in exchanges.text
+        assert "ciphertext-b" not in exchanges.text
+        assert capital.status_code == 200, capital.text
+        assert capital.json()["fundsMoved"] is False
+        assert capital.json()["sources"] == [{
+            "exchangeId": "binance", "exchange": "Binance", "asset": "USDT",
+            "available": 12.5, "reserved": 2.0, "usable": 12.5,
+            "valuationUsd": None, "valuationNote": "No external FX valuation is applied",
+            "lastVerified": now,
+        }]
+        assert "BTC" not in capital.text
+        assert "api-owner-b" not in identity.text
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
