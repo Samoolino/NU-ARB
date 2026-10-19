@@ -977,7 +977,11 @@ def readiness_probe():
                     detail="PostgreSQL Control API route parity is not complete",
                 )
             return {"status": "ready", "storage": "postgres"}
-        except (OSError, ValueError):
+        except HTTPException:
+            raise
+        except Exception:
+            # Backend driver errors vary by implementation; never leak connection
+            # details or let an unexpected exception turn readiness into HTTP 500.
             raise HTTPException(status_code=503, detail="Control API persistence is not ready") from None
     if kind not in {"sqlite", ""}:
         raise HTTPException(status_code=503, detail="Control API persistence is not ready")
