@@ -481,62 +481,85 @@ def runtime_config():
             "enginePhase": engine_phase}
 
 
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(SESSION_COOKIE, token, httponly=True,
+                        secure=os.getenv("APP_SECURE_COOKIE", "1") == "1",
+                        samesite="lax", max_age=SESSION_TTL, path="/")
+
+
+def _session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 @app.post("/api/v1/auth/signup", dependencies=[Depends(_proxy_auth)])
-def signup(payload: Signup, response: Response):
+def signup(payload: Signup, response: Response, store=Depends(get_control_plane_store)):
     if payload.password != payload.password_confirmation:
         raise HTTPException(422, "Passwords do not match")
-    db = _connect(); user_id = secrets.token_hex(16); salt = secrets.token_bytes(16)
+    email = payload.email.strip().lower()
+    user_id = secrets.token_hex(16)
+    salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), salt, 310_000)
+    token = secrets.token_urlsafe(32)
+    now = int(time.time())
     try:
-        db.execute("INSERT INTO users(id,email,salt,password_hash,created_at) VALUES(?,?,?,?,?)",
-                   (user_id, payload.email.lower(), salt, digest, datetime.now(timezone.utc).isoformat()))
-        db.commit(); _new_session(db, user_id, response)
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(409, "An account with this email already exists") from exc
-    finally:
-        db.close()
-    return {"user": {"id": user_id, "email": payload.email.lower()}}
+        store.create_user_with_session(
+            user_id=user_id, email=email, salt=salt, password_hash=digest,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            token_hash=_session_token_hash(token), expires_at=now + SESSION_TTL,
+        )
+    except Exception as exc:
+        # Translate only recognizable uniqueness conflicts; backend outages and
+        # schema errors must remain server errors rather than looking like duplicates.
+        message = str(exc).lower()
+        if "unique" in message or "duplicate key" in message or "already exists" in message:
+            raise HTTPException(409, "An account with this email already exists") from exc
+        raise
+    _set_session_cookie(response, token)
+    return {"user": {"id": user_id, "email": email}}
 
 
 @app.post("/api/v1/auth/login", dependencies=[Depends(_proxy_auth)])
-def login(payload: Login, response: Response):
-    db = _connect()
-    try:
-        row = db.execute("SELECT id,email,salt,password_hash FROM users WHERE lower(email)=lower(?)", (payload.email,)).fetchone()
-        supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
-        if not row or not hmac.compare_digest(supplied, row["password_hash"]):
-            raise HTTPException(401, "Email or password is incorrect")
-        _new_session(db, row["id"], response)
-        return {"user": {"id": row["id"], "email": row["email"]}}
-    finally:
-        db.close()
+def login(payload: Login, response: Response, store=Depends(get_control_plane_store)):
+    row = store.get_user_by_email(payload.email.strip().lower())
+    supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
+    if not row or not hmac.compare_digest(supplied, row["password_hash"]):
+        raise HTTPException(401, "Email or password is incorrect")
+    token = secrets.token_urlsafe(32)
+    store.create_session(token_hash=_session_token_hash(token), user_id=row["id"],
+                         expires_at=int(time.time()) + SESSION_TTL)
+    _set_session_cookie(response, token)
+    return {"user": {"id": row["id"], "email": row["email"]}}
 
 
 @app.post("/api/v1/auth/logout", dependencies=[Depends(_proxy_auth)])
-def logout(request: Request, response: Response):
-    db = _connect(); token = request.cookies.get(SESSION_COOKIE)
-    uid = None
-    if token:
-        row = db.execute("SELECT user_id FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
-        uid = row["user_id"] if row else None
+def logout(request: Request, response: Response, store=Depends(get_control_plane_store)):
+    token = request.cookies.get(SESSION_COOKIE)
+    session = store.get_session(_session_token_hash(token)) if token else None
+    uid = session["user_id"] if session else None
     if uid and uid == engine_owner_id and engine_task is not None and not engine_task.done():
-        db.close()
         raise HTTPException(409, "Stop the engine before signing out")
     if token:
-        db.execute("DELETE FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),)); db.commit()
-    db.close(); response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
+        store.delete_session(_session_token_hash(token))
+    response.delete_cookie(SESSION_COOKIE, path="/", httponly=True,
+                           secure=os.getenv("APP_SECURE_COOKIE", "1") == "1", samesite="lax")
     return {"ok": True}
 
 
 @app.get("/api/v1/auth/me", dependencies=[Depends(_proxy_auth)])
-def me(request: Request):
-    db = _connect()
-    try:
-        user_id = _current_user(request, db)
-        row = db.execute("SELECT id,email FROM users WHERE id=?", (user_id,)).fetchone()
-        return {"user": dict(row)}
-    finally:
-        db.close()
+def me(request: Request, store=Depends(get_control_plane_store)):
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(401, "Sign in required")
+    token_hash = _session_token_hash(token)
+    session = store.get_valid_session(token_hash, now_epoch=int(time.time()))
+    if session is None:
+        # Opportunistically purge expired sessions; never accept an expired token.
+        store.purge_expired_sessions(now_epoch=int(time.time()))
+        raise HTTPException(401, "Session expired; sign in again")
+    row = store.get_user(session["user_id"])
+    if row is None:
+        raise HTTPException(401, "Session expired; sign in again")
+    return {"user": {"id": row["id"], "email": row["email"]}}
 
 
 @app.get("/api/v1/exchanges", dependencies=[Depends(_proxy_auth)])
