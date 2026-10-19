@@ -15,6 +15,9 @@ MAX_SCAN_SYMBOLS = 12
 MAX_PUBLIC_NOTIONAL_USD = 100_000.0
 MAX_TAKER_FEE_BPS = 100.0
 MAX_MIN_NET_BPS = 500.0
+MAX_BOOK_AGE_MS = 15_000
+MAX_FUTURE_TIMESTAMP_SKEW_MS = 5_000
+MAX_CROSS_VENUE_TIMESTAMP_SKEW_MS = 5_000
 SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{2,20}/[A-Z0-9]{2,20}$")
 
 
@@ -80,6 +83,10 @@ def rank_snapshot_books(
             if buy_id == sell_id:
                 continue
             buy_book, sell_book = books[buy_id], books[sell_id]
+            buy_ts, sell_ts = buy_book.get("timestamp"), sell_book.get("timestamp")
+            if (buy_ts is not None and sell_ts is not None
+                    and abs(buy_ts - sell_ts) > MAX_CROSS_VENUE_TIMESTAMP_SKEW_MS):
+                continue
             quantity, buy_quote, buy_complete = _walk_asks(buy_book.get("asks", []), notional_usd)
             if not buy_complete or quantity <= 0:
                 continue
@@ -117,11 +124,12 @@ async def scan_public_spot(
     taker_fee_bps: float = 10.0,
     min_net_bps: float = 5.0,
     exchange_factory: Callable | None = None,
+    reference_price_provider: Callable | None = None,
 ) -> dict:
-    if (len(venue_ids) < 2 or len(venue_ids) > 18
+    if (len(venue_ids) < 2 or len(venue_ids) > 20
             or len(set(venue_ids)) != len(venue_ids)
             or any(venue not in VENUES for venue in venue_ids)):
-        raise ValueError("Select between two and 18 distinct venues.")
+        raise ValueError("Select between two and 20 distinct venues.")
     if any(not isinstance(venue, str) or not re.fullmatch(r"[a-z0-9]+", venue) for venue in venue_ids):
         raise ValueError("Venue IDs must be lowercase registry IDs.")
     if len(symbols) < 1 or len(symbols) > MAX_SCAN_SYMBOLS or len(set(symbols)) != len(symbols):
@@ -175,14 +183,31 @@ async def scan_public_spot(
                     asks = book.get("asks") if isinstance(book, dict) else None
                     bids = book.get("bids") if isinstance(book, dict) else None
                     if not asks or not bids:
-                        raise RuntimeError("Empty spot order book.")
+                        raise RuntimeError("EmptyOrderBook")
+                    timestamp = book.get("timestamp")
+                    if timestamp is not None:
+                        try:
+                            timestamp = float(timestamp)
+                        except (TypeError, ValueError, OverflowError):
+                            raise RuntimeError("InvalidOrderBookTimestamp") from None
+                        if not math.isfinite(timestamp) or timestamp <= 0:
+                            raise RuntimeError("InvalidOrderBookTimestamp")
+                        now_ms = time.time() * 1000
+                        if timestamp - now_ms > MAX_FUTURE_TIMESTAMP_SKEW_MS:
+                            raise RuntimeError("FutureOrderBookTimestamp")
+                        if now_ms - timestamp > MAX_BOOK_AGE_MS:
+                            raise RuntimeError("StaleOrderBook")
                     return symbol, {
                         "asks": asks,
                         "bids": bids,
-                        "timestamp": book.get("timestamp"),
+                        "timestamp": timestamp,
+                        "timestampQuality": "exchange" if timestamp is not None else "missing_exchange_timestamp",
+                        "receivedAtMs": time.time() * 1000,
                     }, None
                 except Exception as exc:
-                    return symbol, None, type(exc).__name__
+                    safe_codes = {"EmptyOrderBook", "InvalidOrderBookTimestamp", "FutureOrderBookTimestamp", "StaleOrderBook"}
+                    code = str(exc) if str(exc) in safe_codes else type(exc).__name__
+                    return symbol, None, code
 
             fetched = await asyncio.gather(*(fetch_book(symbol) for symbol in markets))
             books = {symbol: book for symbol, book, _ in fetched if book is not None}
@@ -229,6 +254,43 @@ async def scan_public_spot(
             min_net_bps=min_net_bps,
         ))
     opportunities.sort(key=lambda item: (item["netPnlUsd"], item["netBps"]), reverse=True)
+
+    # CoinGecko is an independent USD sanity reference, not a venue quote. It may
+    # create advisory signals but never changes order-book economics or enables execution.
+    if reference_price_provider is None:
+        from arbx.coingecko_reference import get_reference_prices
+        reference_price_provider = get_reference_prices
+    try:
+        reference_data = await asyncio.wait_for(reference_price_provider(symbols), timeout=4.5)
+        if not isinstance(reference_data, dict):
+            raise ValueError("invalid reference response")
+    except Exception:
+        reference_data = {"status": "unavailable", "provider": "CoinGecko", "prices": {}, "ageSeconds": None}
+    reference_signals = []
+    if reference_data.get("status") == "available" and (reference_data.get("ageSeconds") is None
+            or reference_data.get("ageSeconds") > 180):
+        reference_data = {**reference_data, "status": "stale", "prices": {}}
+    for symbol, books in by_symbol.items():
+        reference_price = (reference_data.get("prices") or {}).get(symbol)
+        if not isinstance(reference_price, (int, float)) or not math.isfinite(reference_price) or reference_price <= 0:
+            continue
+        for venue_id, book in books.items():
+            asks, bids = book.get("asks", []), book.get("bids", [])
+            if not asks or not bids:
+                continue
+            best_ask, best_bid = _positive_level(asks[0]), _positive_level(bids[0])
+            if not best_ask or not best_bid:
+                continue
+            mid = (best_ask[0] + best_bid[0]) / 2
+            deviation_pct = (mid / reference_price - 1) * 100
+            if abs(deviation_pct) >= 1.5:
+                reference_signals.append({
+                    "signalType": "reference_price_deviation", "symbol": symbol, "venue": venue_id,
+                    "venueMidPrice": mid, "referencePriceUsd": reference_price,
+                    "referenceProvider": "CoinGecko", "referenceAgeSeconds": reference_data.get("ageSeconds"),
+                    "deviationPct": round(deviation_pct, 4), "severity": "warning",
+                    "executionEnabled": False,
+                })
     return {
         "observedAt": time.time(),
         "quoteValueAssumptionUsd": "USDT, USDC, and DAI treated as $1.00 for display",
@@ -237,6 +299,8 @@ async def scan_public_spot(
         "notionalUsd": notional_usd,
         "takerFeeBps": taker_fee_bps,
         "minimumNetBps": min_net_bps,
+        "referenceData": {key: value for key, value in reference_data.items() if key != "prices"},
+        "referenceSignals": reference_signals,
         "venues": venues,
         "opportunities": opportunities,
     }
