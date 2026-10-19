@@ -5,6 +5,8 @@ must happen only after contract/integration tests and migration rehearsals pass.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from arbx.storage import StorageBackend
@@ -63,6 +65,14 @@ class ControlPlaneStore:
                 session_id TEXT PRIMARY KEY REFERENCES control_api_engine_sessions(session_id) ON DELETE CASCADE,
                 worker_id TEXT NOT NULL,
                 lease_expires_at INTEGER NOT NULL,
+                fencing_token INTEGER NOT NULL CHECK(fencing_token >= 1))""",
+            """CREATE TABLE IF NOT EXISTS control_api_engine_checkpoints (
+                session_id TEXT PRIMARY KEY REFERENCES control_api_engine_sessions(session_id) ON DELETE CASCADE,
+                checkpoint_version INTEGER NOT NULL CHECK(checkpoint_version >= 1),
+                checkpoint_json TEXT NOT NULL,
+                checkpoint_sha256 TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                worker_id TEXT NOT NULL,
                 fencing_token INTEGER NOT NULL CHECK(fencing_token >= 1))""",
             """CREATE TABLE IF NOT EXISTS control_api_exchange_credentials (
                 user_id TEXT NOT NULL REFERENCES control_api_users(id) ON DELETE CASCADE,
@@ -279,6 +289,93 @@ class ControlPlaneStore:
                    WHERE session_id=? AND worker_id=? AND fencing_token=?"""
             ), (session_id, worker_id, fencing_token))
             return cursor.rowcount == 1
+
+    def get_engine_checkpoint(self, *, session_id: str, owner_user_id: str) -> dict[str, Any] | None:
+        """Load an owner-scoped checkpoint and verify its canonical JSON checksum."""
+        with self.backend.transaction() as session:
+            row = session.fetch_one(self._sql(
+                """SELECT c.session_id, c.checkpoint_version, c.checkpoint_json, c.checkpoint_sha256,
+                          c.updated_at, c.worker_id, c.fencing_token
+                   FROM control_api_engine_checkpoints c
+                   JOIN control_api_engine_sessions e ON e.session_id=c.session_id
+                   WHERE c.session_id=? AND e.owner_user_id=?"""
+            ), (session_id, owner_user_id))
+        if row is None:
+            return None
+        encoded = row["checkpoint_json"]
+        if not isinstance(encoded, str) or hashlib.sha256(encoded.encode("utf-8")).hexdigest() != row["checkpoint_sha256"]:
+            raise ValueError("checkpoint checksum verification failed")
+        try:
+            checkpoint = json.loads(encoded)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("checkpoint JSON is invalid") from exc
+        if not isinstance(checkpoint, dict):
+            raise ValueError("checkpoint payload must be an object")
+        return {**row, "checkpoint": checkpoint}
+
+    def save_engine_checkpoint_fenced(
+        self, *, session_id: str, owner_user_id: str, worker_id: str,
+        fencing_token: int, now_epoch: int, updated_at: str,
+        checkpoint: dict[str, Any], expected_version: int,
+    ) -> dict[str, Any] | None:
+        """Persist a versioned checkpoint only under the current unexpired worker fence.
+
+        The owner/session, phase, lease expiry, worker ID and fencing token are
+        checked in the same transaction as the checkpoint upsert. Returns None
+        for a stale/foreign lease and raises on optimistic-version conflicts.
+        """
+        if not isinstance(checkpoint, dict):
+            raise ValueError("checkpoint must be a JSON object")
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id is required")
+        if not isinstance(worker_id, str) or not worker_id.strip():
+            raise ValueError("worker_id is required")
+        if isinstance(fencing_token, bool) or not isinstance(fencing_token, int) or fencing_token < 1:
+            raise ValueError("fencing_token must be a positive integer")
+        if isinstance(now_epoch, bool) or not isinstance(now_epoch, int) or now_epoch < 0:
+            raise ValueError("now_epoch must be a non-negative integer")
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
+            raise ValueError("expected_version must be a non-negative integer")
+        try:
+            encoded = json.dumps(checkpoint, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("checkpoint must contain only finite JSON values") from exc
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        p = "?"
+        lock = " FOR UPDATE" if self.backend.dialect == "postgres" else ""
+        with self.backend.transaction() as session:
+            engine = session.fetch_one(self._sql(
+                "SELECT owner_user_id, mode, phase FROM control_api_engine_sessions WHERE session_id=?" + lock
+            ), (session_id,))
+            lease = session.fetch_one(self._sql(
+                "SELECT worker_id, lease_expires_at, fencing_token FROM control_api_engine_worker_leases WHERE session_id=?" + lock
+            ), (session_id,))
+            if (engine is None or engine["owner_user_id"] != owner_user_id
+                or engine["mode"] not in {"paper", "simulation"}
+                or engine["phase"] not in {"STARTING", "PREFLIGHTING", "RUNNING"}
+                or lease is None or lease["worker_id"] != worker_id
+                or lease["fencing_token"] != fencing_token or lease["lease_expires_at"] <= now_epoch):
+                return None
+            current = session.fetch_one(self._sql(
+                "SELECT checkpoint_version FROM control_api_engine_checkpoints WHERE session_id=?" + lock
+            ), (session_id,))
+            current_version = int(current["checkpoint_version"]) if current else 0
+            if current_version != expected_version:
+                raise ValueError("checkpoint version conflict")
+            next_version = expected_version + 1
+            row = session.fetch_one(self._sql(
+                """INSERT INTO control_api_engine_checkpoints
+                   (session_id, checkpoint_version, checkpoint_json, checkpoint_sha256, updated_at, worker_id, fencing_token)
+                   VALUES(?,?,?,?,?,?,?)
+                   ON CONFLICT(session_id) DO UPDATE SET
+                     checkpoint_version=excluded.checkpoint_version, checkpoint_json=excluded.checkpoint_json,
+                     checkpoint_sha256=excluded.checkpoint_sha256, updated_at=excluded.updated_at,
+                     worker_id=excluded.worker_id, fencing_token=excluded.fencing_token
+                   RETURNING session_id, checkpoint_version, checkpoint_json, checkpoint_sha256, updated_at, worker_id, fencing_token"""
+            ), (session_id, next_version, encoded, digest, updated_at, worker_id, fencing_token))
+            if row is None:
+                raise RuntimeError("checkpoint upsert did not return a row")
+            return {**row, "checkpoint": checkpoint}
 
     def create_user(self, *, user_id: str, email: str, salt: bytes,
                     password_hash: bytes, created_at: str) -> dict[str, Any]:
