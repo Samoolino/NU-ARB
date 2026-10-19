@@ -1,6 +1,7 @@
 import pathlib
 import sys
 import unittest
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "arb_bot"))
 from arbx.public_scanner import rank_snapshot_books, scan_public_spot
@@ -18,10 +19,14 @@ class FakeExchange:
     async def fetch_order_book(self, symbol, limit):
         price = 100 if self.venue == "binance" else 103
         bid = 99 if self.venue == "binance" else 102
-        return {"asks": [[price, 3]], "bids": [[bid, 3]], "timestamp": 1}
+        return {"asks": [[price, 3]], "bids": [[bid, 3]], "timestamp": int(time.time() * 1000)}
 
     async def close(self):
         pass
+
+
+async def fake_reference_prices(symbols):
+    return {"status": "available", "provider": "CoinGecko", "prices": {"BTC/USDT": 100.0}, "ageSeconds": 5}
 
 
 class PublicScannerTests(unittest.IsolatedAsyncioTestCase):
@@ -33,6 +38,7 @@ class PublicScannerTests(unittest.IsolatedAsyncioTestCase):
             taker_fee_bps=10,
             min_net_bps=5,
             exchange_factory=FakeExchange,
+            reference_price_provider=fake_reference_prices,
         )
 
         self.assertFalse(result["executionEnabled"])
@@ -60,6 +66,64 @@ class PublicScannerTests(unittest.IsolatedAsyncioTestCase):
                 notional_usd=float("inf"),
                 exchange_factory=FakeExchange,
             )
+
+    async def test_coingecko_reference_deviation_emits_advisory_signal_only(self):
+        async def reference_provider(symbols):
+            return {"status": "available", "provider": "CoinGecko", "prices": {"BTC/USDT": 100.0}, "ageSeconds": 3}
+
+        result = await scan_public_spot(
+            ["binance", "bybit"], ["BTC/USDT"], notional_usd=100,
+            exchange_factory=FakeExchange, reference_price_provider=reference_provider,
+        )
+
+        self.assertEqual(result["referenceData"]["provider"], "CoinGecko")
+        self.assertTrue(result["referenceSignals"])
+        self.assertTrue(all(signal["executionEnabled"] is False for signal in result["referenceSignals"]))
+        self.assertTrue(all(signal["signalType"] == "reference_price_deviation" for signal in result["referenceSignals"]))
+
+    async def test_coingecko_reference_outage_does_not_break_orderbook_scan(self):
+        async def unavailable_reference(symbols):
+            return {"status": "unavailable", "provider": "CoinGecko", "prices": {}, "ageSeconds": None}
+
+        result = await scan_public_spot(
+            ["binance", "bybit"], ["BTC/USDT"], notional_usd=100,
+            exchange_factory=FakeExchange, reference_price_provider=unavailable_reference,
+        )
+
+        self.assertTrue(result["opportunities"])
+        self.assertEqual(result["referenceData"]["status"], "unavailable")
+        self.assertEqual(result["referenceSignals"], [])
+
+    async def test_discards_stale_order_books_before_generating_opportunities(self):
+        class StaleExchange(FakeExchange):
+            async def fetch_order_book(self, symbol, limit):
+                book = await super().fetch_order_book(symbol, limit)
+                book["timestamp"] = int(time.time() * 1000) - 120_000
+                return book
+
+        result = await scan_public_spot(
+            ["binance", "bybit"], ["BTC/USDT"], notional_usd=100,
+            exchange_factory=StaleExchange,
+        )
+
+        self.assertEqual(result["opportunities"], [])
+        self.assertTrue(all(v["status"] == "unavailable" for v in result["venues"]))
+        self.assertTrue(all("StaleOrderBook" in v["errors"].values() for v in result["venues"]))
+
+    async def test_rejects_order_book_timestamps_far_in_the_future(self):
+        class FutureExchange(FakeExchange):
+            async def fetch_order_book(self, symbol, limit):
+                book = await super().fetch_order_book(symbol, limit)
+                book["timestamp"] = int(time.time() * 1000) + 60_000
+                return book
+
+        result = await scan_public_spot(
+            ["binance", "bybit"], ["BTC/USDT"], notional_usd=100,
+            exchange_factory=FutureExchange,
+        )
+
+        self.assertEqual(result["opportunities"], [])
+        self.assertTrue(all("FutureOrderBookTimestamp" in v["errors"].values() for v in result["venues"]))
 
     def test_skips_malformed_book_levels_and_models_both_venue_fees(self):
         result = rank_snapshot_books(
