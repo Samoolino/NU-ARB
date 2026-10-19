@@ -311,3 +311,36 @@ def test_remove_exchange_deletes_only_current_users_store_credentials(tmp_path, 
     finally:
         web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+
+def test_default_sqlite_signup_remains_compatible_with_legacy_engine_auth(tmp_path, monkeypatch):
+    import sqlite3
+    from fastapi.testclient import TestClient
+
+    database = tmp_path / "legacy-auth.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.delenv("ARBX_STORAGE_BACKEND", raising=False)
+    monkeypatch.delenv("ARBX_DATABASE_URL", raising=False)
+    monkeypatch.setenv("APP_SECURE_COOKIE", "0")
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = client.post(
+                "/api/v1/auth/signup",
+                json={
+                    "email": "legacy@example.test",
+                    "password": "a-long-test-password",
+                    "password_confirmation": "a-long-test-password",
+                },
+            )
+            assert response.status_code == 200, response.text
+            me_response = client.get("/api/v1/auth/me")
+            assert me_response.status_code == 200, me_response.text
+            assert me_response.json()["user"]["email"] == "legacy@example.test"
+        with sqlite3.connect(database) as db:
+            assert db.execute("SELECT COUNT(*) FROM users WHERE email=?",
+                              ("legacy@example.test",)).fetchone()[0] == 1
+            assert db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
