@@ -130,3 +130,41 @@ def test_engine_session_registry_enforces_owner_and_non_live_mode(database_url):
             (f"valid-paper-session-{suffix}",),
         ).fetchone()
         assert row == (owner_id, "paper")
+
+
+def test_control_store_engine_registry_round_trips_on_postgres(database_url):
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"control-store-owner-{suffix}"
+    other_id = f"control-store-other-{suffix}"
+    store = ControlPlaneStore(PostgresBackend(database_url))
+    store.create_user(
+        user_id=owner_id, email=f"{owner_id}@example.invalid", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.create_user(
+        user_id=other_id, email=f"{other_id}@example.invalid", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+
+    session_id = f"paper-session-{suffix}"
+    store.register_engine_session(
+        session_id=session_id, owner_user_id=owner_id, mode="paper", phase="RUNNING",
+        created_at="2026-10-19T01:00:00+00:00",
+        updated_at="2026-10-19T01:00:00+00:00", metadata_json='{"origin":"integration"}',
+    )
+
+    assert store.get_engine_session(session_id)["owner_user_id"] == owner_id
+    assert [row["session_id"] for row in store.list_engine_sessions(owner_id)] == [session_id]
+    assert store.list_engine_sessions(other_id) == []
+    assert store.update_engine_session(
+        session_id=session_id, owner_user_id=other_id, phase="STOPPED",
+        updated_at="2026-10-19T02:00:00+00:00",
+    ) is False
+    assert store.update_engine_session(
+        session_id=session_id, owner_user_id=owner_id, phase="STOPPED",
+        updated_at="2026-10-19T03:00:00+00:00", stopped_at="2026-10-19T03:00:00+00:00",
+    ) is True
+    assert store.get_engine_session(session_id)["phase"] == "STOPPED"
