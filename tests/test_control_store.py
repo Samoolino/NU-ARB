@@ -507,3 +507,62 @@ def test_deleting_engine_session_owner_cascades_registry_row(tmp_path):
         session.execute("DELETE FROM control_api_users WHERE id=?", ("session-owner",))
 
     assert store.get_engine_session("owned-paper-session") is None
+
+
+def test_engine_session_registry_rejects_unknown_phases_and_terminal_restart(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-state-machine.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="state-machine-owner", email="state-machine@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="phase"):
+        store.register_engine_session(
+            session_id="invalid-phase-session", owner_user_id="state-machine-owner",
+            mode="paper", phase="RUNNING_BUT_UNSAFE",
+            created_at="2026-10-19T00:00:00+00:00",
+            updated_at="2026-10-19T00:00:00+00:00",
+        )
+
+    store.register_engine_session(
+        session_id="terminal-session", owner_user_id="state-machine-owner",
+        mode="paper", phase="STOPPED",
+        created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    with pytest.raises(ValueError, match="transition"):
+        store.update_engine_session(
+            session_id="terminal-session", owner_user_id="state-machine-owner",
+            phase="RUNNING", updated_at="2026-10-19T01:00:00+00:00",
+        )
+    assert store.get_engine_session("terminal-session")["phase"] == "STOPPED"
+
+
+def test_engine_session_registry_allows_idempotent_phase_update_and_failure_terminal(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "engine-session-failure-state.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="failure-owner", email="failure-owner@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="failure-session", owner_user_id="failure-owner",
+        mode="simulation", phase="RUNNING",
+        created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    assert store.update_engine_session(
+        session_id="failure-session", owner_user_id="failure-owner",
+        phase="RUNNING", updated_at="2026-10-19T00:30:00+00:00",
+    ) is True
+    assert store.update_engine_session(
+        session_id="failure-session", owner_user_id="failure-owner",
+        phase="FAILED", updated_at="2026-10-19T01:00:00+00:00",
+        error_code="WORKER_FAILED",
+    ) is True
+    with pytest.raises(ValueError, match="transition"):
+        store.update_engine_session(
+            session_id="failure-session", owner_user_id="failure-owner",
+            phase="RUNNING", updated_at="2026-10-19T02:00:00+00:00",
+        )
