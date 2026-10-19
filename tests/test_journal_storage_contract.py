@@ -65,3 +65,33 @@ def test_certification_evidence_round_trips(tmp_path):
         assert row["evidence"] == {"status": "unverified"}
     finally:
         journal.close()
+
+
+
+def test_recent_trades_are_session_scoped_and_decode_json(tmp_path):
+    journal = make_journal(tmp_path)
+    try:
+        journal.append({
+            "session_id": "owner-session-a", "mode": "simulation", "exchange_a": "alpha",
+            "strategy": "fixture", "net_pnl": 1.25, "execution_status": "FILLED",
+            "verification_status": "verified", "cumulative_realized_pnl": 1.25,
+            "path": ["alpha", "beta"], "symbols": ["BTC/USDT"],
+        })
+        journal.append({
+            "session_id": "owner-session-b", "mode": "simulation", "exchange_a": "beta",
+            "strategy": "fixture", "net_pnl": 9.0, "execution_status": "FILLED",
+            "verification_status": "verified", "cumulative_realized_pnl": 9.0,
+        })
+
+        rows = journal.recent_trades("owner-session-a")
+
+        assert len(rows) == 1
+        assert rows[0]["session_id"] == "owner-session-a"
+        assert rows[0]["path"] == ["alpha", "beta"]
+        assert rows[0]["symbols"] == ["BTC/USDT"]
+        with pytest.raises(ValueError):
+            journal.recent_trades("owner-session-a", limit=0)
+        with pytest.raises(ValueError):
+            journal.recent_trades("")
+    finally:
+        journal.close()
