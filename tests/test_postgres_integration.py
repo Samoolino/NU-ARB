@@ -312,3 +312,53 @@ def test_latest_engine_session_query_is_owner_scoped_and_update_ordered(database
     assert latest is not None
     assert latest["session_id"] == f"updated-latest-{suffix}"
     assert latest["owner_user_id"] == owner_id
+
+
+
+def test_postgres_credential_loader_is_owner_scoped_and_decrypts_only_requested_credentials(database_url, monkeypatch):
+    """Use the real PostgreSQL store to prove owner scoping and encrypted credential loading."""
+    import json
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from arbx import web_api
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"credential-loader-owner-{suffix}"
+    foreign_id = f"credential-loader-foreign-{suffix}"
+    store = ControlPlaneStore(PostgresBackend(database_url))
+    for user_id in (owner_id, foreign_id):
+        store.create_user(
+            user_id=user_id, email=f"{user_id}@example.invalid", salt=b"salt",
+            password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+        )
+
+    key = bytes(range(32))
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", key.hex())
+
+    def encrypted(payload):
+        nonce = bytes(range(12))
+        return nonce + AESGCM(key).encrypt(
+            nonce, json.dumps(payload, separators=(",", ":")).encode(),
+            b"arbx-exchange-credentials-v1",
+        )
+
+    store.save_credentials(
+        user_id=owner_id, exchange_id="binance",
+        encrypted_credentials=encrypted({"apiKey": "owner-key", "secret": "owner-secret"}),
+        auth_mode="hmac", state="CONNECTED", last_verified="2026-10-19T00:00:00+00:00",
+        verification_json="{}",
+    )
+    store.save_credentials(
+        user_id=foreign_id, exchange_id="binance",
+        encrypted_credentials=encrypted({"apiKey": "foreign-key", "secret": "foreign-secret"}),
+        auth_mode="hmac", state="CONNECTED", last_verified="2026-10-19T00:00:00+00:00",
+        verification_json="{}",
+    )
+
+    loaded = web_api._load_user_credentials(store, owner_id, ["binance"])
+    assert loaded == {"binance": {"apiKey": "owner-key", "secret": "owner-secret"}}
+    assert "foreign-key" not in repr(loaded)
+    assert web_api._load_user_credentials(store, owner_id, []) == {}
+    with pytest.raises(Exception, match="Could not unlock saved exchange credentials"):
+        web_api._load_user_credentials(store, owner_id, ["bybit"])
