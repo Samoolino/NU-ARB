@@ -254,7 +254,8 @@ class ControlPlaneStore:
                    VALUES(?,?,?,1)
                    ON CONFLICT(session_id) DO UPDATE SET
                        fencing_token=CASE
-                           WHEN control_api_engine_worker_leases.worker_id=excluded.worker_id
+                           WHEN control_api_engine_worker_leases.lease_expires_at > ?
+                                AND control_api_engine_worker_leases.worker_id=excluded.worker_id
                            THEN control_api_engine_worker_leases.fencing_token
                            ELSE control_api_engine_worker_leases.fencing_token+1
                        END,
@@ -263,7 +264,7 @@ class ControlPlaneStore:
                    WHERE control_api_engine_worker_leases.lease_expires_at<=?
                       OR control_api_engine_worker_leases.worker_id=?
                    RETURNING session_id, worker_id, lease_expires_at, fencing_token"""
-            ), (session_id, worker_id, now_epoch + lease_seconds, now_epoch, worker_id))
+            ), (session_id, worker_id, now_epoch + lease_seconds, now_epoch, now_epoch, worker_id))
 
     def release_engine_worker_lease(self, *, session_id: str, worker_id: str,
                                     fencing_token: int) -> bool:
