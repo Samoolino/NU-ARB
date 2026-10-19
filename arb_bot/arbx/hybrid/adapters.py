@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import replace
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -298,10 +299,15 @@ class CCXTAdapter(CCXTProAdapter):
 
     async def get_capabilities(self):
         base = await super().get_capabilities()
-        return VenueCapabilities(**{**base.__dict__ if hasattr(base, "__dict__") else {f.name: getattr(base, f.name) for f in base.__dataclass_fields__.values()},
-                                    "websocket": False, "native_websocket": False,
-                                    "user_stream": False, "balance_stream": False,
-                                    "ccxt": True, "ccxt_pro": False})
+        return replace(
+            base,
+            websocket=False,
+            native_websocket=False,
+            user_stream=False,
+            balance_stream=False,
+            ccxt=True,
+            ccxt_pro=False,
+        )
 
 
 class NativeSDKAdapter(BaseAdapter):
