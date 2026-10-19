@@ -627,3 +627,33 @@ def test_engine_session_terminal_timestamp_cannot_be_set_early_or_overwritten(tm
         stopped_at="2026-10-19T01:30:00+00:00",
     )
     assert store.get_engine_session("immutable-time-session")["stopped_at"] == first
+
+
+def test_engine_session_idempotent_update_preserves_terminal_error_code(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "terminal-error-code.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="terminal-error-owner", email="terminal-error@example.test",
+        salt=b"salt", password_hash=b"hash",
+        created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="terminal-error-session", owner_user_id="terminal-error-owner",
+        mode="paper", phase="RUNNING",
+        created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    store.update_engine_session(
+        session_id="terminal-error-session", owner_user_id="terminal-error-owner",
+        phase="FAILED", updated_at="2026-10-19T01:00:00+00:00",
+        error_code="WORKER_FAILED",
+    )
+
+    # An idempotent update must not erase diagnostic evidence accidentally.
+    store.update_engine_session(
+        session_id="terminal-error-session", owner_user_id="terminal-error-owner",
+        phase="FAILED", updated_at="2026-10-19T02:00:00+00:00",
+    )
+    row = store.get_engine_session("terminal-error-session")
+    assert row["error_code"] == "WORKER_FAILED"
+    assert row["stopped_at"] == "2026-10-19T01:00:00+00:00"
