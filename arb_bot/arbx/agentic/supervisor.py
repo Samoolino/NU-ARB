@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import islice
+import unicodedata
 from typing import Any, Iterable, Mapping
 
 
@@ -19,6 +20,7 @@ _ALLOWED_ROLES = {
 }
 _ALLOWED_FINDINGS = {"INFO", "WARN", "REJECT", "UNKNOWN"}
 _MAX_SUMMARY_CHARS = 500
+_MAX_OBSERVATION_ID_CHARS = 256
 _MAX_REPORTS = 20
 
 
@@ -52,7 +54,11 @@ def _parse_report(value: Mapping[str, Any]) -> AgentReport | None:
         return None
     if not isinstance(finding, str) or finding not in _ALLOWED_FINDINGS:
         return None
-    if not isinstance(observation_id, str) or not observation_id.strip():
+    if (
+        not isinstance(observation_id, str)
+        or not observation_id.strip()
+        or len(observation_id) > _MAX_OBSERVATION_ID_CHARS
+    ):
         return None
     if (
         isinstance(observed_at_ms, bool)
@@ -87,6 +93,7 @@ def aggregate_reports(
     if (
         not isinstance(expected_observation_id, str)
         or not expected_observation_id.strip()
+        or len(expected_observation_id) > _MAX_OBSERVATION_ID_CHARS
         or isinstance(now_ms, bool)
         or not isinstance(now_ms, int)
         or now_ms < 0
