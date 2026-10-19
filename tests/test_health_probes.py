@@ -50,8 +50,9 @@ def test_readiness_probe_checks_selected_postgres_backend_without_sqlite_fallbac
 
     response = TestClient(web_api.app).get("/health/ready")
 
-    assert response.status_code == 200
-    assert response.json() == {"status": "ready", "storage": "postgres"}
+    # A healthy database alone is not enough: PostgreSQL route parity is incomplete.
+    assert response.status_code == 503
+    assert response.json() == {"detail": "PostgreSQL Control API route parity is not complete"}
 
 
 def test_orchestrator_healthz_checks_selected_postgres_backend(monkeypatch):
@@ -68,8 +69,9 @@ def test_orchestrator_healthz_checks_selected_postgres_backend(monkeypatch):
 
     response = TestClient(web_api.app).get("/healthz")
 
-    assert response.status_code == 200
-    assert response.json() == {"status": "ready", "storage": "postgres"}
+    # Orchestrator health must not report ready while routes still fail closed on PostgreSQL.
+    assert response.status_code == 503
+    assert response.json() == {"detail": "PostgreSQL Control API route parity is not complete"}
 
 
 def test_orchestrator_healthz_fails_closed_when_selected_postgres_is_unhealthy(monkeypatch):
