@@ -1,5 +1,6 @@
 """Disposable-PostgreSQL integration checks; never point this at production."""
 import os
+import uuid
 
 import psycopg
 import pytest
@@ -26,17 +27,18 @@ def test_migrations_are_idempotent(database_url):
 
 
 def test_foreign_key_and_unique_constraints_are_enforced(database_url):
+    email = f"integration-{uuid.uuid4().hex}@example.invalid"
     with psycopg.connect(database_url) as conn:
         row = conn.execute(
             "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id",
-            ("integration@example.invalid", "test-hash"),
+            (email, "test-hash"),
         ).fetchone()
         user_id = row[0]
         with pytest.raises(psycopg.errors.UniqueViolation):
             with conn.transaction():
                 conn.execute(
                     "INSERT INTO users (email, password_hash) VALUES (%s, %s)",
-                    ("integration@example.invalid", "other-hash"),
+                    (email, "other-hash"),
                 )
         with pytest.raises(psycopg.errors.ForeignKeyViolation):
             with conn.transaction():
