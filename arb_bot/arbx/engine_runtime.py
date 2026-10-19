@@ -81,3 +81,30 @@ class DurableEngineRuntime:
             phase=phase, updated_at=updated_at, now_epoch=now_epoch,
             error_code=error_code, metadata_json=metadata_json,
         )
+
+
+
+def recovery_disposition(session: dict[str, Any], *, checkpoint_verified: bool) -> str:
+    """Return a conservative restart action without performing recovery side effects.
+
+    A RUNNING session may resume only when its persisted checkpoint has been
+    independently verified. This policy is advisory until a supervised worker
+    consumes it and all resume writes are fenced in their own transactions.
+    """
+    if not isinstance(session, dict) or not isinstance(session.get("phase"), str):
+        raise ValueError("session with a recognized phase is required")
+    if not isinstance(checkpoint_verified, bool):
+        raise ValueError("checkpoint_verified must be a boolean")
+
+    phase = session["phase"]
+    if phase == "CREATED":
+        return "CLAIM_AND_START"
+    if phase in {"STARTING", "PREFLIGHTING"}:
+        return "RESTART_PREFLIGHT"
+    if phase == "RUNNING":
+        return "RESUME_CHECKPOINT" if checkpoint_verified else "FAIL_UNSAFE_RECOVERY"
+    if phase == "STOPPING":
+        return "COMPLETE_STOP"
+    if phase in {"STOPPED", "FAILED", "PREFLIGHT_FAILED"}:
+        return "IGNORE_TERMINAL"
+    raise ValueError("session phase is not recognized")
