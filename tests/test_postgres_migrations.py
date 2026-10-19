@@ -31,6 +31,7 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
         "003_control_api_schema.sql",
         "004_engine_session_registry.sql",
         "005_engine_session_phase_constraints.sql",
+        "006_engine_worker_leases.sql",
     ]
     sql = files[0].read_text(encoding="utf-8")
     assert "provider_evidence" in sql
@@ -50,6 +51,10 @@ def test_migration_inventory_is_sorted_and_includes_audit_and_control_api_schema
     phase_sql = files[4].read_text(encoding="utf-8")
     assert "control_api_engine_sessions_phase_check" in phase_sql
     assert "'PREFLIGHT_FAILED'" in phase_sql
+    leases_sql = files[5].read_text(encoding="utf-8")
+    assert "control_api_engine_worker_leases" in leases_sql
+    assert "fencing_token BIGINT NOT NULL CHECK (fencing_token >= 1)" in leases_sql
+    assert "ON DELETE CASCADE" in leases_sql
 
 
 def test_migration_inventory_rejects_duplicate_versions(tmp_path: Path):
