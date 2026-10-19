@@ -169,3 +169,14 @@ def test_execution_coordinator_halts_on_non_finite_realized_pnl():
     assert coordinator.halted
     assert coordinator.state == ExecutionState.HALTED
     assert coordinator.events[-1]["reason"] == "invalid_realized_pnl"
+
+
+
+def test_execution_coordinator_records_verified_executor_result_without_fabricated_fill_sizes():
+    from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
+
+    coordinator = ExecutionCoordinator()
+    coordinator.on_submission(order_id="paper-cycle")
+    coordinator.on_execution_verified()
+    assert coordinator.state == ExecutionState.FILLED
+    assert coordinator.events[-1]["verification"] == "executor_result_ok"
