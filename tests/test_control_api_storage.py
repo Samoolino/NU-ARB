@@ -381,3 +381,25 @@ def test_sqlite_login_normalizes_whitespace_around_email(tmp_path, monkeypatch):
             assert me_response.json()["user"]["email"] == "login-normalization@example.test"
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_engine_journal_route_fails_closed_for_postgres_without_sqlite_fallback(tmp_path, monkeypatch):
+    """Unmigrated journal reads must not silently return legacy SQLite data."""
+    database = tmp_path / "legacy-engine-journal.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = client.get("/api/v1/engine/journal")
+
+        assert response.status_code == 503, response.text
+        assert "not yet supported" in response.json()["detail"]
+        assert not database.exists()
+        assert not (tmp_path / "engine_test-user.sqlite3").exists()
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
