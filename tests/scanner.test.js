@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isValidSymbol, readFiniteNumber, scanBooks } from "../lib/scanner.js";
+import { bookTimestampError, isValidSymbol, readFiniteNumber, scanAllVenues, scanBooks } from "../lib/scanner.js";
 import { EXCHANGES, EXCHANGE_BY_ID } from "../lib/exchange-registry.js";
 
 test("registers the 18 requested public spot venues without duplicate ids", () => {
@@ -90,4 +90,25 @@ test("ranks multi-pair opportunities across every selected venue and applies the
   assert.equal(opportunities[0].status, "meets_minimum_estimated_edge");
   assert.ok(opportunities.some((opportunity) => opportunity.symbol === "BTC/USDT"));
   assert.ok(opportunities.every((opportunity) => opportunity.executionEnabled === false));
+});
+
+test("rejects missing, malformed, stale, and far-future exchange timestamps", () => {
+  const now = 1_800_000_000_000;
+  assert.equal(bookTimestampError(null, now), "MissingOrderBookTimestamp");
+  assert.equal(bookTimestampError("not-a-time", now), "InvalidOrderBookTimestamp");
+  assert.equal(bookTimestampError(now - 16_000, now), "StaleOrderBook");
+  assert.equal(bookTimestampError(now + 6_000, now), "FutureOrderBookTimestamp");
+  assert.equal(bookTimestampError(now - 1_000, now), null);
+});
+
+test("does not rank cross-venue books whose timestamps differ by more than five seconds", () => {
+  const opportunities = scanAllVenues({
+    venueIds: ["binance", "bybit"], symbols: ["BTC/USDT"], notionalUsd: 100, minNetBps: 0,
+    feesBps: {binance: 0, bybit: 0},
+    booksBySymbol: {"BTC/USDT": {
+      binance: {asks: [[100, 2]], bids: [[99, 2]], timestamp: 1_800_000_000_000},
+      bybit: {asks: [[103, 2]], bids: [[102, 2]], timestamp: 1_800_000_006_000},
+    }},
+  });
+  assert.deepEqual(opportunities, []);
 });
