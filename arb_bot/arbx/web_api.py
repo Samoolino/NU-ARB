@@ -642,47 +642,46 @@ async def verify_exchange(exchange_id: str, payload: ExchangeConnect, request: R
     if exchange_id not in VENUES:
         raise HTTPException(404, "Exchange is not in the supported venue registry")
     uid = _store_current_user(request, store)
+    if engine_owner_id == uid and engine_task is not None and not engine_task.done():
+        raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
+    if not payload.credentials or any(not isinstance(k, str) or not isinstance(v, str) for k, v in payload.credentials.items()):
+        raise HTTPException(422, "Credential fields must be text values")
+    modes = {item["id"]: item for item in AUTH_SCHEMAS[exchange_id]["modes"]}
+    mode = modes.get(payload.auth_mode)
+    if not mode:
+        raise HTTPException(422, "Authentication mode is not supported for this exchange")
+    allowed_fields = {field["name"] for field in mode["fields"]}
+    if set(payload.credentials) != allowed_fields or any(not value.strip() for value in payload.credentials.values()):
+        raise HTTPException(422, "Provide exactly the non-empty credential fields shown for this authentication mode")
     try:
-        if engine_owner_id == uid and engine_task is not None and not engine_task.done():
-            raise HTTPException(409, "Stop the active engine session before changing saved exchange credentials")
-        if not payload.credentials or any(not isinstance(k, str) or not isinstance(v, str) for k, v in payload.credentials.items()):
-            raise HTTPException(422, "Credential fields must be text values")
-        modes = {item["id"]: item for item in AUTH_SCHEMAS[exchange_id]["modes"]}
-        mode = modes.get(payload.auth_mode)
-        if not mode:
-            raise HTTPException(422, "Authentication mode is not supported for this exchange")
-        allowed_fields = {field["name"] for field in mode["fields"]}
-        if set(payload.credentials) != allowed_fields or any(not value.strip() for value in payload.credentials.values()):
-            raise HTTPException(422, "Provide exactly the non-empty credential fields shown for this authentication mode")
-        try:
-            exchange = _make_exchange(exchange_id, payload.auth_mode, payload.credentials)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(500, f"Could not initialize adapter: {type(exc).__name__}") from exc
-        try:
-            evidence, balance_summary, book_summary = await _probe_exchange(exchange_id, exchange, payload.symbol)
-        finally:
-            try: await exchange.close()
-            except Exception: pass
-        live_eligible = evidence["liveEligible"]
-        scanner_eligible = evidence["scannerEligible"]
-        state = evidence["connectionState"]
-        verified_at = evidence["verifiedAt"]
-        key_preview = payload.credentials.get("apiKey", "")
-        masked = f"{key_preview[:3]}••••{key_preview[-3:]}" if len(key_preview) >= 7 else "••••"
-        encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
-        saved_verification = {"evidence": evidence, "balances": balance_summary,
-                              "orderBook": book_summary, "maskedKey": masked}
-        store.save_credentials(
-            user_id=uid, exchange_id=exchange_id, encrypted_credentials=encrypted,
-            auth_mode=payload.auth_mode, state=state, last_verified=verified_at,
-            verification_json=json.dumps(saved_verification, separators=(",", ":")),
-        )
-        return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
-                "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
-                "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
-                "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
+        exchange = _make_exchange(exchange_id, payload.auth_mode, payload.credentials)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Could not initialize adapter: {type(exc).__name__}") from exc
+    try:
+        evidence, balance_summary, book_summary = await _probe_exchange(exchange_id, exchange, payload.symbol)
+    finally:
+        try: await exchange.close()
+        except Exception: pass
+    live_eligible = evidence["liveEligible"]
+    scanner_eligible = evidence["scannerEligible"]
+    state = evidence["connectionState"]
+    verified_at = evidence["verifiedAt"]
+    key_preview = payload.credentials.get("apiKey", "")
+    masked = f"{key_preview[:3]}••••{key_preview[-3:]}" if len(key_preview) >= 7 else "••••"
+    encrypted = _encrypt(json.dumps(payload.credentials, separators=(",", ":")).encode())
+    saved_verification = {"evidence": evidence, "balances": balance_summary,
+                          "orderBook": book_summary, "maskedKey": masked}
+    store.save_credentials(
+        user_id=uid, exchange_id=exchange_id, encrypted_credentials=encrypted,
+        auth_mode=payload.auth_mode, state=state, last_verified=verified_at,
+        verification_json=json.dumps(saved_verification, separators=(",", ":")),
+    )
+    return {"id": exchange_id, "name": VENUES[exchange_id], "state": state, "maskedKey": masked,
+            "verifiedAt": verified_at, "evidence": evidence, "balances": balance_summary,
+            "orderBook": book_summary, "scannerEligible": scanner_eligible, "liveEligible": live_eligible,
+            "executionEnabled": live_eligible and os.getenv("ARBX_LIVE_TRADING_ENABLED", "0") == "1"}
 
 
 @app.delete("/api/v1/exchanges/{exchange_id}", dependencies=[Depends(_proxy_auth)])
