@@ -76,8 +76,8 @@ class ControlPlaneStore:
         """Persist session ownership and initial lifecycle state atomically."""
         if not isinstance(session_id, str) or not session_id.strip() or mode not in {"paper", "simulation"}:
             raise ValueError("engine session requires an ID and a non-live mode")
-        if phase != "CREATED":
-            raise ValueError("new engine sessions must start in CREATED phase")
+        if phase not in ENGINE_SESSION_PHASES:
+            raise ValueError(f"invalid engine session phase: {phase}")
         with self.backend.transaction() as session:
             session.execute(self._sql(
                 """INSERT INTO control_api_engine_sessions
