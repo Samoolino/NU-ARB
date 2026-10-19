@@ -1,6 +1,10 @@
 import ccxt from "ccxt";
 import { EXCHANGES, EXCHANGE_BY_ID } from "../lib/exchange-registry.js";
-import { isValidSymbol, readFiniteNumber, scanAllVenues } from "../lib/scanner.js";
+import { bookTimestampError, isValidSymbol, readFiniteNumber, scanAllVenues } from "../lib/scanner.js";
+import { CoinGeckoReferenceProvider } from "../lib/coingecko-reference.js";
+
+const referenceProvider = new CoinGeckoReferenceProvider();
+const REFERENCE_SIGNAL_THRESHOLD_PCT = 1.5;
 
 const MAX_MARKETS = 12;
 const MAX_NOTIONAL_USD = 100000;
@@ -29,17 +33,21 @@ async function loadVenue(id, symbols) {
     }
     const settled = await Promise.allSettled(available.map(async (symbol) => {
       const book = await exchange.fetchOrderBook(symbol, 20);
-      if (!Array.isArray(book.asks) || !book.asks.length || !Array.isArray(book.bids) || !book.bids.length) {
-        throw new Error("The spot order book is empty.");
-      }
-      return [symbol, {asks: book.asks, bids: book.bids, timestamp: book.timestamp}];
+      if (!Array.isArray(book.asks) || !book.asks.length || !Array.isArray(book.bids) || !book.bids.length) throw new Error("EmptyOrderBook");
+      const timestampError = bookTimestampError(book.timestamp, Date.now());
+      if (timestampError) throw new Error(timestampError);
+      return [symbol, {asks: book.asks, bids: book.bids, timestamp: Number(book.timestamp), receivedAtMs: Date.now()}];
     }));
     const books = {};
     const errors = {};
     for (let index = 0; index < settled.length; index++) {
       const result = settled[index];
       if (result.status === "fulfilled") books[result.value[0]] = result.value[1];
-      else errors[available[index]] = result.reason?.name || "RequestError";
+      else {
+        const code = result.reason?.message;
+        const safeCodes = new Set(["EmptyOrderBook", "MissingOrderBookTimestamp", "InvalidOrderBookTimestamp", "FutureOrderBookTimestamp", "StaleOrderBook"]);
+        errors[available[index]] = safeCodes.has(code) ? code : result.reason?.name || "RequestError";
+      }
     }
     return {
       id,
@@ -109,19 +117,31 @@ export default async function handler(request, response) {
   for (const venue of venues) {
     for (const [symbol, book] of Object.entries(venue.books)) booksBySymbol[symbol][venue.id] = book;
   }
-  const opportunities = scanAllVenues({
-    venueIds,
-    symbols,
-    booksBySymbol,
-    notionalUsd,
-    feesBps: Object.fromEntries(venueIds.map((id) => [id, takerFeeBps])),
-    minNetBps,
-  });
+  const opportunities = scanAllVenues({venueIds, symbols, booksBySymbol, notionalUsd,
+    feesBps: Object.fromEntries(venueIds.map((id) => [id, takerFeeBps])), minNetBps});
+  const referenceData = await referenceProvider.getPrices(symbols);
+  const referenceSignals = [];
+  for (const symbol of symbols) {
+    const referencePrice = referenceData.prices[symbol];
+    if (!Number.isFinite(referencePrice) || referencePrice <= 0) continue;
+    for (const venueId of venueIds) {
+      const book = booksBySymbol[symbol]?.[venueId];
+      if (!book?.bids?.length || !book?.asks?.length) continue;
+      const bid = Number(book.bids[0][0]); const ask = Number(book.asks[0][0]);
+      if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0 || ask < bid) continue;
+      const mid = (bid + ask) / 2; const deviationPct = (mid - referencePrice) / referencePrice * 100;
+      if (Math.abs(deviationPct) >= REFERENCE_SIGNAL_THRESHOLD_PCT) referenceSignals.push({
+        signalType: "reference_price_deviation", symbol, venue: venueId, venueMidPrice: mid, referencePriceUsd: referencePrice,
+        deviationPct: Math.round(deviationPct * 100) / 100, executionEnabled: false, observedAt: Date.now() / 1000});
+    }
+  }
 
   return response.status(200).json({
     observedAt: Date.now() / 1000,
     dataMode: "public_rest_snapshot",
     executionEnabled: false,
+    referenceData,
+    referenceSignals,
     notionalUsd,
     takerFeeBps,
     minNetBps,
