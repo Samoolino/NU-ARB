@@ -36,3 +36,19 @@ def test_readiness_probe_returns_sanitized_503_when_storage_unavailable(monkeypa
     assert response.status_code == 503
     assert response.json() == {"detail": "Control API persistence is not ready"}
     assert "private database path details" not in response.text
+
+
+def test_readiness_probe_checks_selected_postgres_backend_without_sqlite_fallback(monkeypatch):
+    class HealthyPostgresBackend:
+        dialect = "postgres"
+        def health_check(self):
+            return True
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    monkeypatch.setattr(web_api, "control_api_backend_from_environment", lambda: HealthyPostgresBackend())
+
+    response = TestClient(web_api.app).get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "storage": "postgres"}
