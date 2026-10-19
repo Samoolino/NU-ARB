@@ -788,3 +788,46 @@ def test_latest_engine_session_orders_by_update_time_and_owner(tmp_path):
     assert store.get_latest_engine_session("latest-owner-missing") is None
     with pytest.raises(ValueError, match="owner is required"):
         store.get_latest_engine_session("")
+
+
+
+def test_lifecycle_transition_requires_current_unexpired_worker_fence(tmp_path):
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "fenced-lifecycle.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="fenced-owner", email="fenced-owner@example.test", salt=b"salt",
+        password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00",
+    )
+    store.register_engine_session(
+        session_id="fenced-session", owner_user_id="fenced-owner", mode="paper",
+        phase="CREATED", created_at="2026-10-19T00:00:00+00:00",
+        updated_at="2026-10-19T00:00:00+00:00",
+    )
+    first = store.claim_engine_worker_lease(
+        session_id="fenced-session", worker_id="worker-first", now_epoch=100, lease_seconds=10,
+    )
+    assert first is not None
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="fenced-owner",
+        worker_id="worker-first", fencing_token=first["fencing_token"],
+        phase="STARTING", updated_at="2026-10-19T00:00:01+00:00", now_epoch=101,
+    )
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="someone-else",
+        worker_id="worker-first", fencing_token=first["fencing_token"],
+        phase="PREFLIGHTING", updated_at="2026-10-19T00:00:02+00:00", now_epoch=102,
+    ) is False
+    second = store.claim_engine_worker_lease(
+        session_id="fenced-session", worker_id="worker-second", now_epoch=111, lease_seconds=10,
+    )
+    assert second is not None and second["fencing_token"] == 2
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="fenced-owner",
+        worker_id="worker-first", fencing_token=first["fencing_token"],
+        phase="PREFLIGHTING", updated_at="2026-10-19T00:00:03+00:00", now_epoch=112,
+    ) is False
+    assert store.transition_engine_session_with_lease(
+        session_id="fenced-session", owner_user_id="fenced-owner",
+        worker_id="worker-second", fencing_token=second["fencing_token"],
+        phase="PREFLIGHTING", updated_at="2026-10-19T00:00:04+00:00", now_epoch=112,
+    )
