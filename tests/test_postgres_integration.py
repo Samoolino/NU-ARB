@@ -89,7 +89,8 @@ def test_concurrent_unique_insert_has_one_winner(database_url):
 
 
 def test_engine_session_registry_enforces_owner_and_non_live_mode(database_url):
-    owner_email = f"engine-owner-{uuid.uuid4().hex}@example.invalid"
+    suffix = uuid.uuid4().hex
+    owner_email = f"engine-owner-{suffix}@example.invalid"
     with psycopg.connect(database_url) as conn:
         owner_id = conn.execute(
             "INSERT INTO control_api_users (id, email, salt, password_hash, created_at) "
@@ -103,7 +104,7 @@ def test_engine_session_registry_enforces_owner_and_non_live_mode(database_url):
                     """INSERT INTO control_api_engine_sessions
                        (session_id, owner_user_id, mode, phase, created_at, updated_at)
                        VALUES (%s, %s, %s, %s, %s, %s)""",
-                    ("forbidden-live-session", owner_id, "live", "RUNNING",
+                    (f"forbidden-live-session-{suffix}", owner_id, "live", "RUNNING",
                      "2026-10-19T00:00:00+00:00", "2026-10-19T00:00:00+00:00"),
                 )
 
@@ -113,7 +114,7 @@ def test_engine_session_registry_enforces_owner_and_non_live_mode(database_url):
                     """INSERT INTO control_api_engine_sessions
                        (session_id, owner_user_id, mode, phase, created_at, updated_at)
                        VALUES (%s, %s, %s, %s, %s, %s)""",
-                    ("orphan-paper-session", "missing-user", "paper", "STOPPED",
+                    (f"orphan-paper-session-{suffix}", "missing-user", "paper", "STOPPED",
                      "2026-10-19T00:00:00+00:00", "2026-10-19T00:00:00+00:00"),
                 )
 
@@ -121,11 +122,11 @@ def test_engine_session_registry_enforces_owner_and_non_live_mode(database_url):
             """INSERT INTO control_api_engine_sessions
                (session_id, owner_user_id, mode, phase, created_at, updated_at)
                VALUES (%s, %s, %s, %s, %s, %s)""",
-            ("valid-paper-session", owner_id, "paper", "STOPPED",
+            (f"valid-paper-session-{suffix}", owner_id, "paper", "STOPPED",
              "2026-10-19T00:00:00+00:00", "2026-10-19T00:00:00+00:00"),
         )
         row = conn.execute(
             "SELECT owner_user_id, mode FROM control_api_engine_sessions WHERE session_id=%s",
-            ("valid-paper-session",),
+            (f"valid-paper-session-{suffix}",),
         ).fetchone()
         assert row == (owner_id, "paper")
