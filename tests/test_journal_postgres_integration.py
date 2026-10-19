@@ -58,3 +58,29 @@ def test_postgres_journal_round_trips_json_and_realized_fill_filter(journal):
     assert certification["live_eligible"] is False
     assert certification["reasons"] == ["simulation_only"]
     assert certification["evidence"] == {"status": "unverified"}
+
+
+
+def test_postgres_recent_trades_are_session_scoped_and_decode_json(journal):
+    session_id = "journal-recent-" + uuid.uuid4().hex
+    other_session_id = "journal-other-" + uuid.uuid4().hex
+    journal.append({
+        "session_id": session_id, "mode": "simulation", "exchange_a": "fixture",
+        "strategy": "contract-test", "net_pnl": 1.5, "execution_status": "FILLED",
+        "verification_status": "verified", "cumulative_realized_pnl": 1.5,
+        "path": ["fixture-a", "fixture-b"], "symbols": ["BTC/USDT"],
+    })
+    journal.append({
+        "session_id": other_session_id, "mode": "simulation", "exchange_a": "fixture",
+        "strategy": "contract-test", "net_pnl": 9.0, "execution_status": "FILLED",
+        "verification_status": "verified", "cumulative_realized_pnl": 9.0,
+    })
+
+    rows = journal.recent_trades(session_id)
+
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == session_id
+    assert rows[0]["path"] == ["fixture-a", "fixture-b"]
+    assert rows[0]["symbols"] == ["BTC/USDT"]
+    with pytest.raises(ValueError):
+        journal.recent_trades(session_id, limit=0)
