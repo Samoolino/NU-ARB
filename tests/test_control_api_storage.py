@@ -475,3 +475,33 @@ def test_postgres_readiness_stays_closed_until_control_api_parity_is_complete(tm
     assert response.status_code == 503, response.text
     assert "route parity is not complete" in response.json()["detail"]
     assert not database.exists()
+
+
+def test_signup_store_rolls_back_user_when_initial_session_insert_fails(tmp_path):
+    """Account creation must be atomic: no orphaned user if session persistence fails."""
+    import sqlite3
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "signup-atomicity.sqlite3"))
+    store.initialize()
+    with store.backend.transaction() as db:
+        db.execute(
+            """CREATE TRIGGER reject_initial_session
+               BEFORE INSERT ON control_api_sessions
+               BEGIN SELECT RAISE(ABORT, 'injected session write failure'); END"""
+        )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_user_with_session(
+            user_id="atomic-user",
+            email="atomic@example.test",
+            salt=b"0123456789abcdef",
+            password_hash=b"test-password-hash",
+            created_at="2026-10-19T00:00:00+00:00",
+            token_hash="hashed-session-token",
+            expires_at=2_000_000_000,
+        )
+
+    assert store.get_user_by_email("atomic@example.test") is None
+    assert store.get_session("hashed-session-token") is None
