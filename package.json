@@ -2,11 +2,13 @@
   "name": "nu-arb-vercel-dashboard",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "ccxt": "^4.5.0"
   },
   "scripts": {
-    "test": "node tests/scanner.test.js"
+    "test": "node --test tests/*.test.js"
   }
 }
