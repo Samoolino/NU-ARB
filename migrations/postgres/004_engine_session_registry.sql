@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS control_api_engine_sessions (
     updated_at TEXT NOT NULL,
     stopped_at TEXT,
     error_code TEXT,
-    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+    metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS control_api_engine_sessions_owner_created_idx
     ON control_api_engine_sessions(owner_user_id, created_at DESC);
