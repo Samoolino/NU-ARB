@@ -8,6 +8,77 @@ from collections import deque
 from dataclasses import dataclass
 
 
+MAX_STREAM_EXCHANGE_AGE_MS = 5_000
+MAX_STREAM_FUTURE_SKEW_MS = 5_000
+MAX_CROSS_STREAM_TIMESTAMP_SKEW_MS = 5_000
+STREAM_IDLE_TIMEOUT_S = 15.0
+RECONNECT_THROTTLE_S = 2.0
+
+
+def cross_timestamp_consistent(buy_timestamp: int | float | None, sell_timestamp: int | float | None, *, max_skew_ms: float = MAX_CROSS_STREAM_TIMESTAMP_SKEW_MS) -> bool:
+    if buy_timestamp is None or sell_timestamp is None:
+        return False
+    try:
+        buy, sell = float(buy_timestamp), float(sell_timestamp)
+    except (TypeError, ValueError):
+        return False
+    import math
+    return math.isfinite(buy) and math.isfinite(sell) and buy > 0 and sell > 0 and abs(buy - sell) <= max_skew_ms
+
+
+def validate_stream_order_book(ob: dict, *, now_ms: int | None = None) -> str | None:
+    """Validate one normalized CCXT Pro snapshot before it can enter shared market state."""
+    import math
+    import time as _time
+
+    now_ms = int(_time.time() * 1000) if now_ms is None else int(now_ms)
+    timestamp = ob.get("timestamp")
+    if timestamp is None or isinstance(timestamp, bool):
+        return "missing_exchange_timestamp"
+    try:
+        timestamp = float(timestamp)
+    except (TypeError, ValueError):
+        return "invalid_exchange_timestamp"
+    if not math.isfinite(timestamp) or timestamp <= 0:
+        return "invalid_exchange_timestamp"
+    if timestamp - now_ms > MAX_STREAM_FUTURE_SKEW_MS:
+        return "future_exchange_timestamp"
+    if now_ms - timestamp > MAX_STREAM_EXCHANGE_AGE_MS:
+        return "stale_exchange_timestamp"
+    bids, asks = ob.get("bids"), ob.get("asks")
+    if not isinstance(bids, list) or not bids or not isinstance(asks, list) or not asks:
+        return "empty_order_book"
+    previous = None
+    for level in bids:
+        if not isinstance(level, (list, tuple)) or len(level) < 2:
+            return "invalid_level"
+        try:
+            price, amount = float(level[0]), float(level[1])
+        except (TypeError, ValueError):
+            return "invalid_level"
+        if not math.isfinite(price) or not math.isfinite(amount) or price <= 0 or amount <= 0:
+            return "invalid_level"
+        if previous is not None and price > previous:
+            return "unsorted_bids"
+        previous = price
+    previous = None
+    for level in asks:
+        if not isinstance(level, (list, tuple)) or len(level) < 2:
+            return "invalid_level"
+        try:
+            price, amount = float(level[0]), float(level[1])
+        except (TypeError, ValueError):
+            return "invalid_level"
+        if not math.isfinite(price) or not math.isfinite(amount) or price <= 0 or amount <= 0:
+            return "invalid_level"
+        if previous is not None and price < previous:
+            return "unsorted_asks"
+        previous = price
+    if float(bids[0][0]) >= float(asks[0][0]):
+        return "crossed_order_book"
+    return None
+
+
 @dataclass(slots=True)
 class Book:
     bids: list
@@ -31,6 +102,20 @@ class MarketData:
         self.books: dict[str, Book] = {}
         self.dirty: set[str] = set()
         self.event = asyncio.Event()
+        # State is latest-value-per-symbol; dirty is a bounded set, never an unbounded update queue.
+        self.max_buffered_symbols = len(self.symbols)
+        self._reconnect_lock = asyncio.Lock()
+        self._last_reconnect_at = 0.0
+
+    async def _recover_connection(self) -> None:
+        async with self._reconnect_lock:
+            now = time.monotonic()
+            if now - self._last_reconnect_at < RECONNECT_THROTTLE_S:
+                return
+            self._last_reconnect_at = now
+            self.log("warn", "reinitializing exchange WebSocket transport after stream timeout/error")
+            await self.ex.close()
+            await self.ex.load_markets()
 
     def start(self) -> list:
         return [asyncio.create_task(self._watch(s), name=f"ws:{s}") for s in self.symbols]
@@ -40,7 +125,12 @@ class MarketData:
         while True:
             try:
                 limit = orderbook_limit(self.ex.id, self.depth)
-                ob = await self.ex.watch_order_book(sym, limit)
+                ob = await asyncio.wait_for(self.ex.watch_order_book(sym, limit), timeout=STREAM_IDLE_TIMEOUT_S)
+                invalid_reason = validate_stream_order_book(ob)
+                if invalid_reason is not None:
+                    self.log("warn", f"{sym} stream snapshot rejected ({invalid_reason}); awaiting a fresh valid update")
+                    await asyncio.sleep(min(backoff, 2.0))
+                    continue
                 self.books[sym] = Book(ob["bids"][: self.depth], ob["asks"][: self.depth], time.monotonic(),
                                         ob.get("timestamp"), ob.get("nonce"))
                 self.dirty.add(sym)
@@ -49,7 +139,13 @@ class MarketData:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log("warn", f"{sym} stream error {e!r}; retry {backoff:.0f}s")
+                self.log("warn", f"{sym} stream error {type(e).__name__}; retry {backoff:.0f}s")
+                try:
+                    await self._recover_connection()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as recovery_error:
+                    self.log("error", f"{sym} stream recovery failed ({type(recovery_error).__name__}); feed remains untrusted")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
 
