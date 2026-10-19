@@ -403,3 +403,46 @@ def test_engine_journal_route_fails_closed_for_postgres_without_sqlite_fallback(
         assert not (tmp_path / "engine_test-user.sqlite3").exists()
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("get", "/api/v1/engine/state", None),
+        ("post", "/api/v1/engine/stop", None),
+        (
+            "post",
+            "/api/v1/engine/start",
+            {
+                "mode": "paper",
+                "exchange_ids": ["binance"],
+                "trade_size_usd": 1,
+                "max_loss_usd": 1,
+                "target_profit_usd": 1,
+                "require_private_stream": True,
+            },
+        ),
+    ],
+)
+def test_engine_lifecycle_routes_fail_closed_for_postgres_without_sqlite_fallback(
+    tmp_path, monkeypatch, method, path, payload
+):
+    """Lifecycle routes must not initialize or read SQLite when PostgreSQL is selected."""
+    database = tmp_path / "legacy-engine-state.sqlite3"
+    monkeypatch.setattr(web_api, "APP_DB", database)
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = getattr(client, method)(path, json=payload) if payload else getattr(client, method)(path)
+
+        assert response.status_code == 503, response.text
+        assert "not yet supported" in response.json()["detail"]
+        assert not database.exists()
+        assert not (tmp_path / "engine_test-user.sqlite3").exists()
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
