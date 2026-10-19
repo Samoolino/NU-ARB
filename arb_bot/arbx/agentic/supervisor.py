@@ -72,7 +72,7 @@ def _parse_report(value: Mapping[str, Any]) -> AgentReport | None:
     safe_summary = "".join(
         " " if char == "\t" else char
         for char in summary
-        if char != "\t" and unicodedata.category(char) != "Cc"
+        if char != "\t" and not unicodedata.category(char).startswith("C")
     ).strip()
     return AgentReport(role, finding, observation_id, observed_at_ms, safe_summary)
 
