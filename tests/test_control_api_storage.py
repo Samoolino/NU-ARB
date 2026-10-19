@@ -505,3 +505,27 @@ def test_signup_store_rolls_back_user_when_initial_session_insert_fails(tmp_path
 
     assert store.get_user_by_email("atomic@example.test") is None
     assert store.get_session("hashed-session-token") is None
+
+
+def test_live_engine_start_is_disabled_even_when_environment_flag_is_set(monkeypatch):
+    monkeypatch.setenv("ARBX_LIVE_TRADING_ENABLED", "1")
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            response = client.post(
+                "/api/v1/engine/start",
+                json={
+                    "mode": "live",
+                    "exchange_ids": ["binance", "bybit"],
+                    "trade_size_usd": 1,
+                    "max_loss_usd": 1,
+                    "target_profit_usd": 10,
+                    "require_private_stream": True,
+                    "cross_live": True,
+                    "live_confirmation": "I ACCEPT REAL ORDERS",
+                },
+            )
+        assert response.status_code == 503, response.text
+        assert "disabled in this build" in response.json()["detail"]
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
