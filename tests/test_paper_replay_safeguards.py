@@ -79,3 +79,25 @@ def test_partial_fill_requires_reconciliation_and_only_verified_fill_counts(tmp_
         assert reopened.realized("replay-1") == 0.12
     finally:
         reopened.close()
+
+
+
+def test_unverified_filled_status_does_not_count_as_realized_pnl(tmp_path):
+    path = tmp_path / "unverified.sqlite3"
+    journal = TradeJournal(path)
+    journal.append({
+        "session_id": "uncertain-1",
+        "mode": "live",
+        "exchange_a": "venue-a",
+        "strategy": "cross_exchange",
+        "requested_quantity": 1.0,
+        "executed_quantity": 1.0,
+        "net_pnl": 9.0,
+        "execution_status": "FILLED",
+        "verification_status": "PENDING_RECONCILIATION",
+        "cumulative_realized_pnl": 9.0,
+    })
+    try:
+        assert journal.realized("uncertain-1") == 0.0
+    finally:
+        journal.close()
