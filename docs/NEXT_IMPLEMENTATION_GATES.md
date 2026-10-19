@@ -1,5 +1,12 @@
 # Next implementation sequence: parity, evidence, and release gates
 
+
+## 1A. Durable engine-session registry foundation (staged)
+
+Migration `004_engine_session_registry.sql` and `ControlPlaneStore` now define a backend-neutral registry for paper/simulation sessions. It stores the owning user, lifecycle phase/timestamps, sanitized error code, and metadata, and supports owner-scoped listing and owner-checked updates. The schema intentionally rejects `mode='live'`.
+
+This is a persistence contract, **not yet runtime wiring**. Engine lifecycle routes still rely on process-global runtime state and have not been switched to this registry. Do not mark engine restart recovery, multi-worker operation, or authorized journal access complete until routes use the registry and an integration test proves that a second process can recover session ownership/state without reading another user's records.
+
 ## 1. Persistence cutover boundary
 
 SQLite remains the default. Setting `ARBX_STORAGE_BACKEND=postgres` only constructs a backend object; it does not migrate the control API or `TradeJournal`, prove schema parity, copy data, or switch existing call sites.
