@@ -24,12 +24,37 @@ def test_missing_evidence_fails_closed():
     assert "required_numeric_evidence_missing" in result.reasons
 
 
+def test_malformed_numeric_evidence_fails_closed():
+    obs = good_observation()
+    obs["age_ms"] = "100"
+    result = assess_observation(obs)
+    assert result.status == "REJECTED"
+    assert "invalid_numeric_evidence" in result.reasons
+
+
+def test_non_finite_numeric_evidence_fails_closed():
+    for invalid in (float("nan"), float("inf"), float("-inf")):
+        obs = good_observation()
+        obs["net_edge_bps"] = invalid
+        result = assess_observation(obs)
+        assert result.status == "REJECTED"
+        assert "invalid_numeric_evidence" in result.reasons
+
+
 def test_stale_book_is_rejected():
     obs = good_observation()
     obs["age_ms"] = 2000
     result = assess_observation(obs, max_age_ms=1000)
     assert result.status == "REJECTED"
     assert "stale_market_evidence" in result.reasons
+
+
+def test_negative_age_is_rejected():
+    obs = good_observation()
+    obs["age_ms"] = -1
+    result = assess_observation(obs)
+    assert result.status == "REJECTED"
+    assert "invalid_negative_age" in result.reasons
 
 
 def test_agent_cannot_override_engine_risk_gate():
