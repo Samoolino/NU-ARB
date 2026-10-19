@@ -29,6 +29,18 @@ class ControlPlaneStore:
             """CREATE TABLE IF NOT EXISTS control_api_sessions (
                 token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL
                 REFERENCES control_api_users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL)""",
+
+            """CREATE TABLE IF NOT EXISTS control_api_engine_sessions (
+                session_id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL REFERENCES control_api_users(id) ON DELETE CASCADE,
+                mode TEXT NOT NULL CHECK(mode IN ('paper','simulation')),
+                phase TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                stopped_at TEXT,
+                error_code TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}')""",
+            "CREATE INDEX IF NOT EXISTS control_api_engine_sessions_owner_created_idx ON control_api_engine_sessions(owner_user_id, created_at)",
             """CREATE TABLE IF NOT EXISTS control_api_exchange_credentials (
                 user_id TEXT NOT NULL REFERENCES control_api_users(id) ON DELETE CASCADE,
                 exchange_id TEXT NOT NULL, encrypted_credentials BLOB NOT NULL,
@@ -39,6 +51,60 @@ class ControlPlaneStore:
         with self.backend.transaction() as session:
             for statement in statements:
                 session.execute(statement)
+
+
+    def register_engine_session(self, *, session_id: str, owner_user_id: str,
+                                mode: str, phase: str, created_at: str,
+                                updated_at: str, metadata_json: str = "{}") -> dict[str, Any]:
+        """Persist session ownership and initial lifecycle state atomically."""
+        if not session_id.strip() or mode not in {"paper", "simulation"}:
+            raise ValueError("engine session requires an ID and a non-live mode")
+        with self.backend.transaction() as session:
+            session.execute(self._sql(
+                """INSERT INTO control_api_engine_sessions
+                   (session_id, owner_user_id, mode, phase, created_at, updated_at, metadata_json)
+                   VALUES(?,?,?,?,?,?,?)"""
+            ), (session_id, owner_user_id, mode, phase, created_at, updated_at, metadata_json))
+            row = session.fetch_one(self._sql(
+                """SELECT session_id, owner_user_id, mode, phase, created_at, updated_at,
+                          stopped_at, error_code, metadata_json
+                   FROM control_api_engine_sessions WHERE session_id=?"""
+            ), (session_id,))
+            assert row is not None
+            return row
+
+    def get_engine_session(self, session_id: str) -> dict[str, Any] | None:
+        with self.backend.transaction() as session:
+            return session.fetch_one(self._sql(
+                """SELECT session_id, owner_user_id, mode, phase, created_at, updated_at,
+                          stopped_at, error_code, metadata_json
+                   FROM control_api_engine_sessions WHERE session_id=?"""
+            ), (session_id,))
+
+    def list_engine_sessions(self, owner_user_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        if not owner_user_id or not 1 <= limit <= 500:
+            raise ValueError("owner and limit (1..500) are required")
+        with self.backend.transaction() as session:
+            return session.fetch_all(self._sql(
+                """SELECT session_id, owner_user_id, mode, phase, created_at, updated_at,
+                          stopped_at, error_code, metadata_json
+                   FROM control_api_engine_sessions WHERE owner_user_id=?
+                   ORDER BY created_at DESC, session_id ASC LIMIT ?"""
+            ), (owner_user_id, limit))
+
+    def update_engine_session(self, *, session_id: str, owner_user_id: str,
+                              phase: str, updated_at: str, stopped_at: str | None = None,
+                              error_code: str | None = None,
+                              metadata_json: str | None = None) -> bool:
+        """Update only a session owned by the caller; return false for missing/foreign IDs."""
+        with self.backend.transaction() as session:
+            cursor = session.execute(self._sql(
+                """UPDATE control_api_engine_sessions
+                   SET phase=?, updated_at=?, stopped_at=?, error_code=?,
+                       metadata_json=COALESCE(?, metadata_json)
+                   WHERE session_id=? AND owner_user_id=?"""
+            ), (phase, updated_at, stopped_at, error_code, metadata_json, session_id, owner_user_id))
+            return cursor.rowcount == 1
 
     def create_user(self, *, user_id: str, email: str, salt: bytes,
                     password_hash: bytes, created_at: str) -> dict[str, Any]:
