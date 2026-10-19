@@ -820,7 +820,19 @@ def remove_exchange(exchange_id: str, request: Request, store=Depends(get_contro
 
 
 @app.get("/api/v1/engine/state", dependencies=[Depends(_proxy_auth)])
-def engine_state(request: Request):
+def engine_state(request: Request, store=Depends(get_control_plane_store)):
+    if _postgres_store_selected():
+        if not POSTGRES_CONTROL_API_PARITY_COMPLETE:
+            raise HTTPException(503, "Configured persistence backend is not yet supported by the Control API")
+        uid = _store_current_user(request, store)
+        sessions = store.list_engine_sessions(uid, limit=500)
+        if not sessions:
+            return {"status": "STOPPED", "mode": None, "stats": None, "sessionId": None,
+                    "error": None, "executionEnabled": False}
+        current = max(sessions, key=lambda item: (str(item.get("updated_at", "")), str(item.get("session_id", ""))))
+        return {"status": current["phase"], "mode": current["mode"], "stats": None,
+                "sessionId": current["session_id"], "error": current.get("error_code"),
+                "executionEnabled": False}
     db = _connect()
     try:
         uid = _current_user(request, db)
