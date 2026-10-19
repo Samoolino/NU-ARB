@@ -23,7 +23,7 @@ def test_migrations_are_idempotent(database_url):
     assert run_postgres_migrations(database_url) == []
     with psycopg.connect(database_url) as conn:
         versions = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-    assert versions == [("001",), ("002",), ("003",), ("004",), ("005",), ("006",), ("007",)]
+    assert versions == [("001",), ("002",), ("003",), ("004",), ("005",), ("006",), ("007",), ("008",)]
     with psycopg.connect(database_url) as conn:
         indexes = {
             row[0] for row in conn.execute(
