@@ -27,7 +27,7 @@
       <div class="brand"><div class="mark">A</div><div><div class="brand-name">ARBX <span style="color:var(--muted);font-weight:450">/ MARKET SCANNER</span></div><div class="brand-sub">Cross-exchange spot intelligence</div></div></div>
       <div class="live-label"><span id="globalDot" class="dot"></span><span id="globalStatus">Waiting for first snapshot</span></div>
     </header>
-    <section class="hero"><div><h1>Market edge, measured.</h1><p>Choose from 20 candidate public spot venues. Depth-aware estimates. No orders sent.</p></div><div class="stamp" id="updatedAt">—</div></section>
+    <section class="hero"><div><h1>Market edge, measured.</h1><p>Choose from 18 registered public spot venues. Depth-aware estimates. No orders sent.</p></div><div class="stamp" id="updatedAt">—</div></section>
 <section class="agent-console" id="agentConsole" aria-labelledby="agentTitle">
       <div class="agent-heading"><div><h2 id="agentTitle">Agent console</h2><p>Describe a public market scan in plain text. This version routes only validated, read-only scan requests.</p></div><span class="agent-mode">SAFE ROUTER · NO ORDER EXECUTION</span></div>
       <form id="agentForm" class="agent-form"><label for="agentMessage">What should I check?</label><textarea id="agentMessage" rows="2" maxlength="500" placeholder="Scan BTC/USDT across Binance and Bybit; show the estimated edge." required></textarea><div class="agent-actions"><span id="agentStatus" role="status" aria-live="polite">Ready · no task running</span><button class="button primary" id="agentSubmit" type="submit">Process request</button></div></form>
@@ -45,13 +45,28 @@
         <option value="kraken" selected>Kraken</option><option value="coinbaseexchange" selected>Coinbase Exchange</option><option value="bitfinex" selected>Bitfinex</option>
         <option value="bitstamp" selected>Bitstamp</option><option value="gemini" selected>Gemini</option><option value="cryptocom" selected>Crypto.com</option>
         <option value="coinex" selected>CoinEx</option><option value="bingx" selected>BingX</option><option value="whitebit" selected>WhiteBIT</option>
-        <option value="bitmart" selected>BitMart</option><option value="upbit" selected>Upbit</option>
-      </select><div class="account-actions"><button class="button secondary" id="selectAllVenues" type="button">Select all</button><button class="button secondary" id="clearVenues" type="button">Clear</button></div></div>
+              </select><div class="account-actions"><button class="button secondary" id="selectAllVenues" type="button">Select all</button><button class="button secondary" id="clearVenues" type="button">Clear</button></div></div>
       <div class="field amount"><label for="size">NOTIONAL · USD-EQUIVALENT</label><input id="size" type="number" min="1" max="100000" step="1" value="100" required></div>
       <div class="field small"><label for="takerFee">ASSUMED TAKER FEE · BPS / VENUE</label><input id="takerFee" type="number" min="0" max="100" step="0.1" value="10" required></div>
       <div class="field small"><label for="minNetBps">MIN ESTIMATED NET EDGE · BPS</label><input id="minNetBps" type="number" min="0" max="500" step="0.1" value="5" required></div>
       <div class="actions"><label class="toggle"><input id="auto" type="checkbox"> Auto refresh · 30s</label><button class="button secondary" id="refresh" type="button">Refresh now</button><button class="button primary" id="scan" type="submit">Scan selected markets</button></div>
     </form>
+    <section id="marketUniverse" style="margin-top:22px" aria-labelledby="universeTitle">
+      <div class="section-head"><h2 id="universeTitle">Token &amp; venue market directory</h2><span>Reference prices are not executable quotes</span></div>
+      <div class="controls" style="align-items:end">
+        <div class="field small"><label for="universePage">COINGECKO PAGE</label><input id="universePage" type="number" min="1" max="100" value="1"></div>
+        <div class="field small"><label for="universeSize">ROWS</label><select id="universeSize"><option>25</option><option selected>50</option><option>100</option></select></div>
+        <div class="actions"><button class="button secondary" id="loadTokenUniverse" type="button">Load token page</button><button class="button primary" id="verifyVenueCatalogs" type="button">Verify Binance + Bybit listings</button></div>
+      </div>
+      <p class="account-note" id="universeStatus" role="status" aria-live="polite">Load a CoinGecko global market page or verify venue spot listings.</p>
+      <div class="panel table-wrap"><table class="opps" style="min-width:850px"><thead><tr><th>Rank</th><th>Token</th><th>CoinGecko ID</th><th>USD reference</th><th>24h volume USD</th><th>24h change</th><th>Candidate pair</th><th>Action</th></tr></thead><tbody id="universeRows"><tr><td colspan="8" class="empty">Token market page not loaded.</td></tr></tbody></table></div>
+      <div class="section-head"><h2>Token identities &amp; network contracts</h2><span>CoinGecko platform directory</span></div>
+      <div class="controls" style="align-items:end"><div class="field small"><label for="chainPage">TOKEN PAGE</label><input id="chainPage" type="number" min="1" max="1000" value="1"></div><button class="button secondary" id="loadChainTokens" type="button">Load token + network page</button></div>
+      <div class="panel table-wrap"><table class="opps" style="min-width:750px"><thead><tr><th>Token</th><th>CoinGecko ID</th><th>Symbol</th><th>Platform / network</th><th>Contract address</th></tr></thead><tbody id="chainRows"><tr><td colspan="5" class="empty">Token platform directory not loaded.</td></tr></tbody></table></div>
+      <div class="section-head"><h2>Verified venue listing catalog</h2><span>Public REST metadata</span></div>
+      <p class="account-note">This checks active spot pairs quoted in USDT, USDC or DAI. Tickers do not establish token contract or blockchain-network identity, and catalog checks do not establish WebSocket health.</p>
+      <div class="panel table-wrap"><table class="opps" style="min-width:620px"><thead><tr><th>Venue</th><th>Status</th><th>Active spot pairs</th><th>Sample pairs</th></tr></thead><tbody id="venueCatalogRows"><tr><td colspan="4" class="empty">Listing verification has not run.</td></tr></tbody></table></div>
+    </section>
     <div id="error" class="error-banner" role="status"></div>
     <div id="referenceSignals" class="fineprint" hidden aria-live="polite"><strong>Reference warning.</strong><span id="referenceSignalText"></span></div>
     <section>
@@ -61,7 +76,7 @@
     <div class="fineprint"><strong>Read-only estimates.</strong><span>Snapshots use public REST depth; stable quote values are assumed to be $1. Enter your estimated taker fee and minimum net edge in BPS. Fees, actual inventory, latency, partial fills, and slippage can differ. These estimates do not place orders or assure profit. The separate engine panel preserves account-level live eligibility checks.</span></div>
     <details class="account" id="accountPanel">
       <summary>Account and exchange verification</summary>
-      <p class="account-note">Create an application account to verify exchange connections. Passwords are hashed and exchange credentials are encrypted at rest. All 20 registry venues can be selected for verification where an adapter is available. Live eligibility is separate: only Binance, Bybit, and KuCoin currently have permission probes that may satisfy the strict checks, and every account must pass fresh balance, scope, spot execution, and stream checks. A listed venue is not automatically live-enabled.</p>
+      <p class="account-note">Create an application account to verify exchange connections. Passwords are hashed and exchange credentials are encrypted at rest. All registered venues can be selected for verification where an adapter is available. Live eligibility is separate: only Binance, Bybit, and KuCoin currently have permission probes that may satisfy the strict checks, and every account must pass fresh balance, scope, spot execution, and stream checks. A listed venue is not automatically live-enabled.</p>
       <div class="account-grid">
         <section class="account-box" id="authBox">
           <h3 id="authTitle">Sign in or create an account</h3>
@@ -119,7 +134,7 @@
         </section>
       </div>
     </details>
-    <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>20 cataloged public spot venues · credentials remain server-side</span></footer>
+    <footer class="footer"><span>ARBX · PUBLIC DATA MODE</span><span>18 cataloged public spot venues · credentials remain server-side</span></footer>
   </main>
   <script type="module">
     const EXCHANGES = [{"id":"binance","name":"Binance"},{"id":"bybit","name":"Bybit"},{"id":"okx","name":"OKX"},{"id":"kucoin","name":"KuCoin"},{"id":"gateio","name":"Gate.io"},{"id":"mexc","name":"MEXC"},{"id":"htx","name":"HTX"},{"id":"lbank","name":"LBank"},{"id":"bitget","name":"Bitget"},{"id":"kraken","name":"Kraken"},{"id":"coinbaseexchange","name":"Coinbase Exchange"},{"id":"bitfinex","name":"Bitfinex"},{"id":"bitstamp","name":"Bitstamp"},{"id":"gemini","name":"Gemini"},{"id":"cryptocom","name":"Crypto.com Exchange"},{"id":"coinex","name":"CoinEx"},{"id":"bingx","name":"BingX"},{"id":"whitebit","name":"WhiteBIT"}];
@@ -222,12 +237,45 @@
         $("scan").textContent = "Scan selected markets";
       }
     }
+    async function loadTokenUniverse() {
+      const page = Number($("universePage").value), perPage = Number($("universeSize").value);
+      $("universeStatus").textContent = "Loading CoinGecko market references…";
+      try {
+        const r = await fetch("/api/markets?source=coingecko&page="+page+"&perPage="+perPage,{cache:"no-store"});
+        const d = await r.json(); if(!r.ok) throw new Error(d.error||"Market directory unavailable");
+        const body=$("universeRows"); body.replaceChildren();
+        for(const c of d.rows||[]) {
+          const tr=document.createElement("tr");
+          for(const v of [c.marketCapRank??"—",c.name+" ("+c.symbol+")",c.id,c.currentPriceUsd==null?"—":"$"+currency(c.currentPriceUsd,6),c.volume24hUsd==null?"—":"$"+currency(c.volume24hUsd,0),c.change24hPct==null?"—":currency(c.change24hPct,2)+"%",c.candidateSpotPairs?.[0]||"—"]) {const td=document.createElement("td");td.textContent=String(v);tr.append(td);}
+          const td=document.createElement("td"),b=document.createElement("button");b.type="button";b.className="button secondary";b.textContent="Add candidate";
+          b.addEventListener("click",()=>{const pair=c.candidateSpotPairs?.[0];if(!pair)return;const select=$("markets");let o=Array.from(select.options).find(x=>x.value===pair);if(!o){o=document.createElement("option");o.value=pair;o.textContent=pair+" · unverified";select.append(o);}if(selectedValues(select).length>=12&&!o.selected){$("universeStatus").textContent="Maximum 12 selected markets.";return;}o.selected=true;$("universeStatus").textContent=pair+" added as a candidate; venue listing still needs verification.";});td.append(b);tr.append(td);body.append(tr);
+        }
+        $("universeStatus").textContent="CoinGecko page "+d.page+" loaded: "+d.rows.length+" global market references. Candidate pairs are not verified listings.";
+      } catch(e) {$("universeStatus").textContent=e.message||"Market directory unavailable";}
+    }
+    async function loadChainTokens() {
+      const page=Number($("chainPage").value);$("universeStatus").textContent="Loading token identity and platform metadata…";
+      try {const r=await fetch("/api/markets?source=tokens&page="+page+"&perPage=50",{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"Token platform directory unavailable");const body=$("chainRows");body.replaceChildren();
+        for(const token of d.rows||[]){const platforms=token.platforms?.length?token.platforms:[{network:"—",contractAddress:"—"}];for(const platform of platforms){const tr=document.createElement("tr");for(const value of [token.name,token.id,token.symbol,platform.network,platform.contractAddress]){const td=document.createElement("td");td.textContent=String(value);tr.append(td);}body.append(tr);}}
+        $("universeStatus").textContent="Token/platform page "+d.page+" · "+d.rows.length+" token identities from "+d.totalRows+" indexed assets. Contract metadata is not proof of exchange listing or bridge equivalence.";
+      }catch(e){$("universeStatus").textContent=e.message||"Token platform directory unavailable";}
+    }
+    async function verifyVenueCatalogs() {
+      $("universeStatus").textContent="Checking Binance and Bybit public spot listings…";
+      try {
+        const r=await fetch("/api/markets?source=venues&venues=binance,bybit",{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"Venue catalog unavailable");
+        const body=$("venueCatalogRows");body.replaceChildren();
+        for(const v of d.venues||[]){const tr=document.createElement("tr");for(const value of [v.name,v.status,v.totalSpotPairs,(v.rows||[]).slice(0,6).map(x=>x.symbol).join(", ")||"—"]){const td=document.createElement("td");td.textContent=String(value);tr.append(td);}body.append(tr);}
+        $("universeStatus").textContent="Listing catalog loaded for "+(d.venues||[]).filter(v=>v.status==="available").length+"/2 venues. REST metadata only; streaming health is separate.";
+      } catch(e){$("universeStatus").textContent=e.message||"Venue catalog unavailable";}
+    }
+
     function parseAgentRequest(rawText) {
       if (typeof rawText !== "string" || !rawText.trim() || rawText.length > 500) return {ok: false, message: "Enter a request of 1–500 characters."};
       const text = rawText.trim();
       if (!/\b(scan|compare|check|inspect|find|show)\b/i.test(text)) return {ok: false, message: "I can currently process public market scan requests. Start with scan, compare, check, inspect, find, or show."};
       const symbols = [...new Set(Array.from(text.matchAll(/\b([A-Z0-9]{2,20})\s*\/\s*(USDT|USDC|DAI)\b/gi), (m) => m[1].toUpperCase() + "/" + m[2].toUpperCase()))];
-      const aliases = [["binance", /\bbinance\b/i], ["bybit", /\bbybit\b/i], ["okx", /\bokx\b/i], ["kucoin", /\bku\s?coin\b/i], ["gateio", /\bgate(?:\.io|io)\b/i], ["mexc", /\bmexc\b/i], ["htx", /\bhtx\b/i], ["lbank", /\blbank\b/i], ["bitget", /\bbitget\b/i], ["kraken", /\bkraken\b/i], ["coinbaseexchange", /\bcoinbase(?:\s+exchange)?\b/i], ["bitfinex", /\bbitfinex\b/i], ["bitstamp", /\bbitstamp\b/i], ["gemini", /\bgemini\b/i], ["cryptocom", /\bcrypto\.com\b/i], ["coinex", /\bcoinex\b/i], ["bingx", /\bbingx\b/i], ["whitebit", /\bwhitebit\b/i], ["bitmart", /\bbitmart\b/i], ["upbit", /\bupbit\b/i]];
+      const aliases = [["binance", /\bbinance\b/i], ["bybit", /\bbybit\b/i], ["okx", /\bokx\b/i], ["kucoin", /\bku\s?coin\b/i], ["gateio", /\bgate(?:\.io|io)\b/i], ["mexc", /\bmexc\b/i], ["htx", /\bhtx\b/i], ["lbank", /\blbank\b/i], ["bitget", /\bbitget\b/i], ["kraken", /\bkraken\b/i], ["coinbaseexchange", /\bcoinbase(?:\s+exchange)?\b/i], ["bitfinex", /\bbitfinex\b/i], ["bitstamp", /\bbitstamp\b/i], ["gemini", /\bgemini\b/i], ["cryptocom", /\bcrypto\.com\b/i], ["coinex", /\bcoinex\b/i], ["bingx", /\bbingx\b/i], ["whitebit", /\bwhitebit\b/i]];
       const venues = aliases.filter(([, pattern]) => pattern.test(text)).map(([id]) => id);
       return {ok: true, symbols, venues};
     }
@@ -547,6 +595,9 @@
     $("clearVenues").addEventListener("click", () => {
       for (const option of $("venues").options) option.selected = false;
     });
+    $("loadChainTokens").addEventListener("click", loadChainTokens);
+    $("loadTokenUniverse").addEventListener("click", loadTokenUniverse);
+    $("verifyVenueCatalogs").addEventListener("click", verifyVenueCatalogs);
     $("agentForm").addEventListener("submit", processAgentRequest);
     $("controls").addEventListener("submit", scan);
     $("refresh").addEventListener("click", scan);
