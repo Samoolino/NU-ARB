@@ -235,3 +235,79 @@ def test_expired_injected_store_session_is_rejected(tmp_path, monkeypatch):
     finally:
         web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+
+def test_exchange_list_uses_injected_store_with_postgres_selected(tmp_path, monkeypatch):
+    import json
+    from fastapi.testclient import TestClient
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "exchange-list.sqlite3"))
+    store.initialize()
+    store.create_user(
+        user_id="exchange-list-user", email="list@example.test",
+        salt=b"0123456789abcdef", password_hash=b"hash",
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    store.save_credentials(
+        user_id="exchange-list-user", exchange_id="binance",
+        encrypted_credentials=b"encrypted", auth_mode="api_key",
+        state="ACCOUNT_DATA_CONNECTED", last_verified="2026-10-18T00:00:00+00:00",
+        verification_json=json.dumps({"evidence": {"scannerEligible": True},
+                                      "balances": {"USDT": {"free": 4, "used": 1}},
+                                      "orderBook": None, "maskedKey": "abc••••xyz"}),
+    )
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, "opaque-test-token")
+            store.create_session(
+                token_hash=web_api._session_token_hash("opaque-test-token"),
+                user_id="exchange-list-user", expires_at=2_000_000_000,
+            )
+            response = client.get("/api/v1/exchanges")
+        assert response.status_code == 200, response.text
+        binance = next(item for item in response.json()["exchanges"] if item["id"] == "binance")
+        assert binance["state"] in ("ACCOUNT_DATA_CONNECTED", "STALE")
+        assert binance["maskedKey"] == "abc••••xyz"
+        assert binance["balances"]["USDT"]["free"] == 4
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_remove_exchange_deletes_only_current_users_store_credentials(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "exchange-remove.sqlite3"))
+    store.initialize()
+    for user_id, email in (("owner-a", "a@example.test"), ("owner-b", "b@example.test")):
+        store.create_user(user_id=user_id, email=email, salt=b"0123456789abcdef",
+                          password_hash=b"hash", created_at="2026-01-01T00:00:00+00:00")
+    store.save_credentials(user_id="owner-a", exchange_id="binance", encrypted_credentials=b"a",
+                          auth_mode="api_key", state="FAILED", last_verified=None, verification_json="{}")
+    store.save_credentials(user_id="owner-b", exchange_id="binance", encrypted_credentials=b"b",
+                          auth_mode="api_key", state="FAILED", last_verified=None, verification_json="{}")
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, "owner-a-token")
+            store.create_session(token_hash=web_api._session_token_hash("owner-a-token"),
+                                 user_id="owner-a", expires_at=2_000_000_000)
+            response = client.delete("/api/v1/exchanges/binance")
+        assert response.status_code == 200, response.text
+        assert store.get_credentials("owner-a", "binance") is None
+        assert store.get_credentials("owner-b", "binance") is not None
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
