@@ -840,7 +840,29 @@ def engine_state(request: Request):
 
 
 @app.get("/api/v1/engine/journal", dependencies=[Depends(_proxy_auth)])
-def engine_journal(request: Request):
+def engine_journal(request: Request, store=Depends(get_control_plane_store)):
+    # PostgreSQL reads map the authenticated owner to only their durable sessions.
+    if _postgres_store_selected():
+        uid = _store_current_user(request, store)
+        sessions = store.list_engine_sessions(uid, limit=500)
+        if not sessions:
+            return {"trades": [], "realizedNetPnl": 0.0, "scope": "owned durable engine sessions"}
+        from arbx.journal_storage import BackendTradeJournal
+        from arbx.storage import backend_from_environment
+        journal = BackendTradeJournal(backend_from_environment())
+        try:
+            trades = []
+            realized_total = 0.0
+            for engine_session in sessions:
+                session_id = engine_session["session_id"]
+                trades.extend(journal.recent_trades(session_id, limit=100))
+                realized_total += journal.realized(session_id)
+            trades.sort(key=lambda record: (str(record.get("timestamp", "")), int(record.get("id", 0))), reverse=True)
+            return {"trades": trades[:100], "realizedNetPnl": realized_total,
+                    "scope": "owned durable engine sessions"}
+        finally:
+            journal.close()
+
     db = _connect()
     try:
         uid = _current_user(request, db)
