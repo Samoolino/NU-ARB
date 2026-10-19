@@ -226,3 +226,48 @@ def test_postgres_worker_lease_is_exclusive_and_fences_stale_workers(database_ur
     assert store.release_engine_worker_lease(
         session_id=session_id, worker_id=second_worker, fencing_token=2,
     ) is True
+
+
+def test_postgres_engine_state_route_uses_real_database_and_owner_scope(database_url, monkeypatch):
+    """Exercise the API route against disposable PostgreSQL, not an SQLite test double."""
+    from fastapi.testclient import TestClient
+    from arbx import web_api
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import PostgresBackend
+
+    suffix = uuid.uuid4().hex
+    owner_id = f"route-owner-{suffix}"
+    foreign_id = f"route-foreign-{suffix}"
+    token = f"route-token-{suffix}"
+    store = ControlPlaneStore(PostgresBackend(database_url))
+    for user_id in (owner_id, foreign_id):
+        store.create_user(user_id=user_id, email=f"{user_id}@example.invalid", salt=b"salt",
+                          password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00")
+    store.create_session(token_hash=web_api._session_token_hash(token), user_id=owner_id,
+                         expires_at=2_000_000_000)
+    store.register_engine_session(session_id=f"owned-session-{suffix}", owner_user_id=owner_id,
+                                  mode="simulation", phase="RUNNING",
+                                  created_at="2026-10-18T00:00:00+00:00",
+                                  updated_at="2026-10-18T00:00:00+00:00")
+    store.register_engine_session(session_id=f"foreign-session-{suffix}", owner_user_id=foreign_id,
+                                  mode="paper", phase="RUNNING",
+                                  created_at="2026-10-19T00:00:00+00:00",
+                                  updated_at="2026-10-19T00:00:00+00:00")
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", database_url)
+    monkeypatch.setattr(web_api, "POSTGRES_CONTROL_API_PARITY_COMPLETE", True)
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, token)
+            response = client.get("/api/v1/engine/state")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["sessionId"] == f"owned-session-{suffix}"
+        assert body["mode"] == "simulation"
+        assert body["status"] == "RUNNING"
+        assert body["executionEnabled"] is False
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
