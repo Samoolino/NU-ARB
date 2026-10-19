@@ -253,6 +253,35 @@ def _decrypt(blob: bytes) -> bytes:
     return AESGCM(key).decrypt(blob[:12], blob[12:], b"arbx-exchange-credentials-v1")
 
 
+def _load_user_credentials(store, user_id: str, exchange_ids: list[str]) -> dict[str, dict[str, str]]:
+    """Decrypt only the requested user's persisted credentials from the selected store.
+
+    The caller must supply the already-authenticated user ID. This helper accepts
+    a ControlPlaneStore rather than opening a database itself, so PostgreSQL
+    selection can never fall back to the legacy SQLite credential table.
+    """
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise HTTPException(401, "Authentication required")
+    if len(exchange_ids) != len(set(exchange_ids)):
+        raise HTTPException(422, "Duplicate exchange IDs are not allowed")
+    credentials_by_id: dict[str, dict[str, str]] = {}
+    for exchange_id in exchange_ids:
+        row = store.get_credentials(user_id, exchange_id)
+        if row is None:
+            raise HTTPException(409, f"Missing saved credentials for {exchange_id}")
+        try:
+            decoded = json.loads(_decrypt(row["encrypted_credentials"]).decode())
+            if not isinstance(decoded, dict) or not decoded or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in decoded.items()
+            ):
+                raise ValueError("invalid credential payload")
+            credentials_by_id[exchange_id] = decoded
+        except Exception as exc:
+            raise HTTPException(503, "Could not unlock saved exchange credentials") from exc
+    return credentials_by_id
+
+
 class Signup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
