@@ -67,11 +67,21 @@ async def get_reference_prices(symbols: list[str]) -> dict:
             if not isinstance(cached, dict) or not cached:
                 return {"status": "unavailable", "provider": "CoinGecko", "prices": {}, "ageSeconds": None}
     prices = {}
+    ages = []
+    now_wall = time.time()
     for pair in requested_pairs:
         entry = cached.get(pair.split("/", 1)[0])
-        if isinstance(entry, dict):
-            prices[pair] = entry["priceUsd"]
-    ages = [cached[symbol]["ageSeconds"] for symbol in wanted
-            if isinstance(cached.get(symbol), dict)]
+        if not isinstance(entry, dict):
+            continue
+        try:
+            updated_at = float(entry["updatedAt"])
+            price = float(entry["priceUsd"])
+            age = now_wall - updated_at
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(price) or price <= 0 or not math.isfinite(age) or age < -30 or age > _MAX_REFERENCE_AGE_SECONDS:
+            continue
+        prices[pair] = price
+        ages.append(max(0.0, age))
     return {"status": "available" if prices else "unavailable", "provider": "CoinGecko", "prices": prices,
             "ageSeconds": round(max(ages), 1) if ages else None}
