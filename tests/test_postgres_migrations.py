@@ -53,3 +53,56 @@ def test_migration_inventory_rejects_duplicate_versions(tmp_path: Path):
     (tmp_path / "001_second.sql").write_text("SELECT 2;", encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate"):
         _migration_files(tmp_path)
+
+
+
+def test_postgres_migrations_cover_runtime_control_store_and_journal_columns():
+    """Catch schema drift before any PostgreSQL runtime cutover is attempted."""
+    files = {path.name: path.read_text(encoding="utf-8") for path in _migration_files()}
+    control = files["003_control_api_schema.sql"]
+    registry = files["004_engine_session_registry.sql"]
+    journal = files["001_initial_schema.sql"]
+
+    for column in (
+        "id TEXT PRIMARY KEY",
+        "email TEXT NOT NULL UNIQUE",
+        "salt BYTEA NOT NULL",
+        "password_hash BYTEA NOT NULL",
+        "created_at TEXT NOT NULL",
+    ):
+        assert column in control
+
+    for column in (
+        "token_hash TEXT PRIMARY KEY",
+        "user_id TEXT NOT NULL REFERENCES control_api_users(id) ON DELETE CASCADE",
+        "expires_at BIGINT NOT NULL",
+    ):
+        assert column in control
+
+    for column in (
+        "session_id TEXT PRIMARY KEY",
+        "owner_user_id TEXT NOT NULL REFERENCES control_api_users(id) ON DELETE CASCADE",
+        "mode TEXT NOT NULL CHECK (mode IN ('paper', 'simulation'))",
+        "phase TEXT NOT NULL",
+        "stopped_at TEXT",
+        "error_code TEXT",
+        "metadata_json TEXT NOT NULL DEFAULT '{}'",
+    ):
+        assert column in registry
+
+    # BackendTradeJournal writes/reads these fields. The migration must keep
+    # the names and JSONB-compatible columns required by the runtime contract.
+    for column in (
+        "session_id TEXT NOT NULL",
+        "timestamp TIMESTAMPTZ NOT NULL DEFAULT now()",
+        "mode TEXT NOT NULL",
+        "exchange_a TEXT NOT NULL",
+        "strategy TEXT NOT NULL",
+        "path JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "symbols JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "net_pnl DOUBLE PRECISION NOT NULL DEFAULT 0",
+        "execution_status TEXT NOT NULL",
+        "verification_status TEXT NOT NULL",
+        "cumulative_realized_pnl DOUBLE PRECISION NOT NULL DEFAULT 0",
+    ):
+        assert column in journal
