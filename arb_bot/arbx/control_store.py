@@ -116,6 +116,18 @@ class ControlPlaneStore:
                    ORDER BY created_at DESC, session_id ASC LIMIT ?"""
             ), (owner_user_id, limit))
 
+    def get_latest_engine_session(self, owner_user_id: str) -> dict[str, Any] | None:
+        """Return the most recently updated session belonging to this owner."""
+        if not owner_user_id:
+            raise ValueError("owner is required")
+        with self.backend.transaction() as session:
+            return session.fetch_one(self._sql(
+                """SELECT session_id, owner_user_id, mode, phase, created_at, updated_at,
+                          stopped_at, error_code, metadata_json
+                   FROM control_api_engine_sessions WHERE owner_user_id=?
+                   ORDER BY updated_at DESC, created_at DESC, session_id ASC LIMIT 1"""
+            ), (owner_user_id,))
+
     def update_engine_session(self, *, session_id: str, owner_user_id: str,
                               phase: str, updated_at: str, stopped_at: str | None = None,
                               error_code: str | None = None,
