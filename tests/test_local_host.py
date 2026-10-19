@@ -42,6 +42,9 @@ class LocalHostTests(unittest.TestCase):
         self.assertIn(b'value="BTC/USDC"', response.content)
         self.assertIn(b'id="minNetBps"', response.content)
         self.assertIn(b'id="referenceSignals"', response.content)
+        self.assertIn(b'id=\"agentConsole\"', response.content)
+        self.assertIn(b'id=\"agentMessage\"', response.content)
+        self.assertIn(b'parseAgentRequest', response.content)
         self.assertIn(b'CoinGecko USD reference differs', response.content)
         self.assertIn(b'fetch("/api/scan?"', response.content)
 
