@@ -545,3 +545,60 @@ def test_runtime_never_advertises_live_execution_as_enabled(monkeypatch):
         assert health.json()["execution_enabled"] is False
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_postgres_engine_journal_reads_only_sessions_owned_by_authenticated_user(tmp_path, monkeypatch):
+    """Journal reads must resolve the cookie owner to only their session IDs."""
+    from fastapi.testclient import TestClient
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("ARBX_DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "journal-owner-scope.sqlite3"))
+    store.initialize()
+    for user_id, email in (("journal-owner-a", "journal-a@example.test"),
+                           ("journal-owner-b", "journal-b@example.test")):
+        store.create_user(user_id=user_id, email=email, salt=b"0123456789abcdef",
+                          password_hash=b"hash", created_at="2026-10-19T00:00:00+00:00")
+    store.create_session(token_hash=web_api._session_token_hash("journal-owner-a-token"),
+                         user_id="journal-owner-a", expires_at=2_000_000_000)
+    store.register_engine_session(session_id="owned-session-a", owner_user_id="journal-owner-a",
+                                  mode="paper", phase="STOPPED", created_at="2026-10-18T00:00:00Z",
+                                  updated_at="2026-10-18T00:00:00Z")
+    store.register_engine_session(session_id="foreign-session-b", owner_user_id="journal-owner-b",
+                                  mode="simulation", phase="STOPPED", created_at="2026-10-18T00:00:00Z",
+                                  updated_at="2026-10-18T00:00:00Z")
+
+    class FakeJournal:
+        requested_sessions = []
+        def __init__(self, backend):
+            assert backend.dialect == "sqlite"
+        def recent_trades(self, session_id, limit=100):
+            self.requested_sessions.append(session_id)
+            return [{"id": 1, "session_id": session_id, "timestamp": "2026-10-18T00:00:00Z", "net_pnl": 3.5}]
+        def realized(self, session_id):
+            return 3.5 if session_id == "owned-session-a" else 999.0
+        def close(self):
+            return None
+
+    import arbx.journal_storage
+    import arbx.storage
+    monkeypatch.setattr(arbx.journal_storage, "BackendTradeJournal", FakeJournal)
+    monkeypatch.setattr(arbx.storage, "backend_from_environment",
+                        lambda: SQLiteBackend(tmp_path / "journal-data.sqlite3"))
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, "journal-owner-a-token")
+            response = client.get("/api/v1/engine/journal")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert [trade["session_id"] for trade in body["trades"]] == ["owned-session-a"]
+        assert body["realizedNetPnl"] == 3.5
+        assert body["scope"] == "owned durable engine sessions"
+        assert FakeJournal.requested_sessions == ["owned-session-a"]
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
