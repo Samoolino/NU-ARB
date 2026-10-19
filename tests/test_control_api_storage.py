@@ -135,3 +135,103 @@ def test_duplicate_case_insensitive_signup_returns_conflict_with_injected_store(
     finally:
         web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+
+def test_injected_store_auth_login_me_and_logout_round_trip(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    monkeypatch.setenv("APP_SECURE_COOKIE", "0")
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "auth-roundtrip.sqlite3"))
+    store.initialize()
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            signup = client.post(
+                "/api/v1/auth/signup",
+                json={
+                    "email": "roundtrip@example.test",
+                    "password": "a-long-test-password",
+                    "password_confirmation": "a-long-test-password",
+                },
+            )
+            assert signup.status_code == 200, signup.text
+            raw_token = client.cookies.get(web_api.SESSION_COOKIE)
+            assert raw_token
+            token_hash = web_api._session_token_hash(raw_token)
+            assert store.get_session(token_hash) is not None
+            assert store.get_session(raw_token) is None
+
+            me = client.get("/api/v1/auth/me")
+            assert me.status_code == 200, me.text
+            assert me.json()["user"]["email"] == "roundtrip@example.test"
+
+            logout = client.post("/api/v1/auth/logout")
+            assert logout.status_code == 200, logout.text
+            assert store.get_session(token_hash) is None
+
+            unauthorized = client.get("/api/v1/auth/me")
+            assert unauthorized.status_code == 401
+
+            bad_login = client.post(
+                "/api/v1/auth/login",
+                json={"email": "roundtrip@example.test", "password": "wrong-password"},
+            )
+            assert bad_login.status_code == 401
+            good_login = client.post(
+                "/api/v1/auth/login",
+                json={"email": "ROUNDTRIP@example.test", "password": "a-long-test-password"},
+            )
+            assert good_login.status_code == 200, good_login.text
+            assert client.get("/api/v1/auth/me").status_code == 200
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_expired_injected_store_session_is_rejected(tmp_path, monkeypatch):
+    import hashlib
+    import secrets
+    import time
+    from fastapi.testclient import TestClient
+    from arbx.control_store import ControlPlaneStore
+    from arbx.storage import SQLiteBackend
+
+    monkeypatch.setenv("ARBX_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "ARBX_DATABASE_URL",
+        "postgresql://nu_arb_test:nu_arb_test_only@localhost:5432/nu_arb_test",
+    )
+    monkeypatch.setenv("APP_SECURE_COOKIE", "0")
+    store = ControlPlaneStore(SQLiteBackend(tmp_path / "expired-session.sqlite3"))
+    store.initialize()
+    user_id = "expired-session-user"
+    store.create_user(
+        user_id=user_id,
+        email="expired@example.test",
+        salt=b"0123456789abcdef",
+        password_hash=b"not-used-in-this-test",
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    store.create_session(token_hash=token_hash, user_id=user_id, expires_at=int(time.time()) - 1)
+    web_api.app.dependency_overrides[web_api.get_control_plane_store] = lambda: store
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            client.cookies.set(web_api.SESSION_COOKIE, raw_token)
+            response = client.get("/api/v1/auth/me")
+        assert response.status_code == 401
+        assert store.get_session(token_hash) is None
+    finally:
+        web_api.app.dependency_overrides.pop(web_api.get_control_plane_store, None)
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
