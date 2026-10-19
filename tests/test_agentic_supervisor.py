@@ -157,14 +157,14 @@ def test_mapping_parser_exception_fails_closed():
 
 def test_unicode_control_characters_are_removed():
     reports = baseline()
-    reports[0] = {**reports[0], "summary": "safe\\u009bunsafe\\u202e"}
+    reports[0] = {**reports[0], "summary": "safe\u009bunsafe\u202e"}
     result = aggregate_reports(
         reports, expected_observation_id="obs-1", now_ms=10000
     )
     assert result.status == "ADVISORY_ONLY"
     summary = next(r.summary for r in result.reports if r.role == "connectivity")
-    assert "\\u009b" not in summary
-    assert "\\u202e" not in summary
+    assert "\u009b" not in summary
+    assert "\u202e" not in summary
 
 
 def test_oversized_observation_identifiers_fail_closed():
