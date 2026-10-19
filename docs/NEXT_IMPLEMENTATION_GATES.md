@@ -3,9 +3,9 @@
 
 ## 1A. Durable engine-session registry foundation (staged)
 
-Migrations `004_engine_session_registry.sql` and `005_engine_session_phase_constraints.sql` and `ControlPlaneStore` define a backend-neutral registry for paper/simulation sessions. Migration 005 constrains persisted lifecycle phases to the application's recognized state vocabulary. It stores the owning user, lifecycle phase/timestamps, sanitized error code, and metadata, and supports owner-scoped listing and owner-checked updates. The schema intentionally rejects `mode='live'`.
+Migrations `004_engine_session_registry.sql`, `005_engine_session_phase_constraints.sql`, and `006_engine_worker_leases.sql` and `ControlPlaneStore` define a backend-neutral registry for paper/simulation sessions plus an exclusive, expiring worker lease with a monotonically increasing fencing token on worker takeover. Migration 005 constrains persisted lifecycle phases to the application's recognized state vocabulary. The registry stores the owning user, lifecycle phase/timestamps, sanitized error code, and metadata, and supports owner-scoped listing and owner-checked updates. The schema intentionally rejects `mode='live'`.
 
-This is a persistence contract, **not yet runtime wiring**. Engine lifecycle routes still rely on process-global runtime state and have not been switched to this registry. Do not mark engine restart recovery, multi-worker operation, or authorized journal access complete until routes use the registry and an integration test proves that a second process can recover session ownership/state without reading another user's records.
+This is a persistence contract, **not yet runtime wiring**. Worker-lease APIs are tested at the store layer, but engine lifecycle routes still rely on process-global runtime state and do not claim, heartbeat, release, or recover through these leases. Do not mark engine restart recovery, multi-worker operation, or authorized journal access complete until routes use the registry and an integration test proves that a second process can recover session ownership/state without reading another user's records.
 
 ## 1. Persistence cutover boundary
 
