@@ -119,7 +119,11 @@ def aggregate_reports(
         if not isinstance(raw, Mapping):
             reasons.append("malformed_agent_report")
             continue
-        report = _parse_report(raw)
+        try:
+            report = _parse_report(raw)
+        except Exception:
+            # Treat hostile/custom Mapping implementations as malformed input.
+            report = None
         if report is None:
             reasons.append("malformed_agent_report")
             continue
