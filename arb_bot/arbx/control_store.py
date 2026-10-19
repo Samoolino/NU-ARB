@@ -10,6 +10,23 @@ from typing import Any
 from arbx.storage import StorageBackend
 
 
+ENGINE_SESSION_PHASES = frozenset({
+    "CREATED", "STARTING", "PREFLIGHTING", "RUNNING", "STOPPING",
+    "STOPPED", "FAILED", "PREFLIGHT_FAILED",
+})
+ENGINE_SESSION_TERMINAL_PHASES = frozenset({"STOPPED", "FAILED", "PREFLIGHT_FAILED"})
+ENGINE_SESSION_TRANSITIONS = {
+    "CREATED": frozenset({"STARTING", "STOPPING", "STOPPED", "FAILED"}),
+    "STARTING": frozenset({"PREFLIGHTING", "RUNNING", "STOPPING", "STOPPED", "FAILED"}),
+    "PREFLIGHTING": frozenset({"RUNNING", "STOPPING", "STOPPED", "PREFLIGHT_FAILED", "FAILED"}),
+    "RUNNING": frozenset({"STOPPING", "STOPPED", "FAILED"}),
+    "STOPPING": frozenset({"STOPPED", "FAILED"}),
+    "STOPPED": frozenset(),
+    "FAILED": frozenset(),
+    "PREFLIGHT_FAILED": frozenset(),
+}
+
+
 class ControlPlaneStore:
     def __init__(self, backend: StorageBackend):
         self.backend = backend
@@ -57,8 +74,10 @@ class ControlPlaneStore:
                                 mode: str, phase: str, created_at: str,
                                 updated_at: str, metadata_json: str = "{}") -> dict[str, Any]:
         """Persist session ownership and initial lifecycle state atomically."""
-        if not session_id.strip() or mode not in {"paper", "simulation"}:
+        if not isinstance(session_id, str) or not session_id.strip() or mode not in {"paper", "simulation"}:
             raise ValueError("engine session requires an ID and a non-live mode")
+        if phase not in ENGINE_SESSION_PHASES:
+            raise ValueError(f"invalid engine session phase: {phase}")
         with self.backend.transaction() as session:
             session.execute(self._sql(
                 """INSERT INTO control_api_engine_sessions
@@ -96,11 +115,29 @@ class ControlPlaneStore:
                               phase: str, updated_at: str, stopped_at: str | None = None,
                               error_code: str | None = None,
                               metadata_json: str | None = None) -> bool:
-        """Update only a session owned by the caller; return false for missing/foreign IDs."""
+        """Update an owned session only along the defined lifecycle state machine.
+
+        Missing or foreign session IDs return false. Invalid phases and illegal
+        transitions raise ValueError. A PostgreSQL row lock serializes competing
+        lifecycle updates.
+        """
+        if phase not in ENGINE_SESSION_PHASES:
+            raise ValueError(f"invalid engine session phase: {phase}")
         with self.backend.transaction() as session:
+            lock = " FOR UPDATE" if self.backend.dialect == "postgres" else ""
+            current = session.fetch_one(self._sql(
+                "SELECT phase FROM control_api_engine_sessions WHERE session_id=? AND owner_user_id=?" + lock
+            ), (session_id, owner_user_id))
+            if current is None:
+                return False
+            current_phase = current["phase"]
+            if phase != current_phase and phase not in ENGINE_SESSION_TRANSITIONS.get(current_phase, frozenset()):
+                raise ValueError(f"invalid engine session transition: {current_phase} -> {phase}")
+            if phase in ENGINE_SESSION_TERMINAL_PHASES and stopped_at is None:
+                stopped_at = updated_at
             cursor = session.execute(self._sql(
                 """UPDATE control_api_engine_sessions
-                   SET phase=?, updated_at=?, stopped_at=?, error_code=?,
+                   SET phase=?, updated_at=?, stopped_at=COALESCE(?, stopped_at), error_code=?,
                        metadata_json=COALESCE(?, metadata_json)
                    WHERE session_id=? AND owner_user_id=?"""
             ), (phase, updated_at, stopped_at, error_code, metadata_json, session_id, owner_user_id))
