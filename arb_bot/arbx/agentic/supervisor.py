@@ -6,6 +6,7 @@ It accepts already-produced reports and returns advisory diagnostics only.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import islice
 from typing import Any, Iterable, Mapping
 
 
@@ -18,6 +19,7 @@ _ALLOWED_ROLES = {
 }
 _ALLOWED_FINDINGS = {"INFO", "WARN", "REJECT", "UNKNOWN"}
 _MAX_SUMMARY_CHARS = 500
+_MAX_REPORTS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +62,12 @@ def _parse_report(value: Mapping[str, Any]) -> AgentReport | None:
         return None
     if not isinstance(summary, str) or len(summary) > _MAX_SUMMARY_CHARS:
         return None
-    return AgentReport(role, finding, observation_id, observed_at_ms, summary)
+    # Keep diagnostics to one line and remove terminal/control characters.
+    safe_summary = "".join(
+        char for char in summary
+        if char in "\t " or (char >= " " and char != "\x7f")
+    ).replace("\t", " ").strip()
+    return AgentReport(role, finding, observation_id, observed_at_ms, safe_summary)
 
 
 def aggregate_reports(
@@ -79,7 +86,7 @@ def aggregate_reports(
     """
     if (
         not isinstance(expected_observation_id, str)
-        or not expected_observation_id
+        or not expected_observation_id.strip()
         or isinstance(now_ms, bool)
         or not isinstance(now_ms, int)
         or now_ms < 0
@@ -91,6 +98,7 @@ def aggregate_reports(
             not isinstance(role, str) or role not in _ALLOWED_ROLES
             for role in required_roles
         )
+        or len(set(required_roles)) != len(required_roles)
     ):
         return SupervisorAssessment("REJECTED", ("invalid_supervisor_configuration",), ())
 
@@ -98,9 +106,14 @@ def aggregate_reports(
     reasons: list[str] = []
     seen_roles: set[str] = set()
     try:
-        incoming = list(reports)
+        # Bound iteration before materialization: generators may be infinite or
+        # adversarially large, and must not be allowed to exhaust memory.
+        incoming = list(islice(iter(reports), _MAX_REPORTS + 1))
     except Exception:
         return SupervisorAssessment("REJECTED", ("invalid_report_collection",), ())
+
+    if len(incoming) > _MAX_REPORTS:
+        return SupervisorAssessment("REJECTED", ("too_many_agent_reports",), ())
 
     for raw in incoming:
         if not isinstance(raw, Mapping):
