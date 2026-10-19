@@ -70,3 +70,17 @@ Any missing, malformed, or stale input must reject the simulated opportunity. Pa
 - [ ] Obtain human release approval only after CI, persistence parity, recovery, and security evidence are attached to the release.
 
 Until these gates pass, status is **not approved for production PostgreSQL cutover or live execution**.
+
+
+## 1B. Atomic worker-fenced journal append (partial implementation)
+
+ `BackendTradeJournal.append_fenced` checks the durable session owner, mode, active lifecycle phase, worker ID, lease expiry, and fencing token in the same database transaction as the journal insert. The contract test covers lease takeover and rejects a stale worker without adding a row; the PostgreSQL integration test exercises the same invariant against a disposable database.
+
+Important limits:
+- The new method is an opt-in safe write path; it does not automatically rewrite all existing journal callers.
+- Existing `append` remains for compatibility and must not be used for worker-originated writes once a supervised worker is integrated.
+- Opportunity and venue-certification writes also need fenced variants before the worker may use them.
+- No worker loop or PostgreSQL start/stop route is enabled by this change.
+- The new PostgreSQL integration test and full suite must pass in CI before this change is considered verified.
+
+Do not treat this as proof that all consequential side effects are fenced. The release gate remains closed.
