@@ -550,7 +550,7 @@ def login(payload: Login, response: Response, store=Depends(get_control_plane_st
         db = _connect()
         try:
             row = db.execute("SELECT id,email,salt,password_hash FROM users WHERE lower(email)=lower(?)",
-                             (payload.email,)).fetchone()
+                             (payload.email.strip(),)).fetchone()
             supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), row["salt"], 310_000) if row else b""
             if not row or not hmac.compare_digest(supplied, row["password_hash"]):
                 raise HTTPException(401, "Email or password is incorrect")
