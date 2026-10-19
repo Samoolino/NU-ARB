@@ -470,14 +470,9 @@ def healthz():
         key_ok = False
     if not token_ok or not key_ok:
         raise HTTPException(503, "Control service configuration is incomplete")
-    db = _connect()
-    try:
-        # Health checks must be read-only: orchestrators may call this endpoint
-        # frequently, and probes must not create tables or write rows.
-        db.execute("SELECT 1").fetchone()
-    finally:
-        db.close()
-    return {"status": "ready"}
+    # Keep the orchestrator probe aligned with the selected storage backend.
+    # readiness_probe is read-only and deliberately does not fall back to SQLite.
+    return readiness_probe()
 
 
 @app.get("/api/v1/runtime", dependencies=[Depends(_proxy_auth)])
