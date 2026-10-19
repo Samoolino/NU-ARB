@@ -67,6 +67,24 @@ class DurableEngineRuntime:
             now_epoch=now_epoch, lease_seconds=self.lease_seconds,
         )
 
+    def load_checkpoint(self, *, owner_user_id: str, session_id: str) -> dict[str, Any] | None:
+        """Load only the requested owner's checkpoint; store verifies its checksum."""
+        return self.store.get_engine_checkpoint(session_id=session_id, owner_user_id=owner_user_id)
+
+    def persist_checkpoint(
+        self, *, owner_user_id: str, session_id: str, lease: dict[str, Any],
+        checkpoint: dict[str, Any], expected_version: int,
+        updated_at: str, now_epoch: int,
+    ) -> dict[str, Any] | None:
+        """Write a checkpoint through the storage transaction that enforces the current fence."""
+        if lease.get("session_id") != session_id or lease.get("worker_id") != self.worker_id:
+            return None
+        return self.store.save_engine_checkpoint_fenced(
+            session_id=session_id, owner_user_id=owner_user_id, worker_id=self.worker_id,
+            fencing_token=lease.get("fencing_token"), now_epoch=now_epoch, updated_at=updated_at,
+            checkpoint=checkpoint, expected_version=expected_version,
+        )
+
     def transition(
         self, *, owner_user_id: str, session_id: str, lease: dict[str, Any],
         phase: str, updated_at: str, now_epoch: int,
