@@ -529,3 +529,19 @@ def test_live_engine_start_is_disabled_even_when_environment_flag_is_set(monkeyp
         assert "disabled in this build" in response.json()["detail"]
     finally:
         web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
+
+
+def test_runtime_never_advertises_live_execution_as_enabled(monkeypatch):
+    monkeypatch.setenv("ARBX_LIVE_TRADING_ENABLED", "1")
+    web_api.app.dependency_overrides[web_api._proxy_auth] = lambda: None
+    try:
+        with TestClient(web_api.app) as client:
+            runtime = client.get("/api/v1/runtime")
+            health = client.get("/health")
+        assert runtime.status_code == 200, runtime.text
+        assert runtime.json()["liveTradingEnabled"] is False
+        assert runtime.json()["executionEnabled"] is False
+        assert health.status_code == 200, health.text
+        assert health.json()["execution_enabled"] is False
+    finally:
+        web_api.app.dependency_overrides.pop(web_api._proxy_auth, None)
