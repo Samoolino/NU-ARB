@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from abc import ABC, abstractmethod
+from dataclasses import asdict
 from typing import Any
 
 from .contracts import (
@@ -298,10 +299,16 @@ class CCXTAdapter(CCXTProAdapter):
 
     async def get_capabilities(self):
         base = await super().get_capabilities()
-        return VenueCapabilities(**{**base.__dict__ if hasattr(base, "__dict__") else {f.name: getattr(base, f.name) for f in base.__dataclass_fields__.values()},
-                                    "websocket": False, "native_websocket": False,
-                                    "user_stream": False, "balance_stream": False,
-                                    "ccxt": True, "ccxt_pro": False})
+        capabilities = asdict(base)
+        capabilities.update({
+            "websocket": False,
+            "native_websocket": False,
+            "user_stream": False,
+            "balance_stream": False,
+            "ccxt": True,
+            "ccxt_pro": False,
+        })
+        return VenueCapabilities(**capabilities)
 
 
 class NativeSDKAdapter(BaseAdapter):
