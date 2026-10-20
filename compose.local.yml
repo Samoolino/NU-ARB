@@ -1,0 +1,30 @@
+services:
+  control:
+    build:
+      context: .
+      dockerfile: Dockerfile.control
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      ARBX_APP_DB: /data/arbx_app.sqlite3
+      APP_SECURE_COOKIE: "0"
+      ARBX_LIVE_TRADING_ENABLED: "0"
+      ENGINE_PROXY_TOKEN: ${ENGINE_PROXY_TOKEN:?Set ENGINE_PROXY_TOKEN in your local .env}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?Set CREDENTIAL_ENCRYPTION_KEY in your local .env}
+      PORT: "8000"
+    volumes:
+      - arbx-local-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  arbx-local-data:
