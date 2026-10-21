@@ -234,7 +234,7 @@ class Hub:
                     balance_age = (now_mono-balance_last)*1000 if balance_last is not None else float("inf")
                     stats = getattr(getattr(vw, "lat", None), "stats", None)
                     p95 = stats().get("p95", float("inf")) if callable(stats) else 0.0
-                    age = max(0.0,(now_mono-vb.recv)*1000) if hasattr(vb, "recv") else opportunity.age_ms
+                    age = max(0.0,(now_mono-vb.recv)*1000) if hasattr(vb, "recv") else getattr(opportunity, "age_ms", 0.0)
                     if not math.isfinite(bal):
                         bal = 1e30 if not is_live else 0.0
                     private_last = getattr(vw, "private_last_message", None)
