@@ -30,3 +30,15 @@ jobs:
         env:
           PYTHONPATH: arb_bot
         run: python -m pytest -q tests
+
+  scanner-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run scanner tests
+        run: node --test tests/scanner.test.js
