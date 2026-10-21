@@ -18,13 +18,43 @@ class OrderLedger:
         rows=self.db.execute("SELECT execution_id,state,symbol FROM executions WHERE state IN ('SUBMITTING','UNKNOWN','PARTIALLY_FILLED','RECONCILIATION_REQUIRED') ORDER BY created_at").fetchall()
         return [dict(r) for r in rows]
 
-    def begin(self,symbol,legs):
-        if self.unresolved(): raise RuntimeError("unresolved prior execution exists; reconcile before new orders")
-        eid=uuid.uuid4().hex; now=time.time()
-        with self.db:
-            self.db.execute("INSERT INTO executions(execution_id,state,symbol,created_at,updated_at) VALUES(?,?,?,?,?)",(eid,"SUBMITTING",symbol,now,now))
-            for leg in legs: self.add_leg(eid,leg)
-        return eid
+    def begin(self, symbol, legs):
+        """Atomically reserve the journal for one execution across processes."""
+        eid = uuid.uuid4().hex
+        now = time.time()
+        try:
+            # Acquire the SQLite write reservation before checking unresolved work.
+            # A deferred read-then-write transaction permits two processes to both
+            # observe an empty journal and submit overlapping routes.
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self.db.execute(
+                "SELECT execution_id FROM executions "
+                "WHERE state IN ('SUBMITTING','UNKNOWN','PARTIALLY_FILLED','RECONCILIATION_REQUIRED') "
+                "LIMIT 1"
+            ).fetchone()
+            if row:
+                raise RuntimeError(
+                    "unresolved prior execution exists; reconcile before new orders"
+                )
+            self.db.execute(
+                "INSERT INTO executions(execution_id,state,symbol,created_at,updated_at) "
+                "VALUES(?,?,?,?,?)",
+                (eid, "SUBMITTING", symbol, now, now),
+            )
+            for leg in legs:
+                self.db.execute(
+                    "INSERT INTO order_legs(execution_id,leg_key,venue,client_order_id,side,requested,status) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (
+                        eid, leg["key"], leg["venue"], leg["client_order_id"],
+                        leg["side"], float(leg["requested"]), "SUBMITTING",
+                    ),
+                )
+            self.db.commit()
+            return eid
+        except Exception:
+            self.db.rollback()
+            raise
 
     def add_leg(self,eid,leg):
         with self.db:
