@@ -45,4 +45,64 @@ class OrderLedger:
         with self.db:
             self.db.execute("UPDATE executions SET state=?,updated_at=?,detail=? WHERE execution_id=?",(state,time.time(),json.dumps(detail or {}),eid))
 
+
+    def get_execution(self, eid):
+        """Return one execution and its legs for operator reconciliation."""
+        row = self.db.execute(
+            "SELECT execution_id,state,symbol,created_at,updated_at,detail FROM executions WHERE execution_id=?",
+            (eid,),
+        ).fetchone()
+        if row is None:
+            return None
+        execution = dict(row)
+        execution["detail"] = json.loads(execution["detail"] or "{}")
+        legs = self.db.execute(
+            "SELECT leg_key,venue,client_order_id,order_id,side,requested,filled,status,detail "
+            "FROM order_legs WHERE execution_id=? ORDER BY rowid",
+            (eid,),
+        ).fetchall()
+        execution["legs"] = []
+        for leg in legs:
+            item = dict(leg)
+            item["detail"] = json.loads(item["detail"] or "{}")
+            execution["legs"].append(item)
+        return execution
+
+    def resolve_manual(self, eid, *, operator, evidence, confirm=False):
+        """Close a halted execution only after a human has reconciled venue state.
+
+        This records an auditable acknowledgement; it does not verify the evidence,
+        query an exchange, or make inventory safe. Callers must inspect balances,
+        order/trade history, and residual assets before invoking it.
+        """
+        operator = str(operator or "").strip()
+        evidence = str(evidence or "").strip()
+        if confirm is not True:
+            raise ValueError("explicit confirm=True is required")
+        if not operator or not evidence:
+            raise ValueError("operator and reconciliation evidence are required")
+        with self.db:
+            row = self.db.execute(
+                "SELECT state,detail FROM executions WHERE execution_id=?", (eid,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown execution: {eid}")
+            if row["state"] not in (
+                "SUBMITTING", "UNKNOWN", "PARTIALLY_FILLED", "RECONCILIATION_REQUIRED"
+            ):
+                raise ValueError(f"execution is not unresolved: {row['state']}")
+            detail = json.loads(row["detail"] or "{}")
+            detail["manual_resolution"] = {
+                "operator": operator,
+                "evidence": evidence,
+                "resolved_at": time.time(),
+                "previous_state": row["state"],
+                "acknowledgement_only": True,
+            }
+            self.db.execute(
+                "UPDATE executions SET state='RESOLVED_MANUALLY',updated_at=?,detail=? "
+                "WHERE execution_id=?",
+                (time.time(), json.dumps(detail), eid),
+            )
+
     def close(self): self.db.close()
