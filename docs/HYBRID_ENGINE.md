@@ -187,3 +187,15 @@ RPC health, gas price, simulation output, minimum output/slippage, and signer pe
 are independently verified. BTCB symbol/name alone is not an identity check. Do not set
 an adapter to live-eligible from a token ticker or a mocked simulation. Docker packaging
 isolates adapters and dependencies; it does not improve exchange latency by itself.
+
+
+## BTCB/BEP-20 verification adapter status
+
+The BNB Smart Chain BTCB route has a dedicated verification-only adapter in
+`arb_bot/arbx/hybrid/bsc_btcb.py`. It verifies chain ID, contract code presence,
+token decimals and symbol against a supplied manifest, and requires a separate
+transaction-simulation result. It does not sign or submit transactions. It remains
+ineligible for live trading while `PINNED_MANIFEST_SHA256` is unset. That pin must
+be established through independent review of canonical token/router/factory/pool
+addresses and liquidity sources; a self-declared environment value or ticker is not
+sufficient. The current repository has not established that independent evidence.
