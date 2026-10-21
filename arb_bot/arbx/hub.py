@@ -240,7 +240,8 @@ class Hub:
                     private_last = getattr(vw, "private_last_message", None)
                     private_fresh = (not is_live) or (getattr(vw, "private_stream_ready", False) and private_last is not None and (now_mono-private_last)*1000 <= 120_000)
                     certified = getattr(vw, "live_certified", False)
-                    snapshots.append(VenueSnapshot(vw.id,(not is_live) or certified,max(0.0,bal),age,p95,
+                    venue_id = getattr(vw, "id", "buy" if vw is bw else "sell")
+                    snapshots.append(VenueSnapshot(venue_id,(not is_live) or certified,max(0.0,bal),age,p95,
                         permission_ok=(not is_live) or certified,
                         stream_ok=(age<=self.cfg.max_book_age_ms and private_fresh and (not is_live or balance_age<=30_000))))
                 expected_net,worst_net=opportunity.expected_usd,opportunity.worst_usd
