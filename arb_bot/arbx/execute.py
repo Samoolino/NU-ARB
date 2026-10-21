@@ -151,7 +151,11 @@ class CrossExecutor:
         if fb>fs: ex,side,amount,levels=eb,"sell",fb-fs,"bids"
         else: ex,side,amount,levels=es,"buy",fs-fb,"asks"
         amount=float(ex.amount_to_precision(o.symbol,amount))
-        book=await ex.fetch_order_book(o.symbol,10)
+        try:
+            book=await ex.fetch_order_book(o.symbol,10)
+        except Exception as exc:
+            self.ledger.set_state(eid,"RECONCILIATION_REQUIRED",{"reason":"hedge_book_failed","error":repr(exc)})
+            raise LegFailure(f"{eid}: hedge book unavailable; reconciliation required") from exc
         depth=book.get(levels) or []
         if amount<=0 or not depth:
             self.ledger.set_state(eid,"RECONCILIATION_REQUIRED",{"reason":"no_hedge_depth"})

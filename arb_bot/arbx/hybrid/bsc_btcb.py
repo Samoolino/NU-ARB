@@ -64,10 +64,10 @@ class BSCBTCBAdapter:
         reasons = []
         evidence = {"adapter":"bsc_btcb_verification_only","transaction_submission":False}
         m = self.manifest
-        if not self.rpc_url:
-            return BTCBVerification(False, ("rpc_url_missing",), evidence)
         if m is None:
             return BTCBVerification(False, ("route_manifest_missing","trusted_manifest_not_pinned"), evidence)
+        if not self.rpc_url:
+            return BTCBVerification(False, ("rpc_url_missing",), evidence)
         addresses = {"btcb_token":m.btcb_token,"quote_token":m.quote_token,"router":m.router,"factory":m.factory,"pool":m.pool}
         invalid = [key for key,value in addresses.items() if not self._address_ok(value)]
         if invalid:

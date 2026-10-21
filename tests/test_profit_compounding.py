@@ -23,36 +23,36 @@ class ProfitCompoundingTests(unittest.TestCase):
             target_profit_usd=200,
         )
 
-    def test_live_normalizes_to_three_dollar_profit_dca(self):
+    def test_live_keeps_explicit_trade_cap_and_removes_loss_stop(self):
         cfg = self.live_cfg()
         cfg.validate()
         self.assertEqual(cfg.starter_capital_usd, 3.0)
-        self.assertEqual(cfg.trade_size_usd, 3.0)
+        self.assertEqual(cfg.trade_size_usd, 25.0)
         self.assertEqual(cfg.max_loss_usd, 0.0)
-        self.assertIsNone(cfg.target_profit_usd)
+        self.assertEqual(cfg.target_profit_usd, 200.0)
         self.assertEqual(cfg.strategy_mode, "profit_dca")
         self.assertTrue(cfg.compound_profits)
-        self.assertTrue(cfg.halt_on_realized_loss)
+        self.assertFalse(cfg.halt_on_realized_loss)
 
     def test_realized_profit_increases_next_trade_size(self):
         cfg = self.live_cfg()
         cfg.validate()
         risk = RiskManager(cfg)
         risk.record(0.12, True)
-        self.assertAlmostEqual(cfg.trade_size_usd, 3.12, places=8)
+        self.assertAlmostEqual(cfg.trade_size_usd, 25.0, places=8)
         risk.record(0.18, True)
-        self.assertAlmostEqual(cfg.trade_size_usd, 3.30, places=8)
+        self.assertAlmostEqual(cfg.trade_size_usd, 25.0, places=8)
 
-    def test_loss_stops_live_engine_and_does_not_compound(self):
+    def test_realized_loss_does_not_stop_or_mutate_balance_based_size(self):
         cfg = self.live_cfg()
         cfg.validate()
         risk = RiskManager(cfg)
         risk.record(0.50, True)
-        self.assertAlmostEqual(cfg.trade_size_usd, 3.50, places=8)
+        self.assertAlmostEqual(cfg.trade_size_usd, 25.0, places=8)
         risk.record(-0.01, True)
-        self.assertTrue(risk.halted)
-        self.assertIn("realized loss protection", risk.reason)
-        self.assertAlmostEqual(cfg.trade_size_usd, 3.49, places=8)
+        self.assertFalse(risk.halted)
+        self.assertAlmostEqual(risk.pnl, 0.49, places=8)
+        self.assertAlmostEqual(cfg.trade_size_usd, 25.0, places=8)
 
     def test_profit_gate_rejects_non_positive_live_floor(self):
         cfg = self.live_cfg()

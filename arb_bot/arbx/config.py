@@ -127,6 +127,7 @@ class Config:
             # Realized PnL is not a stop-loss trigger; the session profit target is retained.
             self.compound_profits = True
             self.halt_on_realized_loss = False
+            self.max_loss_usd = 0.0
         if not self.exchanges:
             raise ValueError("no exchanges configured (BOT_EXCHANGES)")
         venue_ids = [x.venue_id or x.id for x in self.exchanges]

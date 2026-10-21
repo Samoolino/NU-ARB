@@ -224,18 +224,25 @@ class Hub:
                 opportunity, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
                 free_quote, free_base,
             )
-            if decision.ok:
+            if decision.ok and self.cfg.mode == "live":
                 now_mono = time.monotonic()
                 snapshots = []
-                for vw, vb, bal in ((bw, bb, free_quote),
-                                    (sw, sb, free_base * (float(sb.bids[0][0]) if sb.bids else 0.0))):
-                    balance_age = (now_mono-vw.balance_last_refresh)*1000 if vw.balance_last_refresh is not None else float("inf")
-                    p95 = vw.lat.stats().get("p95",float("inf")) if vw.lat else float("inf")
-                    age = max(0.0,(now_mono-vb.recv)*1000)
-                    private_fresh = (not vw.live) or (vw.private_stream_ready and vw.private_last_message is not None and (now_mono-vw.private_last_message)*1000 <= 120_000)
-                    snapshots.append(VenueSnapshot(vw.id,(not vw.live) or vw.live_certified,max(0.0,bal),age,p95,
-                        permission_ok=(not vw.live) or vw.live_certified,
-                        stream_ok=(age<=self.cfg.max_book_age_ms and private_fresh and (not vw.live or balance_age<=30_000))))
+                for vw, vb, bal in ((bw, buy_book, free_quote),
+                                    (sw, sell_book, free_base * (float(sell_book.bids[0][0]) if sell_book.bids else 0.0))):
+                    is_live = getattr(vw, "live", self.cfg.mode == "live")
+                    balance_last = getattr(vw, "balance_last_refresh", None)
+                    balance_age = (now_mono-balance_last)*1000 if balance_last is not None else float("inf")
+                    stats = getattr(getattr(vw, "lat", None), "stats", None)
+                    p95 = stats().get("p95", float("inf")) if callable(stats) else 0.0
+                    age = max(0.0,(now_mono-vb.recv)*1000) if hasattr(vb, "recv") else opportunity.age_ms
+                    if not math.isfinite(bal):
+                        bal = 1e30 if not is_live else 0.0
+                    private_last = getattr(vw, "private_last_message", None)
+                    private_fresh = (not is_live) or (getattr(vw, "private_stream_ready", False) and private_last is not None and (now_mono-private_last)*1000 <= 120_000)
+                    certified = getattr(vw, "live_certified", False)
+                    snapshots.append(VenueSnapshot(vw.id,(not is_live) or certified,max(0.0,bal),age,p95,
+                        permission_ok=(not is_live) or certified,
+                        stream_ok=(age<=self.cfg.max_book_age_ms and private_fresh and (not is_live or balance_age<=30_000))))
                 expected_net,worst_net=opportunity.expected_usd,opportunity.worst_usd
                 policy=evaluate_opportunity(
                     Opportunity(expected_gross_usd=expected_net,expected_fees_usd=0.0,expected_slippage_usd=0.0,

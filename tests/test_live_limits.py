@@ -14,7 +14,7 @@ from arbx.web_api import EngineStart
 
 
 class LivePilotLimitTests(unittest.TestCase):
-    def test_live_config_enforces_three_dollar_starter_and_profit_dca(self):
+    def test_live_config_uses_balance_based_sizing_and_optional_profit_target(self):
         cfg = Config(
             mode="live",
             exchanges=[ExchangeCfg(id="binance", api_key="a", secret="b"),
@@ -27,9 +27,9 @@ class LivePilotLimitTests(unittest.TestCase):
         )
         cfg.validate()
         self.assertEqual(cfg.starter_capital_usd, 3.0)
-        self.assertEqual(cfg.trade_size_usd, 3.0)
+        self.assertEqual(cfg.trade_size_usd, 25.0)
         self.assertEqual(cfg.max_loss_usd, 0.0)
-        self.assertIsNone(cfg.target_profit_usd)
+        self.assertEqual(cfg.target_profit_usd, 200.0)
         self.assertEqual(cfg.strategy_mode, "profit_dca")
 
     def test_live_config_requires_explicit_cross_venue_opt_in(self):
@@ -49,7 +49,7 @@ class LivePilotLimitTests(unittest.TestCase):
             EngineStart(mode="live", exchange_ids=["binance", "bybit"], trade_size_usd=5,
                         max_loss_usd=3, target_profit_usd=200, cross_live=False)
 
-    def test_live_terminal_defaults_are_three_dollar_profit_dca(self):
+    def test_live_terminal_defaults_to_balance_sizing_and_no_fixed_loss_cap(self):
         with patch.dict(os.environ, {"BOT_MODE": "live", "BOT_TARGET_PROFIT_USD": "",
                                     "BOT_MAX_LOSS_USD": "", "BOT_STRATEGY_MODE": "profit_dca"}, clear=False):
             cfg = Config.from_env()
@@ -59,7 +59,7 @@ class LivePilotLimitTests(unittest.TestCase):
         cfg.cross_live = True
         cfg.validate()
         self.assertEqual(cfg.start_capital_usd, 3.0)
-        self.assertEqual(cfg.trade_size_usd, 3.0)
+        self.assertEqual(cfg.trade_size_usd, 0.0)
         self.assertEqual(cfg.max_loss_usd, 0.0)
         self.assertIsNone(cfg.target_profit_usd)
 
