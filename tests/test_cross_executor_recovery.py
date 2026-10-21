@@ -18,11 +18,12 @@ def opp():
 
 
 class FakeExchange:
-    def __init__(self, venue, *, fill=1.0, ambiguous=False, expose_after_timeout=True):
+    def __init__(self, venue, *, fill=1.0, ambiguous=False, expose_after_timeout=True, include_fees=True):
         self.id=venue
         self.fill=fill
         self.ambiguous=ambiguous
         self.expose_after_timeout=expose_after_timeout
+        self.include_fees=include_fees
         self.orders=[]
         self.calls=0
 
@@ -33,7 +34,9 @@ class FakeExchange:
         self.calls += 1
         order={"id":f"{self.id}-{self.calls}","clientOrderId":params.get("clientOrderId"),
                "symbol":symbol,"side":side,"filled":min(amount,self.fill),"status":"closed",
-               "cost":min(amount,self.fill)*price,"fees":[],"average":price}
+               "cost":min(amount,self.fill)*price,"average":price}
+        if self.include_fees:
+            order["fees"]=[]
         if self.expose_after_timeout or not self.ambiguous:
             self.orders.append(order)
         if self.ambiguous:
@@ -88,4 +91,24 @@ def test_unresolved_submit_persists_and_blocks_next_execution(tmp_path):
     with pytest.raises(LegFailure,match="unresolved durable order"):
         asyncio.run(executor.execute(opp()))
     assert (buy.calls,sell.calls)==calls
+    executor.ledger.close()
+
+
+def test_fee_paid_in_base_asset_is_valued_in_quote():
+    assert CrossExecutor._quote_fee({"fees":[{"currency":"BTC","cost":0.01}]},
+                                    "USDT","BTC",100.0) == 1.0
+
+
+def test_unpriced_third_token_fee_fails_closed():
+    with pytest.raises(LegFailure, match="cannot be valued"):
+        CrossExecutor._quote_fee({"fees":[{"currency":"BNB","cost":0.01}]},
+                                 "USDT","BTC",100.0)
+
+
+def test_missing_fee_evidence_blocks_claiming_profit(tmp_path):
+    buy,sell=FakeExchange("buy",include_fees=False),FakeExchange("sell",include_fees=False)
+    executor=run(tmp_path/"orders.sqlite3",buy,sell)
+    with pytest.raises(LegFailure,match="fee/PnL reconciliation required"):
+        asyncio.run(executor.execute(opp()))
+    assert executor.ledger.unresolved()
     executor.ledger.close()

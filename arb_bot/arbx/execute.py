@@ -142,10 +142,50 @@ class CrossExecutor:
     @staticmethod
     def _filled(order): return float(order.get("filled") or 0.0)
 
+    async def _ensure_fee_data(self, ex, symbol, order):
+        if "fees" in order or order.get("fee") is not None:
+            return
+        order_id = order.get("id")
+        method = getattr(ex, "fetch_my_trades", None)
+        if not order_id or not callable(method):
+            raise LegFailure("exchange did not return fees and cannot fetch user trades")
+        try:
+            trades = await method(symbol, None, None, {"orderId": str(order_id)})
+        except Exception as exc:
+            raise LegFailure("fee lookup failed; realized profitability cannot be verified") from exc
+        matched = []
+        for trade in trades or []:
+            info = trade.get("info") or {}
+            trade_order_id = trade.get("order") or info.get("orderId") or info.get("order_id")
+            if str(trade_order_id or "") != str(order_id):
+                continue
+            if trade.get("fees") is not None:
+                matched.extend(trade.get("fees") or [])
+            elif trade.get("fee") is not None:
+                matched.append(trade["fee"])
+            else:
+                raise LegFailure("trade exists but fee evidence is missing")
+        if not matched:
+            raise LegFailure("no matching user-trade fee evidence found")
+        order["fees"] = matched
+
     @staticmethod
-    def _quote_fee(order,quote):
-        fees=order.get("fees") or ([order.get("fee")] if order.get("fee") else [])
-        return sum(float(f.get("cost") or 0) for f in fees if f and f.get("currency")==quote)
+    def _quote_fee(order, quote, base, average_price):
+        if "fees" not in order and order.get("fee") is None:
+            raise LegFailure("fee data missing; refusing to claim realized profit")
+        fees = order.get("fees") if "fees" in order else [order.get("fee")]
+        total = 0.0
+        for fee in fees or []:
+            if not fee or fee.get("cost") is None or not fee.get("currency"):
+                raise LegFailure("incomplete fee record; realized profitability is unknown")
+            amount = float(fee["cost"])
+            if fee["currency"] == quote:
+                total += amount
+            elif fee["currency"] == base:
+                total += amount * average_price
+            else:
+                raise LegFailure(f"fee currency {fee['currency']} cannot be valued in {quote}")
+        return total
 
     async def _hedge(self,eid,o,eb,es,rb,rs,fb,fs):
         if fb>fs: ex,side,amount,levels=eb,"sell",fb-fs,"bids"
@@ -206,12 +246,24 @@ class CrossExecutor:
         hedge=await self._hedge(eid,o,eb,es,rb,rs,fb,fs) if abs(fb-fs)>1e-12 else None
         cost=float(rb.get("cost") or fb*float(rb.get("average") or o.limit_buy))
         proceeds=float(rs.get("cost") or fs*float(rs.get("average") or o.limit_sell))
-        fees=self._quote_fee(rb,o.quote_ccy)+self._quote_fee(rs,o.quote_ccy)
-        pnl=proceeds-cost-fees
-        if hedge is not None:
-            hv=float(hedge.get("cost") or self._filled(hedge)*float(hedge.get("average") or 0))
-            hf=self._quote_fee(hedge,o.quote_ccy)
-            pnl += hv-hf if fb>fs else -hv-hf
+        buy_avg=float(rb.get("average") or (cost/fb if fb else o.limit_buy))
+        sell_avg=float(rs.get("average") or (proceeds/fs if fs else o.limit_sell))
+        try:
+            await self._ensure_fee_data(eb,o.symbol,rb)
+            await self._ensure_fee_data(es,o.symbol,rs)
+            if hedge is not None:
+                hedge_ex = eb if fb > fs else es
+                await self._ensure_fee_data(hedge_ex,o.symbol,hedge)
+            fees=self._quote_fee(rb,o.quote_ccy,o.base_ccy,buy_avg)+self._quote_fee(rs,o.quote_ccy,o.base_ccy,sell_avg)
+            pnl=proceeds-cost-fees
+            if hedge is not None:
+                hv=float(hedge.get("cost") or self._filled(hedge)*float(hedge.get("average") or 0))
+                hedge_avg=float(hedge.get("average") or (hv/self._filled(hedge) if self._filled(hedge) else 0.0))
+                hf=self._quote_fee(hedge,o.quote_ccy,o.base_ccy,hedge_avg)
+                pnl += hv-hf if fb>fs else -hv-hf
+        except Exception as exc:
+            self.ledger.set_state(eid,"RECONCILIATION_REQUIRED",{"feeError":repr(exc),"buyFilled":fb,"sellFilled":fs})
+            raise LegFailure(f"{eid}: fee/PnL reconciliation required") from exc
         self.ledger.set_state(eid,"HEDGED" if hedge is not None else "COMPLETED",
                               {"buyFilled":fb,"sellFilled":fs,"hedgeFilled":self._filled(hedge) if hedge else 0,"pnl":pnl})
         return TradeResult(pnl)
