@@ -172,7 +172,7 @@ class LiveExecutor:
             intents.append({
                 "key": f"leg{index + 1}", "venue": getattr(self.ex, "id", "venue"),
                 "client_order_id": f"nuarb-{nonce[:12]}-{index + 1}",
-                "side": leg.side, "requested": max(0.0, size),
+                "side": leg.side, "requested": 0.0,
             })
         try:
             eid = self.ledger.begin("triangular", intents)
@@ -191,7 +191,7 @@ class LiveExecutor:
                 self.ledger.update_leg(
                     eid, intent["key"],
                     status=("FILLED" if filled + 1e-12 >= size else "PARTIALLY_FILLED" if filled > 0 else "NO_FILL"),
-                    order=order,
+                    order=order, requested=size,
                 )
                 if filled <= 0:
                     raise NoFill(f"{leg.symbol} {leg.side} unfilled")
