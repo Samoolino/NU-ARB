@@ -201,4 +201,14 @@ addresses and liquidity sources; a self-declared environment value or ticker is 
 sufficient. The current repository has not established that independent evidence.
 
 
-Acceptance review note: the latest full-suite run reached 98 passing tests and one failure in cross-ranking fixture metadata; that fixture compatibility is being corrected before production readiness is claimed.
+Acceptance review note (2026-10-21): CI passed Python compilation, 111 Python tests plus 5 subtests, Node scanner tests, and the Docker control-plane image build. These are software checks, not proof of live profitability or exchange-wide atomicity.
+
+
+## Proxy and connectivity configuration
+
+Set `BOT_PROXY_URL` for a shared HTTP(S)/SOCKS proxy or `BOT_<EXCHANGE>_PROXY_URL`
+for a venue-specific override (for example, `BOT_BINANCE_PROXY_URL`). The worker applies
+the configured proxy to CCXT Python REST/WebSocket transport properties and runs its normal
+latency preflight over that route. A proxy is not assumed to reduce latency: live mode
+still rejects venues whose measured RTT exceeds policy. Credentials in proxy URLs must be
+treated as secrets and must never be included in logs or committed to source control.
