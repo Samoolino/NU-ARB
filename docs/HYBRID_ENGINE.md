@@ -199,3 +199,6 @@ ineligible for live trading while `PINNED_MANIFEST_SHA256` is unset. That pin mu
 be established through independent review of canonical token/router/factory/pool
 addresses and liquidity sources; a self-declared environment value or ticker is not
 sufficient. The current repository has not established that independent evidence.
+
+
+Acceptance review note: the latest full-suite run reached 98 passing tests and one failure in cross-ranking fixture metadata; that fixture compatibility is being corrected before production readiness is claimed.
