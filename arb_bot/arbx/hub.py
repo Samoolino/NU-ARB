@@ -203,7 +203,12 @@ class Hub:
         ask = float(buy_book.asks[0][0])
         fee = max(0.0, bw.fee_of(symbol))
         quote_budget = free_quote / (1.0 + fee + 0.002)
-        size = min(self.cfg.trade_size_usd, quote_budget, free_base * ask)
+        caps = [quote_budget, free_base * ask]
+        if self.cfg.trade_size_usd > 0:
+            caps.append(self.cfg.trade_size_usd)
+        if self.cfg.session_capital_usd is not None:
+            caps.append(self.cfg.session_capital_usd)
+        size = min(caps)
         return max(0.0, size), free_quote, free_base
 
     def _best_cross_for_direction(self, symbol, bw, sw, buy_book, sell_book, now):

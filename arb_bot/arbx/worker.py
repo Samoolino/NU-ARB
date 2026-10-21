@@ -72,6 +72,20 @@ class ExchangeWorker:
     def free_of(self, asset: str) -> float:
         return self.free.get(asset, 0.0) if self.live else self.hub.equity
 
+    def engagement_size(self, start_asset: str) -> float:
+        """Size from the latest authenticated free balance, not a fabricated starter allocation."""
+        if not self.live:
+            return self.hub.trade_size()
+        available = self.free_of(start_asset)
+        if available <= 0:
+            return 0.0
+        caps = [available]
+        if self.cfg.trade_size_usd > 0:
+            caps.append(self.cfg.trade_size_usd)
+        if self.cfg.session_capital_usd is not None:
+            caps.append(self.cfg.session_capital_usd)
+        return max(0.0, min(caps))
+
     def _index(self, symbols) -> None:
         disc = 1.0 - self.cfg.fee_discount_pct / 100.0
         for s in symbols:
@@ -136,7 +150,7 @@ class ExchangeWorker:
             if venue_id not in hybrid.adapters:
                 raise RuntimeError(f"live venue {venue_id} is not present in the hybrid certification catalog")
             evidence = await hybrid.validate_venue(
-                venue_id, symbol=cert_symbol, notional_usd=self.cfg.trade_size_usd
+                venue_id, symbol=cert_symbol, notional_usd=(self.cfg.trade_size_usd or self.cfg.session_capital_usd or 3.0)
             )
             if not evidence.live_eligible:
                 raise RuntimeError(
@@ -251,13 +265,16 @@ class ExchangeWorker:
             await md.event.wait()
             md.event.clear()
             dirty, md.dirty = md.dirty, set()
-            now, size, best, seen = time.monotonic(), hub.trade_size(), None, set()
+            now, best, seen = time.monotonic(), None, set()
             for sym in dirty:                                   # only cycles touching a changed book
                 for tri in self.by_symbol.get(sym, ()):
                     if id(tri) in seen:
                         continue
                     seen.add(id(tri))
                     hub.stats.scans += 1
+                    size = self.engagement_size(tri.start)
+                    if size <= 0:
+                        continue
                     o = evaluate_triangle(tri, md.books, size, self.fee_of, cfg.min_net_bps,
                                           cfg.limit_tol_bps, self.round_price, now)
                     if o and (best is None or o.worst_bps > best.worst_bps):
@@ -283,7 +300,11 @@ class ExchangeWorker:
                 if tri is None:
                     hub.risk.halt(f"[{self.id}] selected cycle disappeared before execution")
                     return
-                o = evaluate_triangle(tri, self.md.books, hub.trade_size(), self.fee_of,
+                size = self.engagement_size(tri.start)
+                if size <= 0:
+                    hub.stats.rejects["insufficient_balance"] += 1
+                    return
+                o = evaluate_triangle(tri, self.md.books, size, self.fee_of,
                                       self.cfg.min_net_bps, self.cfg.limit_tol_bps,
                                       self.round_price, time.monotonic())
                 if o is None:
@@ -333,9 +354,7 @@ class ExchangeWorker:
             coordinator.require_reconciliation()
             coordinator.on_realized_pnl(res.pnl)
             hub.settle(self.id, o.name, o.start, res, o.worst_bps, (time.perf_counter() - t0) * 1000.0)
-            if coordinator.halted:
-                hub.risk.halt(f"[{self.id}] realized loss halted new engagements")
-            elif coordinator.state != ExecutionState.HALTED:
+            if coordinator.state != ExecutionState.HALTED:
                 coordinator.complete()
             if self.live:
                 asyncio.create_task(self.refresh_balance())

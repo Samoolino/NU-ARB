@@ -104,15 +104,12 @@ class ExecutionCoordinator:
         self.transition(ExecutionState.RECONCILING)
 
     def on_realized_pnl(self, pnl_usd: float) -> None:
+        # PnL is evidence, not an execution stop switch. Continue scanning after
+        # realized losses when the next opportunity independently passes every gate.
+        # Unknown order status / partial-fill reconciliation still fail closed.
         if pnl_usd < 0:
             self.realized_loss_usd += abs(pnl_usd)
-            self.halted = True
-            self.transition(
-                ExecutionState.HALTED,
-                reason="realized_loss",
-                pnl_usd=pnl_usd,
-                cumulative_loss_usd=self.realized_loss_usd,
-            )
+        self.transition(ExecutionState.RECONCILING, pnl_usd=pnl_usd, cumulative_loss_usd=self.realized_loss_usd)
 
     def complete(self) -> None:
         if self.halted:
