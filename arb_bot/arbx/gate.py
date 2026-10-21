@@ -1,8 +1,8 @@
 """Modeled-profit and execution-safety gates.
 
-Live policy: start at $3, compound only realized profits into the next trade,
-and stop immediately after any realized loss. There is no fixed session-loss
-ceiling; the engine is fail-closed on realized loss instead.
+Live policy: engage only on fresh, verified, positive worst-case net profitability.
+Sizing is derived from verified available balances and optional session capital.
+Realized loss alone is not a stop condition; ambiguous execution state remains a technical safety halt.
 """
 from __future__ import annotations
 
@@ -37,7 +37,8 @@ class RiskManager:
         now = time.monotonic()
         while self._stamps and now - self._stamps[0] > 60.0:
             self._stamps.popleft()
-        return len(self._stamps) < self.cfg.max_trades_per_min
+        limit = getattr(self.cfg, "max_trades_per_min", 0)
+        return limit <= 0 or len(self._stamps) < limit
 
     @property
     def compounded_capital(self) -> float:
@@ -47,11 +48,10 @@ class RiskManager:
         self._stamps.append(time.monotonic())
         self.pnl += pnl
         self.failures = 0 if ok else self.failures + 1
-        if self.cfg.mode == "live" and self.cfg.compound_profits:
-            self.cfg.trade_size_usd = self.compounded_capital
-        if self.cfg.mode == "live" and self.cfg.halt_on_realized_loss and pnl < 0:
-            self.halt(f"realized loss protection triggered ({pnl:.6f} USD)")
-        elif self.failures >= self.cfg.max_consecutive_failures:
+        # Never convert a realized loss into a stop-loss rule or fabricated allocation.
+        # The next engagement is sized from refreshed balances. Consecutive operational
+        # failures remain a circuit breaker, not a PnL stop.
+        if self.failures >= self.cfg.max_consecutive_failures:
             self.halt("too many consecutive failed/unfilled cycles")
 
 

@@ -6,6 +6,7 @@ import asyncio
 import os
 import time
 from contextlib import suppress
+from urllib.parse import urlparse
 
 from arbx.config import CCXT_ADAPTERS
 from arbx.execute import LegFailure, LiveExecutor, PaperExecutor
@@ -26,6 +27,19 @@ def spot_market_options(exchange_id: str) -> dict:
     return options
 
 
+def configure_proxy(exchange, proxy_url: str | None):
+    """Apply an optional proxy to REST and WebSocket transports without logging credentials."""
+    if not proxy_url:
+        return exchange
+    parsed = urlparse(proxy_url)
+    if parsed.scheme not in ("http", "https", "socks5", "socks5h") or not parsed.hostname:
+        raise ValueError("proxy URL must use http(s) or socks5(s) and include a host")
+    exchange.aiohttp_proxy = proxy_url
+    exchange.ws_proxy = proxy_url
+    exchange.wss_proxy = proxy_url
+    return exchange
+
+
 def build_exchange(x, live: bool):
     import ccxt.pro as ccxtpro
     cls = getattr(ccxtpro, CCXT_ADAPTERS.get(x.id, x.id), None)
@@ -37,7 +51,7 @@ def build_exchange(x, live: bool):
         params.update(apiKey=x.api_key, secret=secret)
         if x.password:
             params["password"] = x.password
-    return cls(params)
+    return configure_proxy(cls(params), getattr(x, "proxy_url", None))
 
 
 class ExchangeWorker:
@@ -47,6 +61,7 @@ class ExchangeWorker:
         self.private_stream_ready = False
         self.private_last_message: float | None = None
         self.private_stream_error: str | None = None
+        self.live_certified = False
         self.balance_last_refresh: float | None = None
         self.ex = self.md = self.lat = self.executor = None
         self.by_symbol: dict = {}
@@ -71,6 +86,20 @@ class ExchangeWorker:
 
     def free_of(self, asset: str) -> float:
         return self.free.get(asset, 0.0) if self.live else self.hub.equity
+
+    def engagement_size(self, start_asset: str) -> float:
+        """Size from the latest authenticated free balance, not a fabricated starter allocation."""
+        if not self.live:
+            return self.hub.trade_size()
+        available = self.free_of(start_asset)
+        if available <= 0:
+            return 0.0
+        caps = [available]
+        if self.cfg.trade_size_usd > 0:
+            caps.append(self.cfg.trade_size_usd)
+        if self.cfg.session_capital_usd is not None:
+            caps.append(self.cfg.session_capital_usd)
+        return max(0.0, min(caps))
 
     def _index(self, symbols) -> None:
         disc = 1.0 - self.cfg.fee_discount_pct / 100.0
@@ -136,13 +165,14 @@ class ExchangeWorker:
             if venue_id not in hybrid.adapters:
                 raise RuntimeError(f"live venue {venue_id} is not present in the hybrid certification catalog")
             evidence = await hybrid.validate_venue(
-                venue_id, symbol=cert_symbol, notional_usd=self.cfg.trade_size_usd
+                venue_id, symbol=cert_symbol, notional_usd=(self.cfg.trade_size_usd or self.cfg.session_capital_usd or 3.0)
             )
             if not evidence.live_eligible:
                 raise RuntimeError(
                     f"live venue certification failed for {venue_id}: "
                     + ", ".join(evidence.reasons)
                 )
+            self.live_certified = True
             self.hub.log("info", f"[{self.id}] hybrid live certification passed for {cert_symbol}")
         self.executor = LiveExecutor(self.ex, self.cfg) if self.live else PaperExecutor(self.cfg)
         if self.live:
@@ -170,7 +200,7 @@ class ExchangeWorker:
         extra = [s for s in extra if s in self.ex.markets]
         self._index([s for s in extra if s not in self.fees])
         allsyms = sorted(self.symbols | set(extra))
-        self.md = MarketData(self.ex, allsyms, self.cfg.depth, self.hub.log)
+        self.md = MarketData(self.ex, allsyms, self.cfg.depth, self.hub.log, self.cfg.max_book_age_ms)
         self.tasks = self.md.start() + [asyncio.create_task(self.lat.loop(self.hub.log))]
         if self.live:
             self.tasks.extend((asyncio.create_task(self._balance_loop()),
@@ -251,13 +281,16 @@ class ExchangeWorker:
             await md.event.wait()
             md.event.clear()
             dirty, md.dirty = md.dirty, set()
-            now, size, best, seen = time.monotonic(), hub.trade_size(), None, set()
+            now, best, seen = time.monotonic(), None, set()
             for sym in dirty:                                   # only cycles touching a changed book
                 for tri in self.by_symbol.get(sym, ()):
                     if id(tri) in seen:
                         continue
                     seen.add(id(tri))
                     hub.stats.scans += 1
+                    size = self.engagement_size(tri.start)
+                    if size <= 0:
+                        continue
                     o = evaluate_triangle(tri, md.books, size, self.fee_of, cfg.min_net_bps,
                                           cfg.limit_tol_bps, self.round_price, now)
                     if o and (best is None or o.worst_bps > best.worst_bps):
@@ -283,12 +316,35 @@ class ExchangeWorker:
                 if tri is None:
                     hub.risk.halt(f"[{self.id}] selected cycle disappeared before execution")
                     return
-                o = evaluate_triangle(tri, self.md.books, hub.trade_size(), self.fee_of,
+                size = self.engagement_size(tri.start)
+                if size <= 0:
+                    hub.stats.rejects["insufficient_balance"] += 1
+                    return
+                o = evaluate_triangle(tri, self.md.books, size, self.fee_of,
                                       self.cfg.min_net_bps, self.cfg.limit_tol_bps,
                                       self.round_price, time.monotonic())
                 if o is None:
                     hub.stats.rejects["opportunity_disappeared"] += 1
                     return
+            from arbx.hybrid.verified_opportunity import Opportunity, VenueSnapshot, evaluate_opportunity
+            now_mono = time.monotonic()
+            balance_age_ms = (now_mono - self.balance_last_refresh) * 1000 if self.balance_last_refresh is not None else float("inf")
+            p95 = self.lat.stats().get("p95", float("inf")) if self.lat else float("inf")
+            private_fresh = (not self.live) or (self.private_stream_ready and self.private_last_message is not None and (now_mono-self.private_last_message)*1000 <= 120_000)
+            snapshot = VenueSnapshot(self.id, (not self.live) or self.live_certified, self.free_of(o.start_asset),
+                                     o.age_ms, p95, permission_ok=(not self.live) or self.live_certified,
+                                     stream_ok=(o.age_ms <= cfg.max_book_age_ms and private_fresh and (not self.live or balance_age_ms <= 30_000)))
+            expected_net, worst_net = o.expected_final-o.start, o.worst_final-o.start
+            policy = evaluate_opportunity(
+                Opportunity(expected_gross_usd=expected_net, expected_fees_usd=0.0, expected_slippage_usd=0.0,
+                            worst_case_reserve_usd=max(0.0, expected_net-worst_net), required_capital_usd=o.start,
+                            session_realized_pnl_usd=hub.risk.pnl, target_profit_usd=cfg.target_profit_usd),
+                (snapshot,), now_book_age_limit_ms=cfg.max_book_age_ms, latency_limit_ms=cfg.pause_rtt_ms,
+                min_expected_net_usd=cfg.min_profit_usd, min_worst_case_net_usd=cfg.min_profit_usd,
+                session_capital_usd=cfg.session_capital_usd)
+            if not policy.ok:
+                hub.stats.rejects[f"verified_policy:{policy.reason}"] += 1
+                return
             d = hub.gate.check_tri(o, self.mlimits, self.lat.ok(), self.free_of(o.start_asset))
             hub.record_opportunity(
                 strategy="triangular", exchange_a=self.id, exchange_b=None,
@@ -333,9 +389,7 @@ class ExchangeWorker:
             coordinator.require_reconciliation()
             coordinator.on_realized_pnl(res.pnl)
             hub.settle(self.id, o.name, o.start, res, o.worst_bps, (time.perf_counter() - t0) * 1000.0)
-            if coordinator.halted:
-                hub.risk.halt(f"[{self.id}] realized loss halted new engagements")
-            elif coordinator.state != ExecutionState.HALTED:
+            if coordinator.state != ExecutionState.HALTED:
                 coordinator.complete()
             if self.live:
                 asyncio.create_task(self.refresh_balance())

@@ -34,4 +34,4 @@ def profit_compounding_capital(starter,realized_profit):
     return max(0.0,starter+max(0.0,realized_profit))
 
 def strategy_catalog():
-    return ("dca_profit_compounding","cross_exchange","triangular_intra_exchange","triangular_multi_exchange","stablecoin_arbitrage","spot")
+    return ("dca_profit_compounding","cross_exchange","triangular_intra_exchange","triangular_multi_exchange","stablecoin_arbitrage","spot","btcb_bsc_verification_only")

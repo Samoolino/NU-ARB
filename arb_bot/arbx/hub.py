@@ -12,10 +12,11 @@ from dataclasses import dataclass, field
 
 from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
-from arbx.gate import ProfitGate, RiskManager
+from arbx.gate import Decision, ProfitGate, RiskManager
 from arbx.journal import TradeJournal
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
+from arbx.hybrid.verified_opportunity import Opportunity, VenueSnapshot, evaluate_opportunity
 
 
 @dataclass
@@ -203,7 +204,12 @@ class Hub:
         ask = float(buy_book.asks[0][0])
         fee = max(0.0, bw.fee_of(symbol))
         quote_budget = free_quote / (1.0 + fee + 0.002)
-        size = min(self.cfg.trade_size_usd, quote_budget, free_base * ask)
+        caps = [quote_budget, free_base * ask]
+        if self.cfg.trade_size_usd > 0:
+            caps.append(self.cfg.trade_size_usd)
+        if self.cfg.session_capital_usd is not None:
+            caps.append(self.cfg.session_capital_usd)
+        size = min(caps)
         return max(0.0, size), free_quote, free_base
 
     def _best_cross_for_direction(self, symbol, bw, sw, buy_book, sell_book, now):
@@ -218,6 +224,36 @@ class Hub:
                 opportunity, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
                 free_quote, free_base,
             )
+            if decision.ok and self.cfg.mode == "live":
+                now_mono = time.monotonic()
+                snapshots = []
+                for vw, vb, bal in ((bw, buy_book, free_quote),
+                                    (sw, sell_book, free_base * (float(sell_book.bids[0][0]) if sell_book.bids else 0.0))):
+                    is_live = getattr(vw, "live", self.cfg.mode == "live")
+                    balance_last = getattr(vw, "balance_last_refresh", None)
+                    balance_age = (now_mono-balance_last)*1000 if balance_last is not None else float("inf")
+                    stats = getattr(getattr(vw, "lat", None), "stats", None)
+                    p95 = stats().get("p95", float("inf")) if callable(stats) else 0.0
+                    age = max(0.0,(now_mono-vb.recv)*1000) if hasattr(vb, "recv") else getattr(opportunity, "age_ms", 0.0)
+                    if not math.isfinite(bal):
+                        bal = 1e30 if not is_live else 0.0
+                    private_last = getattr(vw, "private_last_message", None)
+                    private_fresh = (not is_live) or (getattr(vw, "private_stream_ready", False) and private_last is not None and (now_mono-private_last)*1000 <= 120_000)
+                    certified = getattr(vw, "live_certified", False)
+                    venue_id = getattr(vw, "id", "buy" if vw is bw else "sell")
+                    snapshots.append(VenueSnapshot(venue_id,(not is_live) or certified,max(0.0,bal),age,p95,
+                        permission_ok=(not is_live) or certified,
+                        stream_ok=(age<=self.cfg.max_book_age_ms and private_fresh and (not is_live or balance_age<=30_000))))
+                expected_net,worst_net=opportunity.expected_usd,opportunity.worst_usd
+                policy=evaluate_opportunity(
+                    Opportunity(expected_gross_usd=expected_net,expected_fees_usd=0.0,expected_slippage_usd=0.0,
+                        worst_case_reserve_usd=max(0.0,expected_net-worst_net),required_capital_usd=opportunity.cost,
+                        session_realized_pnl_usd=self.risk.pnl,target_profit_usd=self.cfg.target_profit_usd),
+                    tuple(snapshots),now_book_age_limit_ms=self.cfg.max_book_age_ms,latency_limit_ms=self.cfg.pause_rtt_ms,
+                    min_expected_net_usd=self.cfg.min_profit_usd,min_worst_case_net_usd=self.cfg.min_profit_usd,
+                    session_capital_usd=self.cfg.session_capital_usd)
+                if not policy.ok:
+                    decision=Decision(False, f"verified_policy:{policy.reason}")
             utilization = opportunity.cost / free_quote if free_quote > 0 and math.isfinite(free_quote) else 0.0
             key = (decision.ok, opportunity.worst_usd, opportunity.expected_usd,
                    utilization, opportunity.worst_bps, opportunity.cost)
@@ -379,7 +415,7 @@ class Hub:
             if self.cross_active:
                 self.cross_syms = self._pick_cross_symbols()
                 if self.cfg.mode == "live":
-                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok})
+                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok}, journal_path=self.cfg.journal_path.with_suffix(".orders.sqlite3"))
             for w in ok:
                 w.start(self.cross_syms)
             tasks = [asyncio.create_task(w.run_loop(), name=f"loop:{w.id}") for w in ok]

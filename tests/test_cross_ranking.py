@@ -161,10 +161,15 @@ class CrossRankingTests(unittest.TestCase):
             limit_sell=102.0, cost=100.0, expected_usd=2.0, worst_usd=1.0,
             net_bps=200.0, worst_bps=100.0, age_ms=1.0, base_ccy="BTC", quote_ccy="USDT",
         )
-        executor = CrossExecutor({"buy": FakeExchange(1.0), "sell": FakeExchange(0.99)})
-
-        with self.assertRaisesRegex(LegFailure, "inventory imbalance"):
-            asyncio.run(executor.execute(opportunity))
+        with tempfile.TemporaryDirectory() as directory:
+            executor = CrossExecutor(
+                {"buy": FakeExchange(1.0), "sell": FakeExchange(0.99)},
+                journal_path=pathlib.Path(directory) / "orders.sqlite3",
+            )
+            with self.assertRaisesRegex(LegFailure, "reconciliation required"):
+                asyncio.run(executor.execute(opportunity))
+            self.assertTrue(executor.ledger.unresolved())
+            executor.ledger.close()
 
 
 if __name__ == "__main__":

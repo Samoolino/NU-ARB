@@ -39,26 +39,26 @@ def test_live_evidence_requires_every_gate():
     assert not evidence.live_eligible
 
 
-def test_realized_loss_halts_live_and_profit_compounds():
+def test_realized_loss_does_not_halt_live_and_profit_is_not_fabricated_as_capital():
     from types import SimpleNamespace
     from arbx.gate import RiskManager
 
     cfg = SimpleNamespace(
         mode="live",
         starter_capital_usd=3.0,
-        trade_size_usd=3.0,
+        trade_size_usd=0.0,
         compound_profits=True,
-        halt_on_realized_loss=True,
+        halt_on_realized_loss=False,
         max_trades_per_min=30,
         max_consecutive_failures=3,
     )
     risk = RiskManager(cfg)
     risk.record(0.25, True)
-    assert cfg.trade_size_usd == 3.25
+    assert cfg.trade_size_usd == 0.0
     assert not risk.halted
     risk.record(-0.10, True)
-    assert risk.halted
-    assert cfg.trade_size_usd == 3.15
+    assert not risk.halted
+    assert cfg.trade_size_usd == 0.0
 
 
 def test_certification_journal_round_trip(tmp_path):
@@ -126,11 +126,12 @@ def test_execution_coordinator_tracks_partial_fill():
     assert coordinator.events[-1]["filled"] == 0.6
 
 
-def test_execution_coordinator_halts_on_negative_pnl():
+def test_execution_coordinator_records_negative_pnl_without_loss_stop():
     from arbx.hybrid.execution import ExecutionCoordinator, ExecutionState
 
     coordinator = ExecutionCoordinator()
     assert coordinator.gate(expected_net_usd=0.10, worst_case_net_usd=0.02, min_profit_usd=0.01, min_worst_profit_usd=0.01)
     coordinator.on_realized_pnl(-0.01)
-    assert coordinator.halted
-    assert coordinator.state == ExecutionState.HALTED
+    assert not coordinator.halted
+    assert coordinator.state == ExecutionState.RECONCILING
+    assert coordinator.realized_loss_usd == 0.01

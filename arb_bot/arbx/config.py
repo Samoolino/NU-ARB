@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from arbx.util import STABLES
 
@@ -22,6 +23,7 @@ class ExchangeCfg:
     default_taker_bps: float = 10.0
     require_private_stream: bool = False
     auth_mode: str = "hmac"
+    proxy_url: str | None = None
 
 
 @dataclass
@@ -34,13 +36,14 @@ class Config:
     trade_size_usd: float = LIVE_STARTER_CAPITAL_USD
     target_profit_usd: float | None = None
     target_equity_usd: float | None = None
+    # Optional USD-denominated per-session capital ceiling. None means use only fresh, verified route balances.
+    session_capital_usd: float | None = None
 
-    # Live strategy policy: $3 starter, reinvest realized profits, never average
-    # down a losing trade. The word DCA here means staged capital deployment
-    # from realized profits; it does not mean adding to a losing position.
+    # Live strategy policy: size from verified balances; compound only reconciled realized profits.
+    # Never average down or treat a modeled balance as available exchange funds.
     strategy_mode: str = "profit_dca"
     compound_profits: bool = True
-    halt_on_realized_loss: bool = True
+    halt_on_realized_loss: bool = False  # retained for old payload compatibility; realized PnL alone never halts
 
     # ---- Modeled profit-floor gate ------------------------------------------
     min_net_bps: float = 3.0
@@ -56,13 +59,12 @@ class Config:
     depth: int = 10
 
     # ---- Risk ---------------------------------------------------------------
-    # Kept only for backwards-compatible control-plane payloads. Live trading
-    # does not use a fixed session-loss ceiling; a realized loss is instead a
-    # circuit-breaker event under halt_on_realized_loss.
+    # Backwards-compatible field only. Realized PnL alone never halts new scanning;
+    # execution ambiguity, stale data and failed verification still fail closed.
     max_loss_usd: float = 0.0
     max_consecutive_failures: int = 3
-    max_trades_per_min: int = 30
-    cooldown_s: float = 0.2
+    max_trades_per_min: int = 0  # 0 disables the legacy rate cap; book/latency/venue checks remain mandatory
+    cooldown_s: float = 0.0
 
     # ---- Fees / vehicles ----------------------------------------------------
     fee_discount_pct: float = 0.0
@@ -93,20 +95,24 @@ class Config:
                           secret=os.getenv(f"BOT_{i.upper()}_SECRET", ""),
                           password=os.getenv(f"BOT_{i.upper()}_PASSWORD", ""),
                           auth_mode=os.getenv(f"BOT_{i.upper()}_AUTH_MODE", "hmac").lower(),
+                          proxy_url=os.getenv(f"BOT_{i.upper()}_PROXY_URL") or os.getenv("BOT_PROXY_URL"),
                           max_symbols=mx, default_taker_bps=f("BOT_DEFAULT_TAKER_BPS", 10.0)) for i in ids]
         mode = os.getenv("BOT_MODE", "paper").lower()
         tgt = os.getenv("BOT_TARGET_EQUITY_USD")
         profit_target = os.getenv("BOT_TARGET_PROFIT_USD")
-        starter = LIVE_STARTER_CAPITAL_USD if mode == "live" else f("BOT_START_CAPITAL_USD", LIVE_STARTER_CAPITAL_USD)
-        trade_size = starter if mode == "live" else f("BOT_TRADE_SIZE_USD", starter)
+        starter = f("BOT_START_CAPITAL_USD", LIVE_STARTER_CAPITAL_USD)
+        # In live mode, 0 means auto-size from fresh exchange balances; an explicit BOT_TRADE_SIZE_USD remains a per-engagement ceiling.
+        trade_size = f("BOT_TRADE_SIZE_USD", 0.0 if mode == "live" else starter)
+        session_cap = os.getenv("BOT_SESSION_CAPITAL_USD")
         return cls(
             mode=mode, exchanges=xs,
             start_capital_usd=starter, starter_capital_usd=starter, trade_size_usd=trade_size,
             target_profit_usd=float(profit_target) if profit_target else None,
             target_equity_usd=float(tgt) if tgt else None,
+            session_capital_usd=float(session_cap) if session_cap else None,
             strategy_mode=os.getenv("BOT_STRATEGY_MODE", "profit_dca"),
             compound_profits=b("BOT_COMPOUND_PROFITS", True),
-            halt_on_realized_loss=b("BOT_HALT_ON_REALIZED_LOSS", True),
+            halt_on_realized_loss=False,
             min_net_bps=f("BOT_MIN_NET_BPS", 3.0), min_worst_bps=f("BOT_MIN_WORST_BPS", 0.5),
             limit_tol_bps=f("BOT_LIMIT_TOL_BPS", 1.0), max_rtt_ms=f("BOT_MAX_RTT_MS", 80.0),
             fee_discount_pct=f("BOT_FEE_DISCOUNT_PCT", 0.0),
@@ -120,15 +126,11 @@ class Config:
         if self.strategy_mode not in ("profit_dca", "hybrid"):
             raise ValueError("live strategy is fixed to profit_dca") if self.mode == "live" else None
         if self.mode == "live":
-            # Normalize every live entry path, including the authenticated web
-            # control API, to the single $3 starter-capital condition.
-            self.start_capital_usd = LIVE_STARTER_CAPITAL_USD
-            self.starter_capital_usd = LIVE_STARTER_CAPITAL_USD
-            self.trade_size_usd = LIVE_STARTER_CAPITAL_USD
-            self.target_profit_usd = None
-            self.max_loss_usd = 0.0
+            # Live size comes from verified exchange balances, optionally bounded by BOT_SESSION_CAPITAL_USD.
+            # Realized PnL is not a stop-loss trigger; the session profit target is retained.
             self.compound_profits = True
-            self.halt_on_realized_loss = True
+            self.halt_on_realized_loss = False
+            self.max_loss_usd = 0.0
         if not self.exchanges:
             raise ValueError("no exchanges configured (BOT_EXCHANGES)")
         venue_ids = [x.venue_id or x.id for x in self.exchanges]
@@ -136,14 +138,12 @@ class Config:
             raise ValueError(f"configure between one and {MAX_EXCHANGES} unique exchange venues")
         if self.target_profit_usd is not None and self.target_profit_usd <= 0:
             raise ValueError("BOT_TARGET_PROFIT_USD must be greater than zero")
-        if self.starter_capital_usd <= 0:
-            raise ValueError("BOT_START_CAPITAL_USD must be greater than zero")
-        if self.mode == "live" and self.starter_capital_usd != LIVE_STARTER_CAPITAL_USD:
-            raise ValueError("live mode is fixed to $3 starter capital")
-        if self.trade_size_usd <= 0:
-            raise ValueError("BOT_TRADE_SIZE_USD must be greater than zero")
-        if self.mode == "live" and self.trade_size_usd > LIVE_STARTER_CAPITAL_USD:
-            raise ValueError("live trade size cannot exceed the $3 starter capital allocation")
+        if self.mode != "live" and self.starter_capital_usd <= 0:
+            raise ValueError("BOT_START_CAPITAL_USD must be greater than zero in paper mode")
+        if self.session_capital_usd is not None and self.session_capital_usd <= 0:
+            raise ValueError("BOT_SESSION_CAPITAL_USD must be greater than zero when specified")
+        if self.trade_size_usd < 0 or (self.mode != "live" and self.trade_size_usd == 0):
+            raise ValueError("BOT_TRADE_SIZE_USD must be positive in paper mode and non-negative in live auto-size mode")
         bad = [a for a in self.start_assets if a not in STABLES]
         if bad:
             raise ValueError(f"start assets must be stablecoins, got {bad}")

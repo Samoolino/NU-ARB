@@ -146,3 +146,69 @@ The PnL model exposes expected and worst-case net PnL. Fees, slippage, latency, 
 The execution coordinator has explicit states for partial fills, hedging and reconciliation. It is currently a safety boundary; end-to-end live submission remains behind the existing worker until coordinator reconciliation is wired into the production order path.
 
 See `docs/NATIVE_ADAPTER_ARCHITECTURE.md` for the migration policy.
+
+
+## Verified engagement policy (revision)
+
+A live opportunity is eligible only when every participating venue has fresh authenticated
+balance evidence, verified spot permissions, a healthy public market-data stream, current
+book depth, measured latency within the configured threshold, and a positive modeled
+worst-case net result after fees, slippage, network cost, and partial-fill/reconciliation
+reserves. The scanner consumes the engine's REST/WebSocket feeds as its primary source;
+external scanners may nominate symbols but cannot authorize execution or substitute for
+the fresh feed and balance checks.
+
+Live capital is not hard-coded to a $3 starter. In live mode, unset BOT_TRADE_SIZE_USD
+means auto-size from the worker's fresh available start-asset balance; optional
+BOT_SESSION_CAPITAL_USD caps the deployable amount for the session. An explicit
+BOT_TRADE_SIZE_USD is a per-engagement cap. BOT_TARGET_PROFIT_USD, when set, is a
+realized net-PnL session target and halts new engagements after attainment. Realized PnL
+below zero alone does not halt scanning. Freshness, permissions, insufficient funds,
+non-positive worst-case profitability, target attainment, unknown order status, and
+unreconciled partial fills remain hard eligibility/operational conditions.
+
+## Atomicity boundary and multi-venue recovery
+
+Centralized-exchange orders across venues cannot be made atomic by Python, Docker,
+parallel submission, or a proxy. A same-chain EVM arbitrage can be atomic only when
+all swaps execute inside one on-chain transaction (for example, a verified router or
+purpose-built contract); that transaction still can revert and consumes gas. Cross-CEX
+execution therefore uses coordinated submit, order-status resolution, hedge/reconcile,
+and durable incident states; it must never describe compensating orders as atomic.
+An unknown submit result must be resolved by client order ID / venue order lookup before
+retrying to prevent duplicate exposure. A failed hedge or unresolved fill remains an
+operational halt requiring reconciliation, not a realized-PnL stop-loss.
+
+## BTCB / BNB Smart Chain
+
+No production BSC/BTCB route is enabled by this revision. A chain adapter must fail closed
+until chain ID, token contract addresses, decimals, router/factory, pool liquidity,
+RPC health, gas price, simulation output, minimum output/slippage, and signer permissions
+are independently verified. BTCB symbol/name alone is not an identity check. Do not set
+an adapter to live-eligible from a token ticker or a mocked simulation. Docker packaging
+isolates adapters and dependencies; it does not improve exchange latency by itself.
+
+
+## BTCB/BEP-20 verification adapter status
+
+The BNB Smart Chain BTCB route has a dedicated verification-only adapter in
+`arb_bot/arbx/hybrid/bsc_btcb.py`. It verifies chain ID, contract code presence,
+token decimals and symbol against a supplied manifest, and requires a separate
+transaction-simulation result. It does not sign or submit transactions. It remains
+ineligible for live trading while `PINNED_MANIFEST_SHA256` is unset. That pin must
+be established through independent review of canonical token/router/factory/pool
+addresses and liquidity sources; a self-declared environment value or ticker is not
+sufficient. The current repository has not established that independent evidence.
+
+
+Acceptance review note (2026-10-21): CI passed Python compilation, 111 Python tests plus 5 subtests, Node scanner tests, and the Docker control-plane image build. These are software checks, not proof of live profitability or exchange-wide atomicity.
+
+
+## Proxy and connectivity configuration
+
+Set `BOT_PROXY_URL` for a shared HTTP(S)/SOCKS proxy or `BOT_<EXCHANGE>_PROXY_URL`
+for a venue-specific override (for example, `BOT_BINANCE_PROXY_URL`). The worker applies
+the configured proxy to CCXT Python REST/WebSocket transport properties and runs its normal
+latency preflight over that route. A proxy is not assumed to reduce latency: live mode
+still rejects venues whose measured RTT exceeds policy. Credentials in proxy URLs must be
+treated as secrets and must never be included in logs or committed to source control.
