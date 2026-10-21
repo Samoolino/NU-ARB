@@ -37,9 +37,8 @@ class Config:
     # Optional USD-denominated per-session capital ceiling. None means use only fresh, verified route balances.
     session_capital_usd: float | None = None
 
-    # Live strategy policy: $3 starter, reinvest realized profits, never average
-    # down a losing trade. The word DCA here means staged capital deployment
-    # from realized profits; it does not mean adding to a losing position.
+    # Live strategy policy: size from verified balances; compound only reconciled realized profits.
+    # Never average down or treat a modeled balance as available exchange funds.
     strategy_mode: str = "profit_dca"
     compound_profits: bool = True
     halt_on_realized_loss: bool = False  # retained for old payload compatibility; realized PnL alone never halts
@@ -58,9 +57,8 @@ class Config:
     depth: int = 10
 
     # ---- Risk ---------------------------------------------------------------
-    # Kept only for backwards-compatible control-plane payloads. Live trading
-    # does not use a fixed session-loss ceiling; a realized loss is instead a
-    # circuit-breaker event under halt_on_realized_loss.
+    # Backwards-compatible field only. Realized PnL alone never halts new scanning;
+    # execution ambiguity, stale data and failed verification still fail closed.
     max_loss_usd: float = 0.0
     max_consecutive_failures: int = 3
     max_trades_per_min: int = 0  # 0 disables the legacy rate cap; book/latency/venue checks remain mandatory

@@ -16,6 +16,7 @@ from arbx.gate import ProfitGate, RiskManager
 from arbx.journal import TradeJournal
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
+from arbx.hybrid.verified_opportunity import Opportunity, VenueSnapshot, evaluate_opportunity
 
 
 @dataclass
@@ -223,6 +224,28 @@ class Hub:
                 opportunity, bw.mlimits, sw.mlimits, bw.lat.ok() and sw.lat.ok(),
                 free_quote, free_base,
             )
+            if decision.ok:
+                now_mono = time.monotonic()
+                snapshots = []
+                for vw, vb, bal in ((bw, bb, free_quote),
+                                    (sw, sb, free_base * (float(sb.bids[0][0]) if sb.bids else 0.0))):
+                    balance_age = (now_mono-vw.balance_last_refresh)*1000 if vw.balance_last_refresh is not None else float("inf")
+                    p95 = vw.lat.stats().get("p95",float("inf")) if vw.lat else float("inf")
+                    age = max(0.0,(now_mono-vb.recv)*1000)
+                    private_fresh = (not vw.live) or (vw.private_stream_ready and vw.private_last_message is not None and (now_mono-vw.private_last_message)*1000 <= 120_000)
+                    snapshots.append(VenueSnapshot(vw.id,(not vw.live) or vw.live_certified,max(0.0,bal),age,p95,
+                        permission_ok=(not vw.live) or vw.live_certified,
+                        stream_ok=(age<=self.cfg.max_book_age_ms and private_fresh and (not vw.live or balance_age<=30_000))))
+                expected_net,worst_net=opportunity.expected_usd,opportunity.worst_usd
+                policy=evaluate_opportunity(
+                    Opportunity(expected_gross_usd=expected_net,expected_fees_usd=0.0,expected_slippage_usd=0.0,
+                        worst_case_reserve_usd=max(0.0,expected_net-worst_net),required_capital_usd=opportunity.cost,
+                        session_realized_pnl_usd=self.risk.pnl,target_profit_usd=self.cfg.target_profit_usd),
+                    tuple(snapshots),now_book_age_limit_ms=self.cfg.max_book_age_ms,latency_limit_ms=self.cfg.pause_rtt_ms,
+                    min_expected_net_usd=self.cfg.min_profit_usd,min_worst_case_net_usd=self.cfg.min_profit_usd,
+                    session_capital_usd=self.cfg.session_capital_usd)
+                if not policy.ok:
+                    decision=type(decision)(False,f"verified_policy:{policy.reason}")
             utilization = opportunity.cost / free_quote if free_quote > 0 and math.isfinite(free_quote) else 0.0
             key = (decision.ok, opportunity.worst_usd, opportunity.expected_usd,
                    utilization, opportunity.worst_bps, opportunity.cost)
@@ -384,7 +407,7 @@ class Hub:
             if self.cross_active:
                 self.cross_syms = self._pick_cross_symbols()
                 if self.cfg.mode == "live":
-                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok})
+                    self.cross_exec = CrossExecutor({w.id: w.ex for w in ok}, journal_path=self.cfg.journal_path.with_suffix(".orders.sqlite3"))
             for w in ok:
                 w.start(self.cross_syms)
             tasks = [asyncio.create_task(w.run_loop(), name=f"loop:{w.id}") for w in ok]

@@ -47,6 +47,7 @@ class ExchangeWorker:
         self.private_stream_ready = False
         self.private_last_message: float | None = None
         self.private_stream_error: str | None = None
+        self.live_certified = False
         self.balance_last_refresh: float | None = None
         self.ex = self.md = self.lat = self.executor = None
         self.by_symbol: dict = {}
@@ -157,6 +158,7 @@ class ExchangeWorker:
                     f"live venue certification failed for {venue_id}: "
                     + ", ".join(evidence.reasons)
                 )
+            self.live_certified = True
             self.hub.log("info", f"[{self.id}] hybrid live certification passed for {cert_symbol}")
         self.executor = LiveExecutor(self.ex, self.cfg) if self.live else PaperExecutor(self.cfg)
         if self.live:
@@ -184,7 +186,7 @@ class ExchangeWorker:
         extra = [s for s in extra if s in self.ex.markets]
         self._index([s for s in extra if s not in self.fees])
         allsyms = sorted(self.symbols | set(extra))
-        self.md = MarketData(self.ex, allsyms, self.cfg.depth, self.hub.log)
+        self.md = MarketData(self.ex, allsyms, self.cfg.depth, self.hub.log, self.cfg.max_book_age_ms)
         self.tasks = self.md.start() + [asyncio.create_task(self.lat.loop(self.hub.log))]
         if self.live:
             self.tasks.extend((asyncio.create_task(self._balance_loop()),
@@ -310,6 +312,25 @@ class ExchangeWorker:
                 if o is None:
                     hub.stats.rejects["opportunity_disappeared"] += 1
                     return
+            from arbx.hybrid.verified_opportunity import Opportunity, VenueSnapshot, evaluate_opportunity
+            now_mono = time.monotonic()
+            balance_age_ms = (now_mono - self.balance_last_refresh) * 1000 if self.balance_last_refresh is not None else float("inf")
+            p95 = self.lat.stats().get("p95", float("inf")) if self.lat else float("inf")
+            private_fresh = (not self.live) or (self.private_stream_ready and self.private_last_message is not None and (now_mono-self.private_last_message)*1000 <= 120_000)
+            snapshot = VenueSnapshot(self.id, (not self.live) or self.live_certified, self.free_of(o.start_asset),
+                                     o.age_ms, p95, permission_ok=(not self.live) or self.live_certified,
+                                     stream_ok=(o.age_ms <= cfg.max_book_age_ms and private_fresh and (not self.live or balance_age_ms <= 30_000)))
+            expected_net, worst_net = o.expected_final-o.start, o.worst_final-o.start
+            policy = evaluate_opportunity(
+                Opportunity(expected_gross_usd=expected_net, expected_fees_usd=0.0, expected_slippage_usd=0.0,
+                            worst_case_reserve_usd=max(0.0, expected_net-worst_net), required_capital_usd=o.start,
+                            session_realized_pnl_usd=hub.risk.pnl, target_profit_usd=cfg.target_profit_usd),
+                (snapshot,), now_book_age_limit_ms=cfg.max_book_age_ms, latency_limit_ms=cfg.pause_rtt_ms,
+                min_expected_net_usd=cfg.min_profit_usd, min_worst_case_net_usd=cfg.min_profit_usd,
+                session_capital_usd=cfg.session_capital_usd)
+            if not policy.ok:
+                hub.stats.rejects[f"verified_policy:{policy.reason}"] += 1
+                return
             d = hub.gate.check_tri(o, self.mlimits, self.lat.ok(), self.free_of(o.start_asset))
             hub.record_opportunity(
                 strategy="triangular", exchange_a=self.id, exchange_b=None,

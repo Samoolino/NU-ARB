@@ -298,10 +298,15 @@ class CCXTAdapter(CCXTProAdapter):
 
     async def get_capabilities(self):
         base = await super().get_capabilities()
-        return VenueCapabilities(**{**base.__dict__ if hasattr(base, "__dict__") else {f.name: getattr(base, f.name) for f in base.__dataclass_fields__.values()},
-                                    "websocket": False, "native_websocket": False,
-                                    "user_stream": False, "balance_stream": False,
-                                    "ccxt": True, "ccxt_pro": False})
+        values = base.__dict__.copy() if hasattr(base, "__dict__") else {
+            name: getattr(base, name) for name in VenueCapabilities.__dataclass_fields__
+        }
+        values.update({
+            "websocket": False, "native_websocket": False,
+            "user_stream": False, "balance_stream": False,
+            "ccxt": True, "ccxt_pro": False,
+        })
+        return VenueCapabilities(**values)
 
 
 class NativeSDKAdapter(BaseAdapter):
