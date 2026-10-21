@@ -100,7 +100,14 @@ class BSCBTCBAdapter:
                     reasons.append("token_decimals_mismatch")
                 symbol_hex = await self._rpc(session,"eth_call",[{"to":m.btcb_token,"data":"0x95d89b41"},"latest"])
                 raw = bytes.fromhex(symbol_hex[2:])
-                symbol = raw.rstrip(b"\\x00").decode("utf-8",errors="replace").strip()
+                symbol_bytes = raw.rstrip(b"\\x00")
+                if len(raw) >= 64:
+                    offset = int.from_bytes(raw[:32], "big")
+                    if 0 <= offset <= len(raw) - 32:
+                        length = int.from_bytes(raw[offset:offset + 32], "big")
+                        if 0 <= length <= len(raw) - offset - 32:
+                            symbol_bytes = raw[offset + 32:offset + 32 + length]
+                symbol = symbol_bytes.decode("utf-8", errors="replace").strip()
                 evidence["token_symbol"] = symbol
                 if symbol != m.expected_symbol:
                     reasons.append("token_symbol_mismatch")

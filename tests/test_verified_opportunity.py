@@ -60,3 +60,13 @@ def test_unprofitable_worst_case_and_profit_target_are_rejected():
 def test_insufficient_funds_are_rejected():
     result = check(opportunity(required_capital_usd=13.0), (venue(balance_usd=12.0),))
     assert result.reason == "insufficient_verified_capital"
+
+
+def test_nan_profit_is_rejected_fail_closed():
+    result = check(opportunity(expected_gross_usd=float("nan")), (venue(),))
+    assert not result.ok and result.reason == "invalid_numeric_input"
+
+
+def test_infinite_balance_and_latency_are_rejected():
+    assert check(opportunity(), (venue(balance_usd=float("inf")),)).reason == "invalid_numeric_snapshot:a"
+    assert check(opportunity(), (venue(latency_ms=float("inf")),)).reason == "invalid_numeric_snapshot:a"

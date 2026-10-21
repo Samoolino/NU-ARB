@@ -213,6 +213,12 @@ class HybridEngine:
             journal.close()
         return ev
 
+    async def verify_btcb_route(self, rpc_url=None, manifest=None, *, simulation_ok=False):
+        """Run verification-only BTCB/BSC checks; this method cannot submit transactions."""
+        from .bsc_btcb import BSCBTCBAdapter
+        adapter = BSCBTCBAdapter(rpc_url or os.getenv("BOT_BSC_RPC_URL", ""), manifest)
+        return await adapter.verify(simulation_ok=simulation_ok)
+
     def validate_route(
         self,
         venues: tuple[str, ...],

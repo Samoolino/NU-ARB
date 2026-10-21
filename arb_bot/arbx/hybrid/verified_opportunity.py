@@ -7,6 +7,7 @@ certify a live route.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +56,30 @@ def evaluate_opportunity(
     session_capital_usd: float | None = None,
 ) -> Eligibility:
     """Fail closed unless each venue's balance, permissions, stream and latency are verified."""
+    numeric = [
+        opportunity.expected_gross_usd, opportunity.expected_fees_usd,
+        opportunity.expected_slippage_usd, opportunity.expected_network_usd,
+        opportunity.worst_case_reserve_usd, opportunity.required_capital_usd,
+        opportunity.session_realized_pnl_usd, now_book_age_limit_ms,
+        latency_limit_ms, min_expected_net_usd, min_worst_case_net_usd,
+    ]
+    if opportunity.target_profit_usd is not None:
+        numeric.append(opportunity.target_profit_usd)
+    if session_capital_usd is not None:
+        numeric.append(session_capital_usd)
+    if any(not math.isfinite(value) for value in numeric):
+        return Eligibility(False, "invalid_numeric_input", 0.0, 0.0, 0.0)
+    if any(value < 0 for value in (
+        opportunity.expected_fees_usd, opportunity.expected_slippage_usd,
+        opportunity.expected_network_usd, opportunity.worst_case_reserve_usd,
+        opportunity.required_capital_usd, now_book_age_limit_ms, latency_limit_ms,
+        min_expected_net_usd, min_worst_case_net_usd,
+    )):
+        return Eligibility(False, "invalid_numeric_input", 0.0, 0.0, 0.0)
+    if opportunity.target_profit_usd is not None and opportunity.target_profit_usd <= 0:
+        return Eligibility(False, "invalid_numeric_input", 0.0, 0.0, 0.0)
+    if session_capital_usd is not None and session_capital_usd <= 0:
+        return Eligibility(False, "invalid_numeric_input", 0.0, 0.0, 0.0)
     expected = opportunity.expected_gross_usd - (
         opportunity.expected_fees_usd + opportunity.expected_slippage_usd +
         opportunity.expected_network_usd
@@ -65,6 +90,8 @@ def evaluate_opportunity(
     for venue in venues:
         if not venue.verified or not venue.permission_ok or not venue.stream_ok:
             return Eligibility(False, f"venue_unverified:{venue.venue}", expected, worst, 0.0)
+        if any(not math.isfinite(value) for value in (venue.balance_usd, venue.book_age_ms, venue.latency_ms)):
+            return Eligibility(False, f"invalid_numeric_snapshot:{venue.venue}", expected, worst, 0.0)
         if venue.balance_usd < 0:
             return Eligibility(False, f"invalid_balance:{venue.venue}", expected, worst, 0.0)
         if venue.book_age_ms < 0 or venue.book_age_ms > now_book_age_limit_ms:

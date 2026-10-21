@@ -17,3 +17,12 @@ async def test_unpinned_manifest_fails_closed_before_rpc():
     assert not result.live_eligible
     assert "trusted_manifest_not_pinned" in result.reasons
     assert result.evidence["transaction_submission"] is False
+
+
+@pytest.mark.asyncio
+async def test_hybrid_engine_exposes_verification_only_route():
+    from arbx.hybrid.engine import HybridEngine
+    engine = HybridEngine(cfg=None, adapters={}, evidence={}, capabilities={})
+    result = await engine.verify_btcb_route("", None)
+    assert not result.live_eligible
+    assert "route_manifest_missing" in result.reasons

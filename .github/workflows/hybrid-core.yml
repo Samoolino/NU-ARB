@@ -21,7 +21,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r arb_bot/requirements.txt pytest
+          python -m pip install -r arb_bot/requirements.txt pytest pytest-asyncio httpx2
       - name: Compile hybrid core
         env:
           PYTHONPATH: arb_bot
