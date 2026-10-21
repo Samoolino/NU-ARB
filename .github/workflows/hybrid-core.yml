@@ -1,4 +1,4 @@
-name: Hybrid Core Tests and Acceptance Gates (recovery)
+name: Hybrid Core Tests and Acceptance Gates (final recovery pass)
 
 on:
   push:
