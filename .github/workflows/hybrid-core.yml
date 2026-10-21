@@ -42,3 +42,11 @@ jobs:
           node-version: "20"
       - name: Run scanner tests
         run: node --test tests/scanner.test.js
+
+  container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build control-plane image
+        run: docker build -f Dockerfile.control -t nu-arb-control:acceptance .
