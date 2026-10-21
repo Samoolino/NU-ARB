@@ -80,39 +80,164 @@ async def _ioc(ex, symbol: str, side: str, size: float, price: float, client_ord
 
 
 class LiveExecutor:
-    """Sequential IOC limit orders. Each leg trades the ACTUAL amount received from the previous fill."""
+    """Sequential IOC triangular execution with durable intent and fee reconciliation."""
 
-    def __init__(self, ex, cfg):
+    def __init__(self, ex, cfg, journal_path="tri_orders.sqlite3"):
         self.ex, self.cfg = ex, cfg
+        self.ledger = OrderLedger(journal_path)
+
+    async def _ensure_tri_fee_data(self, symbol: str, order: dict) -> None:
+        # An empty fee array is not evidence that a filled order incurred zero fees.
+        fees = order.get("fees")
+        if fees:
+            if all(f and f.get("cost") is not None and f.get("currency") for f in fees):
+                return
+            raise LegFailure("incomplete triangular fee record")
+        fee = order.get("fee")
+        if fee and fee.get("cost") is not None and fee.get("currency"):
+            order["fees"] = [fee]
+            return
+        order_id = order.get("id")
+        method = getattr(self.ex, "fetch_my_trades", None)
+        if not order_id or not callable(method):
+            raise LegFailure("triangular fee evidence missing; cannot verify realized PnL")
+        try:
+            trades = await method(symbol, None, None, {"orderId": str(order_id)})
+        except Exception as exc:
+            raise LegFailure("triangular fee lookup failed; realized PnL is unknown") from exc
+        matched = []
+        for trade in trades or []:
+            info = trade.get("info") or {}
+            trade_order_id = trade.get("order") or info.get("orderId") or info.get("order_id")
+            if str(trade_order_id or "") != str(order_id):
+                continue
+            if trade.get("fees") is not None:
+                matched.extend(trade.get("fees") or [])
+            elif trade.get("fee") is not None:
+                matched.append(trade["fee"])
+            else:
+                raise LegFailure("triangular fill has no fee evidence")
+        if not matched or any(not f or f.get("cost") is None or not f.get("currency") for f in matched):
+            raise LegFailure("no complete triangular fee evidence found")
+        order["fees"] = matched
+
+    @staticmethod
+    def _tri_net_received(order: dict, side: str, market: dict) -> float:
+        filled = float(order.get("filled") or 0.0)
+        if filled <= 0:
+            return 0.0
+        average = float(order.get("average") or (
+            float(order.get("cost") or 0.0) / filled if order.get("cost") is not None else 0.0
+        ) or order.get("price") or 0.0)
+        if average <= 0:
+            raise LegFailure("triangular fill lacks a valid average price")
+        if side == "buy":
+            received_ccy, input_ccy = market["base"], market["quote"]
+            received = filled
+        else:
+            received_ccy, input_ccy = market["quote"], market["base"]
+            received = float(order.get("cost") or filled * average)
+        fees = order.get("fees") if "fees" in order else ([order["fee"]] if order.get("fee") else None)
+        if not fees:
+            raise LegFailure("triangular fee evidence missing")
+        for fee in fees:
+            if not fee or fee.get("cost") is None or not fee.get("currency"):
+                raise LegFailure("incomplete triangular fee record")
+            fee_amount = float(fee["cost"])
+            if fee_amount < 0:
+                raise LegFailure("negative fee record is invalid")
+            currency = fee["currency"]
+            if currency == received_ccy:
+                received -= fee_amount
+            elif currency == input_ccy:
+                # Convert input-denominated fees into output units at the actual fill average.
+                received -= fee_amount / average if side == "buy" else fee_amount * average
+            else:
+                raise LegFailure(
+                    f"third-token fee {currency} cannot be valued safely in the route; reconciliation required"
+                )
+        if received < -1e-12:
+            raise LegFailure("fees exceed received triangular output")
+        return max(0.0, received)
 
     async def execute_tri(self, o) -> TradeResult:
+        if self.ledger.unresolved():
+            raise LegFailure("unresolved triangular execution exists; reconcile before new engagement")
         amount, done = o.start, []
-        for leg, lim in zip(o.legs, o.limits):
+        nonce = uuid.uuid4().hex
+        intents = []
+        for index, (leg, lim) in enumerate(zip(o.legs, o.limits)):
+            raw = amount / lim if leg.side == "buy" else amount
+            size = float(self.ex.amount_to_precision(leg.symbol, raw))
+            intents.append({
+                "key": f"leg{index + 1}", "venue": getattr(self.ex, "id", "venue"),
+                "client_order_id": f"nuarb-{nonce[:12]}-{index + 1}",
+                "side": leg.side, "requested": 0.0,
+            })
+        try:
+            eid = self.ledger.begin("triangular", intents)
+        except Exception as exc:
+            raise LegFailure("could not create durable triangular order intent") from exc
+
+        for index, (leg, lim, intent) in enumerate(zip(o.legs, o.limits, intents)):
             m = self.ex.market(leg.symbol)
-            raw = amount / lim if leg.side == "buy" else amount      # buying at <= lim can never overspend
+            raw = amount / lim if leg.side == "buy" else amount
             size = float(self.ex.amount_to_precision(leg.symbol, raw))
             try:
                 if size <= 0:
                     raise NoFill("size rounds to zero")
-                order = await _ioc(self.ex, leg.symbol, leg.side, size, lim)
-                got = _received(order, leg.side, m)
-                if got <= 0:
+                order = await _ioc(self.ex, leg.symbol, leg.side, size, lim, intent["client_order_id"])
+                filled = float(order.get("filled") or 0.0)
+                self.ledger.update_leg(
+                    eid, intent["key"],
+                    status=("FILLED" if filled + 1e-12 >= size else "PARTIALLY_FILLED" if filled > 0 else "NO_FILL"),
+                    order=order, requested=size,
+                )
+                if filled <= 0:
                     raise NoFill(f"{leg.symbol} {leg.side} unfilled")
-            except NoFill:
-                if not done:
-                    return TradeResult(0.0, 0.0, ok=False)            # nothing executed -> benign
-                await self._unwind(done)
-                raise LegFailure(f"missed {leg.symbol} {leg.side} after earlier fills; unwind attempted")
-            except Exception as e:
+                if filled + 1e-12 < size:
+                    self.ledger.set_state(eid, "RECONCILIATION_REQUIRED", {
+                        "reason": "partial_triangular_fill", "leg": intent["key"],
+                        "requested": size, "filled": filled, "order_id": order.get("id")
+                    })
+                    raise LegFailure("partial triangular fill; stop route and reconcile inventory")
+                await self._ensure_tri_fee_data(leg.symbol, order)
+                got = self._tri_net_received(order, leg.side, m)
+                if got <= 0:
+                    raise LegFailure(f"{leg.symbol} {leg.side} net output is zero")
+            except NoFill as exc:
+                if not done and index == 0:
+                    self.ledger.set_state(eid, "NO_FILL", {"reason": str(exc)})
+                    return TradeResult(0.0, 0.0, ok=False)
                 if done:
                     try:
                         await self._unwind(done)
-                    except Exception:
-                        pass
-                raise LegFailure(f"{leg.symbol} {leg.side}: {e!r} - CHECK ACCOUNT MANUALLY") from e
+                    except Exception as unwind_exc:
+                        self.ledger.set_state(eid, "RECONCILIATION_REQUIRED", {
+                            "reason": str(exc), "unwindError": repr(unwind_exc)
+                        })
+                        raise LegFailure(f"{eid}: unwind failed; manual reconciliation required") from unwind_exc
+                self.ledger.set_state(eid, "RECONCILIATION_REQUIRED", {"reason": str(exc), "completedLegs": len(done)})
+                raise LegFailure(f"{eid}: missed {leg.symbol} {leg.side}; reconciliation required") from exc
+            except Exception as exc:
+                unwind_error = None
+                if done:
+                    try:
+                        await self._unwind(done)
+                    except Exception as unwind_exc:
+                        unwind_error = repr(unwind_exc)
+                self.ledger.set_state(eid, "RECONCILIATION_REQUIRED", {
+                    "reason": repr(exc), "completedLegs": len(done), "unwindError": unwind_error
+                })
+                raise LegFailure(f"{eid}: {leg.symbol} {leg.side}: {exc!r}; manual reconciliation required") from exc
             done.append((leg, m, amount, got))
             amount = got
-        return TradeResult(amount - o.start, amount)
+
+        pnl = amount - o.start
+        self.ledger.set_state(eid, "COMPLETED", {
+            "start": o.start, "final": amount, "pnl": pnl, "legs": len(done)
+        })
+        return TradeResult(pnl, amount)
 
     async def _free(self, ccy: str) -> float:
         return float(((await self.ex.fetch_balance()).get("free") or {}).get(ccy) or 0.0)

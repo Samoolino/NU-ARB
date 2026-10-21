@@ -31,12 +31,14 @@ class OrderLedger:
             self.db.execute("INSERT INTO order_legs(execution_id,leg_key,venue,client_order_id,side,requested,status) VALUES(?,?,?,?,?,?,?)",
                 (eid,leg["key"],leg["venue"],leg["client_order_id"],leg["side"],float(leg["requested"]),"SUBMITTING"))
 
-    def update_leg(self,eid,key,*,status,order=None,error=None):
+    def update_leg(self,eid,key,*,status,order=None,error=None,requested=None):
         order=order or {}; detail={"error":error} if error else {}
         detail.update({k:order.get(k) for k in ("status","filled","remaining","average","cost","clientOrderId") if k in order})
         with self.db:
-            self.db.execute("UPDATE order_legs SET order_id=COALESCE(?,order_id),filled=?,status=?,detail=? WHERE execution_id=? AND leg_key=?",
-                (str(order["id"]) if order.get("id") is not None else None,float(order.get("filled") or 0),status,json.dumps(detail),eid,key))
+            self.db.execute("UPDATE order_legs SET order_id=COALESCE(?,order_id),requested=COALESCE(?,requested),filled=?,status=?,detail=? WHERE execution_id=? AND leg_key=?",
+                (str(order["id"]) if order.get("id") is not None else None,
+                 float(requested) if requested is not None else None,
+                 float(order.get("filled") or 0),status,json.dumps(detail),eid,key))
             self.db.execute("UPDATE executions SET updated_at=? WHERE execution_id=?",(time.time(),eid))
 
     def set_state(self,eid,state,detail=None):
