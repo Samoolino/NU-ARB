@@ -6,6 +6,7 @@ import asyncio
 import os
 import time
 from contextlib import suppress
+from urllib.parse import urlparse
 
 from arbx.config import CCXT_ADAPTERS
 from arbx.execute import LegFailure, LiveExecutor, PaperExecutor
@@ -26,6 +27,19 @@ def spot_market_options(exchange_id: str) -> dict:
     return options
 
 
+def configure_proxy(exchange, proxy_url: str | None):
+    """Apply an optional proxy to REST and WebSocket transports without logging credentials."""
+    if not proxy_url:
+        return exchange
+    parsed = urlparse(proxy_url)
+    if parsed.scheme not in ("http", "https", "socks5", "socks5h") or not parsed.hostname:
+        raise ValueError("proxy URL must use http(s) or socks5(s) and include a host")
+    exchange.aiohttp_proxy = proxy_url
+    exchange.ws_proxy = proxy_url
+    exchange.wss_proxy = proxy_url
+    return exchange
+
+
 def build_exchange(x, live: bool):
     import ccxt.pro as ccxtpro
     cls = getattr(ccxtpro, CCXT_ADAPTERS.get(x.id, x.id), None)
@@ -37,7 +51,7 @@ def build_exchange(x, live: bool):
         params.update(apiKey=x.api_key, secret=secret)
         if x.password:
             params["password"] = x.password
-    return cls(params)
+    return configure_proxy(cls(params), getattr(x, "proxy_url", None))
 
 
 class ExchangeWorker:

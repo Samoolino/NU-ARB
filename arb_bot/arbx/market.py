@@ -81,6 +81,25 @@ class MarketData:
                 backoff = min(backoff * 2, 30.0)
 
 
+    async def refresh_from_rest(self, sym: str) -> bool:
+        """Fetch and validate one fallback snapshot; never overwrite a good book with bad data."""
+        try:
+            ob = await self.ex.fetch_order_book(sym, orderbook_limit(self.ex.id, self.depth))
+            bids, asks = ob.get("bids", [])[:self.depth], ob.get("asks", [])[:self.depth]
+            ok, reason = validate_book_snapshot(bids, asks, 0.0, self.max_age_ms)
+            if not ok:
+                self.log("warn", f"{sym} REST fallback rejected: {reason}")
+                return False
+            self.books[sym] = Book(bids, asks, time.monotonic(), ob.get("timestamp"), ob.get("nonce"), "rest")
+            self.dirty.add(sym)
+            self.event.set()
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.log("warn", f"{sym} REST fallback failed ({type(exc).__name__})")
+            return False
+
     async def _rest_fallback_loop(self) -> None:
         """Refresh at most three missing/stale books per sweep using REST."""
         cursor = 0
@@ -96,20 +115,7 @@ class MarketData:
                 cursor = 0
                 batch = stale[:3]
             for sym in batch:
-                try:
-                    ob = await self.ex.fetch_order_book(sym, orderbook_limit(self.ex.id, self.depth))
-                    bids, asks = ob.get("bids", [])[:self.depth], ob.get("asks", [])[:self.depth]
-                    ok, reason = validate_book_snapshot(bids, asks, 0.0, self.max_age_ms)
-                    if not ok:
-                        self.log("warn", f"{sym} REST fallback rejected: {reason}")
-                        continue
-                    self.books[sym] = Book(bids, asks, time.monotonic(), ob.get("timestamp"), ob.get("nonce"), "rest")
-                    self.dirty.add(sym)
-                    self.event.set()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    self.log("warn", f"{sym} REST fallback failed ({type(exc).__name__})")
+                await self.refresh_from_rest(sym)
             cursor = (cursor + len(batch)) % max(1, len(stale))
 
 

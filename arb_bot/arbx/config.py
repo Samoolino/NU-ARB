@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from arbx.util import STABLES
 
@@ -22,6 +23,7 @@ class ExchangeCfg:
     default_taker_bps: float = 10.0
     require_private_stream: bool = False
     auth_mode: str = "hmac"
+    proxy_url: str | None = None
 
 
 @dataclass
