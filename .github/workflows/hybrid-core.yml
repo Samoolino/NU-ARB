@@ -1,4 +1,4 @@
-name: Hybrid Core Tests and Acceptance Gates (proxy and feed acceptance)
+name: Hybrid Core Tests and Acceptance Gates (proxy configuration fix)
 
 on:
   push:
