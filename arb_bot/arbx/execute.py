@@ -195,6 +195,12 @@ class LiveExecutor:
                 )
                 if filled <= 0:
                     raise NoFill(f"{leg.symbol} {leg.side} unfilled")
+                if filled + 1e-12 < size:
+                    self.ledger.set_state(eid, "RECONCILIATION_REQUIRED", {
+                        "reason": "partial_triangular_fill", "leg": intent["key"],
+                        "requested": size, "filled": filled, "order_id": order.get("id")
+                    })
+                    raise LegFailure("partial triangular fill; stop route and reconcile inventory")
                 await self._ensure_tri_fee_data(leg.symbol, order)
                 got = self._tri_net_received(order, leg.side, m)
                 if got <= 0:
