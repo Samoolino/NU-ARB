@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from arbx.config import Config
 from arbx.execute import CrossExecutor, LegFailure, PaperExecutor
-from arbx.gate import ProfitGate, RiskManager
+from arbx.gate import Decision, ProfitGate, RiskManager
 from arbx.journal import TradeJournal
 from arbx.strategy import cross_candidate_sizes, evaluate_cross
 from arbx.worker import ExchangeWorker
@@ -253,7 +253,7 @@ class Hub:
                     min_expected_net_usd=self.cfg.min_profit_usd,min_worst_case_net_usd=self.cfg.min_profit_usd,
                     session_capital_usd=self.cfg.session_capital_usd)
                 if not policy.ok:
-                    decision=type(decision)(False,f"verified_policy:{policy.reason}")
+                    decision=Decision(False, f"verified_policy:{policy.reason}")
             utilization = opportunity.cost / free_quote if free_quote > 0 and math.isfinite(free_quote) else 0.0
             key = (decision.ok, opportunity.worst_usd, opportunity.expected_usd,
                    utilization, opportunity.worst_bps, opportunity.cost)

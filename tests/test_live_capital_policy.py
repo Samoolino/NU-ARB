@@ -41,3 +41,9 @@ def test_paper_mode_rejects_zero_trade_size():
     cfg=Config(mode="paper",exchanges=[ExchangeCfg("binance")],trade_size_usd=0.0)
     with pytest.raises(ValueError,match="BOT_TRADE_SIZE_USD"):
         cfg.validate()
+
+
+def test_live_mode_does_not_require_starter_capital():
+    cfg = live_cfg(starter_capital_usd=0.0, start_capital_usd=0.0, trade_size_usd=0.0)
+    cfg.validate()
+    assert cfg.trade_size_usd == 0.0

@@ -135,8 +135,8 @@ class Config:
             raise ValueError(f"configure between one and {MAX_EXCHANGES} unique exchange venues")
         if self.target_profit_usd is not None and self.target_profit_usd <= 0:
             raise ValueError("BOT_TARGET_PROFIT_USD must be greater than zero")
-        if self.starter_capital_usd <= 0:
-            raise ValueError("BOT_START_CAPITAL_USD must be greater than zero")
+        if self.mode != "live" and self.starter_capital_usd <= 0:
+            raise ValueError("BOT_START_CAPITAL_USD must be greater than zero in paper mode")
         if self.session_capital_usd is not None and self.session_capital_usd <= 0:
             raise ValueError("BOT_SESSION_CAPITAL_USD must be greater than zero when specified")
         if self.trade_size_usd < 0 or (self.mode != "live" and self.trade_size_usd == 0):
