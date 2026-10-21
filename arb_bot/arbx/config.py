@@ -95,6 +95,7 @@ class Config:
                           secret=os.getenv(f"BOT_{i.upper()}_SECRET", ""),
                           password=os.getenv(f"BOT_{i.upper()}_PASSWORD", ""),
                           auth_mode=os.getenv(f"BOT_{i.upper()}_AUTH_MODE", "hmac").lower(),
+                          proxy_url=os.getenv(f"BOT_{i.upper()}_PROXY_URL") or os.getenv("BOT_PROXY_URL"),
                           max_symbols=mx, default_taker_bps=f("BOT_DEFAULT_TAKER_BPS", 10.0)) for i in ids]
         mode = os.getenv("BOT_MODE", "paper").lower()
         tgt = os.getenv("BOT_TARGET_EQUITY_USD")
