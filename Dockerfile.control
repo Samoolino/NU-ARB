@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    ARBX_APP_DB=/data/arbx_app.sqlite3
+    ARBX_APP_DB=/data/arbx_app.sqlite3 \
+    ARBX_LIVE_TRADING_ENABLED=0
 
 WORKDIR /app
 COPY arb_bot/requirements.txt /app/requirements.txt
